@@ -221,6 +221,7 @@ interface AppState {
   conversionStatus: ConversionStatus;
   conversionMessage: string;
   converterDialog: ConverterDialogAction | null;
+  pdfReaderPath: string | null;
 
   setContent: (content: string) => void;
   setMode: (mode: 'split' | 'immersive' | 'zen') => void;
@@ -237,6 +238,8 @@ interface AppState {
   loadSettings: () => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
   openFile: (path: string) => Promise<void>;
+  openPdfReader: (path: string) => void;
+  closePdfReader: () => void;
   convertDocument: (path: string) => Promise<void>;
   saveFile: (path: string) => Promise<void>;
   saveTab: (tabId: string, path: string) => Promise<void>;
@@ -465,6 +468,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   conversionStatus: 'idle',
   conversionMessage: '',
   converterDialog: null,
+  pdfReaderPath: null,
 
   setContent: (content) => {
     const { activeTabId, tabs } = get();
@@ -585,6 +589,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openFile: async (path) => {
+    if (/\.pdf$/i.test(path)) {
+      get().openPdfReader(path);
+      return;
+    }
     if (!isTextFileName(path) && isConvertibleDocumentName(path)) {
       await get().convertDocument(path);
       return;
@@ -635,6 +643,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       console.error('Failed to open file:', error);
     }
   },
+
+  openPdfReader: (path) => set({ pdfReaderPath: path }),
+
+  closePdfReader: () => set({ pdfReaderPath: null }),
 
   convertDocument: async (path) => {
     const sourceName = path.split(/[\\/]/).pop() || path;

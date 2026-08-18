@@ -11,6 +11,7 @@ import type {
   AgentEvent,
   AgentEditorContext,
   AgentModelCatalog,
+  AgentResearchOptions,
   AgentSession,
   AgentTimelineItem,
 } from '../types/agent';
@@ -18,7 +19,7 @@ import type {
 const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 let eventUnlisten: UnlistenFn | null = null;
 
-interface StartAgentTurnInput {
+interface StartAgentTurnInput extends AgentResearchOptions {
   backend: AgentBackendId;
   workspaceRoot: string;
   prompt: string;
@@ -185,6 +186,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         context_paths: input.contextPaths || [],
         editor_context: input.editorContext || null,
         approval_mode: input.approvalMode,
+        read_only: input.readOnly,
         session_id: input.sessionId || null,
       } });
       set((state) => ({

@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 
-type ActivityView = 'explorer' | 'search';
+type ActivityView = 'explorer' | 'search' | 'graph' | 'library';
 
 interface ActivityBarProps {
   activeView: ActivityView;
@@ -18,9 +18,11 @@ interface ActivityBarProps {
   onExitImmersive: () => void;
 }
 
-function ActivityIcon({ name }: { name: 'explorer' | 'search' | 'ai' | 'immersive' | 'zen' | 'theme' | 'settings' }) {
+function ActivityIcon({ name }: { name: 'explorer' | 'search' | 'graph' | 'library' | 'ai' | 'immersive' | 'zen' | 'theme' | 'settings' }) {
   if (name === 'explorer') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h9.5L19 8v12.5H5zM14 3.5V8h5M8 12h8M8 16h8" /></svg>;
   if (name === 'search') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.8" /><path d="m15 15 4.5 4.5" /></svg>;
+  if (name === 'graph') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="6" cy="7" r="2.2" /><circle cx="18" cy="6" r="2.2" /><circle cx="12" cy="18" r="2.2" /><path d="m7.9 7.6 8 -1M7.5 8.8l3.2 7M16.5 7.9l-3.2 7" /></svg>;
+  if (name === 'library') return <svg viewBox="0 0 24 24" aria-hidden="true"><rect x="4" y="5" width="16" height="14" rx="2" /><path d="M8 9h8M8 13h5M8 16h8" /></svg>;
   if (name === 'ai') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 5.1L18.5 10l-5 1.6L12 17l-1.5-5.4-5-1.6 5-1.9zM18.4 15.4l.6 2.1 2.1.6-2.1.7-.6 2.1-.7-2.1-2.1-.7 2.1-.6z" /></svg>;
   if (name === 'immersive') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.2-5 9-5 9 5 9 5-3.2 5-9 5-9-5-9-5Z" /><circle cx="12" cy="12" r="2.4" /></svg>;
   if (name === 'zen') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h10M7 9h10M7 13h7M5 19h14" /><path d="M4 4v5M20 4v5M4 20v-5M20 20v-5" /></svg>;
@@ -58,6 +60,12 @@ export function ActivityBar({ activeView, chatbotVisible, settingsOpen, immersiv
         </button>
         <button type="button" className={`activity-bar-button ${activeView === 'search' ? 'active' : ''}`} onClick={() => onSelectView('search')} title="搜索" aria-label="搜索" aria-current={activeView === 'search' ? 'page' : undefined}>
           <ActivityIcon name="search" />
+        </button>
+        <button type="button" className={`activity-bar-button ${activeView === 'graph' ? 'active' : ''}`} onClick={() => onSelectView('graph')} title="知识图谱" aria-label="知识图谱" aria-current={activeView === 'graph' ? 'page' : undefined}>
+          <ActivityIcon name="graph" />
+        </button>
+        <button type="button" className={`activity-bar-button ${activeView === 'library' ? 'active' : ''}`} onClick={() => onSelectView('library')} title="SuperTag 资料库" aria-label="SuperTag 资料库" aria-current={activeView === 'library' ? 'page' : undefined}>
+          <ActivityIcon name="library" />
         </button>
         <button type="button" className={`activity-bar-button ${chatbotVisible ? 'active' : ''}`} onClick={onOpenChat} title="AI 对话" aria-label="AI 对话" aria-pressed={chatbotVisible}>
           <ActivityIcon name="ai" />

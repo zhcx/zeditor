@@ -18,6 +18,63 @@ test('all rendered Markdown HTML is sanitized before reaching a browser or PDF s
   assert.match(preview, /sanitizeRenderedHtml\([^)]*svg/)
 })
 
+test('preview uses the shared document extension preparation before Markdown rendering', () => {
+  const preview = read('src/components/Preview/Preview.tsx')
+
+  assert.match(preview, /prepareMarkdownSource/)
+  assert.match(preview, /FrontmatterPanel/)
+})
+
+test('workspace navigation exposes the knowledge graph view', () => {
+  const activity = read('src/components/ActivityBar/ActivityBar.tsx')
+  const app = read('src/App.tsx')
+  const sidebar = read('src/components/Sidebar/Sidebar.tsx')
+
+  assert.match(activity, /graph/)
+  assert.match(app, /activityView.*graph/)
+  assert.match(sidebar, /KnowledgeGraphPanel/)
+})
+
+test('desktop graph indexing has a bounded Tauri workspace command', () => {
+  const commands = read('src-tauri/src/graph.rs')
+  const main = read('src-tauri/src/main.rs')
+
+  assert.match(commands, /build_workspace_graph/)
+  assert.match(commands, /workspace graph/)
+  assert.match(commands, /symlink_metadata/)
+  assert.match(main, /graph::build_workspace_graph/)
+})
+
+test('workspace navigation exposes structured SuperTag records', () => {
+  const activity = read('src/components/ActivityBar/ActivityBar.tsx')
+  const app = read('src/App.tsx')
+  const sidebar = read('src/components/Sidebar/Sidebar.tsx')
+
+  assert.match(activity, /library/)
+  assert.match(app, /activityView.*library/)
+  assert.match(sidebar, /SuperTagPanel/)
+})
+
+test('PDF annotations use versioned sidecar commands instead of mutating the source PDF', () => {
+  const commands = read('src-tauri/src/commands.rs')
+  const main = read('src-tauri/src/main.rs')
+
+  assert.match(commands, /load_pdf_annotations/)
+  assert.match(commands, /save_pdf_annotations/)
+  assert.match(commands, /zditor-pdf-annotation\.json/)
+  assert.match(main, /commands::load_pdf_annotations/)
+  assert.match(main, /commands::save_pdf_annotations/)
+})
+
+test('opening a PDF uses the reader state while conversion remains an explicit action', () => {
+  const store = read('src/stores/appStore.ts')
+  const app = read('src/App.tsx')
+
+  assert.match(store, /pdfReaderPath/)
+  assert.match(store, /openPdfReader/)
+  assert.match(app, /PdfReaderPanel/)
+})
+
 test('export templates escape document metadata and cannot break out of style blocks', async () => {
   const { applyExportTemplate, EXPORT_TEMPLATES } = await import('../src/components/Export/exportTemplates.ts')
   const template = {

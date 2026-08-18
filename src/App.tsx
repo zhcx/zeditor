@@ -17,6 +17,7 @@ import { TitleBar } from './components/TitleBar/TitleBar';
 import { ActivityBar } from './components/ActivityBar/ActivityBar';
 import { UnsavedChangesDialog } from './components/UnsavedChangesDialog/UnsavedChangesDialog';
 import { ConverterDialog } from './components/ConverterDialog/ConverterDialog';
+import { PdfReaderPanel } from './components/PdfReader/PdfReaderPanel';
 import { UiLanguageBridge } from './i18n/UiLanguageBridge';
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -103,7 +104,7 @@ function App() {
   const [previewScrollElement, setPreviewScrollElement] = useState<HTMLDivElement | null>(null);
   const [previewRenderVersion, setPreviewRenderVersion] = useState(0);
   const [activeEditorLine, setActiveEditorLine] = useState(1);
-  const [activityView, setActivityView] = useState<'explorer' | 'search'>('explorer');
+  const [activityView, setActivityView] = useState<'explorer' | 'search' | 'graph' | 'library'>('explorer');
   const [immersiveOutlineCollapsed, setImmersiveOutlineCollapsed] = useState(false);
   const [immersivePreviewScrollElement, setImmersivePreviewScrollElement] = useState<HTMLDivElement | null>(null);
   const [closePromptTabs, setClosePromptTabs] = useState<CloseGuardTab[] | null>(null);
@@ -469,7 +470,7 @@ function App() {
     };
   }, [balanceDocumentPanes, chatbotPanelWidth, chatbotVisible, outlineVisible, proofreadPanelWidth, proofreadResults.length, setSplitRatio, sidebarVisible, sidebarWidth]);
 
-  const selectActivityView = useCallback((view: 'explorer' | 'search') => {
+  const selectActivityView = useCallback((view: 'explorer' | 'search' | 'graph' | 'library') => {
     if (sidebarVisible && activityView === view) {
       setSidebarVisible(false);
       return;
@@ -970,6 +971,7 @@ function App() {
       </div>
       <StatusBar />
       {settingsOpen && <SettingsPanel />}
+      <PdfReaderPanel />
       <AICompanionPopup />
       <AITranslationPopup
         originalText={translationOriginal}

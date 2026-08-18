@@ -56,6 +56,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
   const [reasoningEffort, setReasoningEffort] = useState(settings.agent.backends[settings.agent.backend].reasoning_effort);
   const [contextPaths, setContextPaths] = useState<string[]>([]);
   const [editorContext, setEditorContext] = useState<AgentEditorContext | null>(null);
+  const [researchReadOnly, setResearchReadOnly] = useState(true);
   const [selection, setSelection] = useState<{ key: string; excluded: string[] }>({ key: '', excluded: [] });
   const roots = useMemo(() => readStoredStringArray('zeditor.workspace-roots'), []);
   const workspaceRoot = roots[0] || '';
@@ -104,6 +105,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
   const beginNewSession = () => {
     newSession();
     setLocalApprovalMode('tiered');
+    setResearchReadOnly(true);
     setEditorContext(null);
     setContextPaths([]);
   };
@@ -126,6 +128,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
       setProfile(config.profile);
       setReasoningEffort(config.reasoning_effort);
     }
+    if (session) setResearchReadOnly(session.read_only);
     void selectSession(sessionId);
   };
 
@@ -169,6 +172,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
         contextPaths,
         editorContext: editorContext || undefined,
         approvalMode: effectiveApprovalMode,
+        readOnly: researchReadOnly,
         sessionId: activeSession?.backend === backend ? activeSession.id : undefined,
       });
       setPrompt('');
@@ -393,6 +397,10 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
             ariaLabel="审批模式"
             placement="top"
           />
+          <label className="agent-read-only-toggle" title="禁止 Agent 写入、删除或移动文件">
+            <input type="checkbox" checked={researchReadOnly} onChange={(event) => setResearchReadOnly(event.currentTarget.checked)} disabled={loading} />
+            <span>研究只读</span>
+          </label>
           <span className="agent-composer-spacer" />
           <ChatSelectMenu
             className="agent-model-menu"

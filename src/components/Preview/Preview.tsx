@@ -8,6 +8,8 @@ import { useAppStore } from '../../stores/appStore';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { findActiveSourceElement } from '../../utils/activeSourceLine';
 import { addHeadingAnchors, findLocalHeadingTarget } from '../../utils/headingAnchors';
+import { prepareMarkdownSource } from '../../utils/markdownExtensions';
+import { FrontmatterPanel } from '../Frontmatter/FrontmatterPanel';
 
 interface PreviewProps {
   className?: string;
@@ -161,7 +163,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
   const contentRef = useRef('');
   const mermaidSequenceRef = useRef(0);
   const [mermaidThemeVersion, setMermaidThemeVersion] = useState(0);
-  const { content, settings } = useAppStore();
+  const { content, settings, setContent } = useAppStore();
   // Markdown parsing, sanitization and DOM replacement are comparatively
   // expensive. Deferring them keeps Monaco's keystroke updates responsive.
   const deferredContent = useDeferredValue(content);
@@ -196,7 +198,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     if (!containerRef.current) return;
     let disposed = false;
 
-    const rendered = sanitizeRenderedHtml(md.render(renderMath(renderVideoExtensions(deferredContent))));
+    const rendered = sanitizeRenderedHtml(md.render(renderMath(renderVideoExtensions(prepareMarkdownSource(deferredContent)))));
     containerRef.current.innerHTML = rendered;
     addHeadingAnchors(containerRef.current);
     addListItemContentAnchors(containerRef.current);
@@ -317,6 +319,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       style={{ ...containerStyle, ...style }}
     >
       <div ref={cardRef} className={`preview-card ${isEmpty ? 'is-empty' : ''}`}>
+        <FrontmatterPanel content={content} onContentChange={setContent} />
         <article ref={containerRef} className="preview-document markdown-body" onClick={handleSourceClick} />
         {isEmpty && (
           <div className="preview-empty-state">

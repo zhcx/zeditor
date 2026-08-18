@@ -17,6 +17,10 @@ export interface AgentSettings {
   backends: Record<AgentBackendId, AgentBackendConfig>;
 }
 
+export interface AgentResearchOptions {
+  readOnly: boolean;
+}
+
 export interface AgentCapabilities {
   streaming: boolean;
   approvals: boolean;

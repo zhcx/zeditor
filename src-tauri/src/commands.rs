@@ -2,6 +2,7 @@ use crate::image::{self, CloudinaryConfig, ImageService, LocalImageConfig, PicGo
 use base64::{engine::general_purpose, Engine as _};
 use font_kit::source::SystemSource;
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use std::time::Duration;
@@ -67,6 +68,28 @@ pub struct FileNode {
     pub path: String,
     pub is_directory: bool,
     pub children: Option<Vec<FileNode>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfAnnotationSidecar {
+    pub version: u8,
+    pub pdf_path: String,
+    pub pdf_sha256: String,
+    pub active_layer_id: String,
+    #[serde(default)]
+    pub layers: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub strokes: Vec<serde_json::Value>,
+    #[serde(default)]
+    pub area_highlights: Vec<serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PdfAnnotationLoadResult {
+    pub sidecar: PdfAnnotationSidecar,
+    pub source_changed: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -649,6 +672,97 @@ pub async fn save_file_content(path: String, content: String) -> Result<(), Stri
     write_utf8_text_file(&path, &content).await
 }
 
+fn pdf_annotation_path(pdf_path: &str) -> PathBuf {
+    PathBuf::from(format!("{}.zditor-pdf-annotation.json", pdf_path))
+}
+
+fn sha256_file(path: &Path) -> Result<String, String> {
+    let bytes = std::fs::read(path).map_err(|error| format!("无法读取 PDF：{error}"))?;
+    Ok(hex::encode(Sha256::digest(bytes)))
+}
+
+fn empty_pdf_annotation_sidecar(pdf_path: &str, pdf_sha256: String) -> PdfAnnotationSidecar {
+    PdfAnnotationSidecar {
+        version: 1,
+        pdf_path: pdf_path.to_string(),
+        pdf_sha256,
+        active_layer_id: "default".into(),
+        layers: vec![serde_json::json!({ "id": "default", "name": "Default", "visible": true })],
+        strokes: Vec::new(),
+        area_highlights: Vec::new(),
+    }
+}
+
+#[tauri::command]
+pub async fn load_pdf_annotations(pdf_path: String) -> Result<PdfAnnotationLoadResult, String> {
+    ensure_fs_authorized(&pdf_path, "读取 PDF 批注")?;
+    let pdf = Path::new(&pdf_path);
+    if !pdf.is_file() {
+        return Err("PDF 文件不存在".into());
+    }
+    let current_hash = sha256_file(pdf)?;
+    let sidecar_path = pdf_annotation_path(&pdf_path);
+    if !sidecar_path.exists() {
+        return Ok(PdfAnnotationLoadResult {
+            sidecar: empty_pdf_annotation_sidecar(&pdf_path, current_hash),
+            source_changed: false,
+        });
+    }
+
+    let sidecar: PdfAnnotationSidecar = serde_json::from_str(
+        &std::fs::read_to_string(&sidecar_path)
+            .map_err(|error| format!("无法读取 PDF 批注 sidecar：{error}"))?,
+    )
+    .map_err(|error| format!("PDF 批注 sidecar 格式无效：{error}"))?;
+    if sidecar.version != 1 {
+        return Err(format!("不支持的 PDF 批注版本：{}", sidecar.version));
+    }
+    if sidecar.pdf_path != pdf_path {
+        return Err("PDF 批注 sidecar 与当前 PDF 路径不匹配".into());
+    }
+    Ok(PdfAnnotationLoadResult {
+        source_changed: sidecar.pdf_sha256 != current_hash,
+        sidecar,
+    })
+}
+
+#[tauri::command]
+pub async fn save_pdf_annotations(
+    pdf_path: String,
+    sidecar: PdfAnnotationSidecar,
+) -> Result<(), String> {
+    ensure_fs_authorized(&pdf_path, "保存 PDF 批注")?;
+    let pdf = Path::new(&pdf_path);
+    if !pdf.is_file() {
+        return Err("PDF 文件不存在".into());
+    }
+    if sidecar.version != 1 {
+        return Err("只支持 PDF 批注 sidecar 版本 1".into());
+    }
+    if sidecar.pdf_path != pdf_path {
+        return Err("PDF 批注 sidecar 与当前 PDF 路径不匹配".into());
+    }
+    let current_hash = sha256_file(pdf)?;
+    if sidecar.pdf_sha256 != current_hash {
+        return Err("pdf_source_changed: PDF 已变化，未覆盖现有批注".into());
+    }
+
+    let sidecar_path = pdf_annotation_path(&pdf_path);
+    let content = serde_json::to_string_pretty(&sidecar).map_err(|error| error.to_string())?;
+    let temporary_path = sidecar_path.with_file_name(format!(
+        "{}.tmp",
+        sidecar_path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or("pdf-annotation.json"),
+    ));
+    std::fs::write(&temporary_path, content.as_bytes())
+        .map_err(|error| format!("无法写入 PDF 批注：{error}"))?;
+    std::fs::rename(&temporary_path, &sidecar_path)
+        .map_err(|error| format!("无法提交 PDF 批注：{error}"))?;
+    Ok(())
+}
+
 fn get_recent_files_path(app: &AppHandle) -> Result<PathBuf, String> {
     app_config_file(app, "recent_files.json")
 }
@@ -913,7 +1027,7 @@ fn canonicalize_or_parent(path: &str) -> Result<PathBuf, String> {
     Ok(parent.join(file_name))
 }
 
-fn ensure_fs_authorized(path: &str, operation: &str) -> Result<(), String> {
+pub(crate) fn ensure_fs_authorized(path: &str, operation: &str) -> Result<(), String> {
     let canonical = canonicalize_or_parent(path)?;
     let roots = lock_authorized_roots();
     if roots.iter().any(|root| canonical.starts_with(root)) {

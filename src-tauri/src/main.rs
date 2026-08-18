@@ -11,6 +11,7 @@ mod agent;
 mod ai;
 mod commands;
 mod converter;
+mod graph;
 mod image;
 mod imaging;
 mod pdf;
@@ -178,6 +179,8 @@ fn main() {
             converter::import_converter_module,
             converter::uninstall_converter_module,
             commands::save_file_content,
+            commands::load_pdf_annotations,
+            commands::save_pdf_annotations,
             commands::read_file_base64,
             commands::reveal_in_file_manager,
             commands::get_recent_files,
@@ -193,6 +196,7 @@ fn main() {
             commands::update_recent_folder,
             commands::remove_recent_folder,
             commands::workspace_search,
+            graph::build_workspace_graph,
             commands::web_search,
             commands::check_for_updates,
             commands::download_and_install_update,

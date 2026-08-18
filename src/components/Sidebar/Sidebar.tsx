@@ -15,6 +15,8 @@ import {
   isConvertibleDocumentName,
 } from '../../utils/documentFormats';
 import { FileTypeIcon } from './FileTypeIcon';
+import { KnowledgeGraphPanel } from '../KnowledgeGraph/KnowledgeGraphPanel';
+import { SuperTagPanel } from '../SuperTag/SuperTagPanel';
 
 interface FileNode {
   name: string;
@@ -41,7 +43,7 @@ interface RawFileNode {
 
 interface SidebarProps {
   style?: React.CSSProperties;
-  view?: 'explorer' | 'search';
+  view?: 'explorer' | 'search' | 'graph' | 'library';
 }
 
 type ContextMenuState = { x: number; y: number; node: FileNode; targetType: 'file' | 'folder' | 'root' } | null;
@@ -266,6 +268,8 @@ function SearchSidebar({ style }: SidebarProps) {
 }
 
 export function Sidebar({ style, view = 'explorer' }: SidebarProps) {
+  if (view === 'graph') return <KnowledgeGraphPanel style={style} />;
+  if (view === 'library') return <SuperTagPanel style={style} />;
   return view === 'search' ? <SearchSidebar style={style} /> : <ExplorerSidebar style={style} />;
 }
 

@@ -141,6 +141,8 @@ pub struct StartAgentTurnRequest {
     pub editor_context: Option<AgentEditorContext>,
     #[serde(default)]
     pub approval_mode: AgentApprovalMode,
+    #[serde(default)]
+    pub read_only: bool,
     pub session_id: Option<String>,
 }
 

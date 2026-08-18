@@ -129,3 +129,15 @@ test('Agent history normalizes canonical Windows workspace paths', () => {
   assert.match(panel, /normalizedWorkspaceRoot/);
   assert.match(panel, /normalizeWorkspacePath\(session\.workspace_root\) === normalizedWorkspaceRoot/);
 });
+
+test('research mode forwards a read-only policy to the Agent runtime', () => {
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+  const store = read('src/stores/agentStore.ts');
+  const types = read('src/types/agent.ts');
+  const rust = read('src-tauri/src/agent/mod.rs');
+  assert.match(panel, /researchReadOnly/);
+  assert.match(panel, /readOnly/);
+  assert.match(store, /read_only: input\.readOnly/);
+  assert.match(types, /readOnly: boolean/);
+  assert.match(rust, /read_only: request\.read_only/);
+});

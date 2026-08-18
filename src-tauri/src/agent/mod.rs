@@ -464,7 +464,7 @@ pub async fn agent_start_turn(
             updated_at: timestamp,
             last_error: None,
             has_changes: false,
-            read_only: false,
+            read_only: request.read_only,
             direct_write,
             base_commit,
             baseline_hashes,
@@ -485,6 +485,7 @@ pub async fn agent_start_turn(
             return Err("恢复会话时不能切换工作区".into());
         }
         session.approval_mode = request.approval_mode;
+        session.read_only = request.read_only;
         session.status = AgentSessionStatus::Running;
         session.updated_at = now();
         session.last_error = None;
