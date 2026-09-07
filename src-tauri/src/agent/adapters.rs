@@ -70,7 +70,13 @@ pub fn build_launch(config: AdapterLaunchConfig<'_>) -> Result<AdapterLaunch, St
             ]);
             command.args([
                 "--permission-mode",
-                if read_only { "plan" } else { "manual" },
+                if read_only {
+                    "plan"
+                } else if approval_mode == AgentApprovalMode::AllowAllSession {
+                    "bypassPermissions"
+                } else {
+                    "manual"
+                },
             ]);
             if let Some(value) = model.filter(|value| !value.is_empty()) {
                 command.args(["--model", value]);

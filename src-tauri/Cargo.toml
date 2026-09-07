@@ -1,6 +1,6 @@
 [package]
 name = "zeditor"
-version = "0.4.4"
+version = "0.4.5"
 description = "A modern Markdown editor with Notion-style UI"
 authors = ["you"]
 edition = "2021"

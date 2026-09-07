@@ -408,6 +408,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       wordWrap: 'on',
       wrappingIndent: 'same',
       renderWhitespace: 'selection',
+      occurrencesHighlight: 'off',
       renderLineHighlight: 'line',
       renderLineHighlightOnlyWhenFocus: false,
       scrollBeyondLastLine: false,

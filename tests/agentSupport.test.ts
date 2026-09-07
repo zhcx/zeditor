@@ -89,6 +89,41 @@ test('composer adapts model, effort, permissions, and file context by backend', 
   assert.match(rust, /"model\/list"/);
 });
 
+test('Agent composer clears submitted prompt before waiting for the turn to start', () => {
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+  const submit = panel.match(/const submit = async \(\) => \{[\s\S]*?\n\s{2}\};/)?.[0] || '';
+  const startIndex = submit.indexOf('await startTurn(');
+  const clearIndex = submit.indexOf("setPrompt('')");
+
+  assert.ok(startIndex >= 0, 'submit must start an Agent turn');
+  assert.ok(clearIndex >= 0, 'submit must clear the composer');
+  assert.ok(clearIndex < startIndex, 'the composer must clear before awaiting Agent startup');
+});
+
+test('Claude full-access mode bypasses native permission prompts', () => {
+  const adapters = read('src-tauri/src/agent/adapters.rs');
+  const claudeLaunch = adapters.match(/AgentBackendId::ClaudeCode => \{[\s\S]*?AdapterProtocol::ClaudeJson/)?.[0] || '';
+
+  assert.match(claudeLaunch, /approval_mode == AgentApprovalMode::AllowAllSession/);
+  assert.match(claudeLaunch, /"bypassPermissions"/);
+});
+
+test('Agent automatically tracks the active document as a removable context', () => {
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+
+  assert.match(panel, /activeTabId/);
+  assert.match(panel, /buildAutomaticEditorContext/);
+  assert.match(panel, /dismissedDocumentKeyRef/);
+  assert.match(panel, /current\?\.selection/);
+});
+
+test('Agent insertion places a Markdown separator before generated content', () => {
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+  const insertIntoEditor = panel.match(/const insertIntoEditor = \(text: string\) => \{[\s\S]*?\n\s{2}\};/)?.[0] || '';
+
+  assert.match(insertIntoEditor, /formatAssistantInsertion/);
+});
+
 test('Agent composer keeps the reference action on one line in narrow panels', () => {
   const styles = read('src/styles/main.css');
   const referenceButtonBlocks = [...styles.matchAll(/^\.agent-reference-button\s*\{([^}]*)\}/gm)];

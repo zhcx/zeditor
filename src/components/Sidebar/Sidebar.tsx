@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { open } from '@tauri-apps/plugin-dialog';
+import { confirm as confirmDialog, open } from '@tauri-apps/plugin-dialog';
 import { useAppStore, type TimelineEntry } from '../../stores/appStore';
 import {
   createOutlineDetectionKey,
@@ -14,7 +14,8 @@ import {
   OPENABLE_FILE_EXTENSIONS,
   isConvertibleDocumentName,
 } from '../../utils/documentFormats';
-import { mergeLoadedChildren, replaceNodeChildren, replaceNodeChildrenMerged, type FileNode } from '../../utils/workspaceTree';
+import { refreshWorkspaceFolderTree, replaceNodeChildren, type FileNode } from '../../utils/workspaceTree';
+import { deleteDocument } from '../../utils/documentSafety';
 import { FileTypeIcon } from './FileTypeIcon';
 
 interface WorkspaceFolder {
@@ -287,7 +288,6 @@ function ExplorerSidebar({ style }: SidebarProps) {
   const [creating, setCreating] = useState<CreateState>(null);
   const [renameValue, setRenameValue] = useState('');
   const [fsClipboard, setFsClipboard] = useState<FsClipboard>(null);
-  const knownTreeSizeRef = useRef(new Map<string, number>());
   // 记录最近被关闭的工作区根路径，防止 currentFile 自动添加 effect 把它们
   // 的子目录重新加为独立根目录。
   const recentlyRemovedRootsRef = useRef<Set<string>>(new Set());
@@ -347,7 +347,6 @@ function ExplorerSidebar({ style }: SidebarProps) {
       setWorkspaceFolders(previous => previous.some((folder) => folder.path === folderPath)
         ? previous
         : [...previous, { name: browserHandle?.name || getFolderName(folderPath), path: folderPath, tree }]);
-      if (tree.length > 0) knownTreeSizeRef.current.set(folderPath, tree.length);
       if (!folderPath.startsWith('web://')) {
         const roots = readStoredStringArray(WORKSPACE_ROOTS_KEY);
         if (!roots.includes(folderPath)) writeStoredStringArray(WORKSPACE_ROOTS_KEY, [...roots, folderPath]);
@@ -373,7 +372,6 @@ function ExplorerSidebar({ style }: SidebarProps) {
       next.delete(folderPath);
       return next;
     });
-    knownTreeSizeRef.current.delete(folderPath);
     if (!folderPath.startsWith('web://')) {
       const roots = readStoredStringArray(WORKSPACE_ROOTS_KEY);
       if (roots.includes(folderPath)) writeStoredStringArray(WORKSPACE_ROOTS_KEY, roots.filter(root => root !== folderPath));
@@ -501,13 +499,20 @@ function ExplorerSidebar({ style }: SidebarProps) {
   // ── 删除 ────────────────────────────────────────────────
   const deleteFsItem = async (path: string) => {
     const name = path.split(/[\\/]/).pop() || '项目';
-    if (!window.confirm(`确定要删除「${name}」吗？此操作不可撤销。`)) return;
     try {
-      if (isTauriRuntime()) {
-        await invoke('delete_fs_item', { path });
+      const deleted = await deleteDocument(path, name, useAppStore.getState().tabs, {
+        confirm: message => isTauriRuntime()
+          ? confirmDialog(message, { title: '删除资源', kind: 'warning' })
+          : window.confirm(message),
+        deleteItem: async () => {
+          if (isTauriRuntime()) await invoke('delete_fs_item', { path });
+        },
+        closeTab: tabId => useAppStore.getState().closeTab(tabId),
+      });
+      if (deleted) {
+        const parentDir = path.replace(/[\\/][^\\/]+$/, '');
+        await refreshWorkspaceFolder(parentDir);
       }
-      const parentDir = path.replace(/[\\/][^\\/]+$/, '');
-      void refreshWorkspaceFolder(parentDir);
     } catch (error) {
       console.error('删除失败:', error);
     }
@@ -519,21 +524,8 @@ function ExplorerSidebar({ style }: SidebarProps) {
     try {
       const tree = await invoke<RawFileNode[]>('read_folder', { path: folderPath });
       const normalized = (tree || []).map(normalizeNode);
-      if (normalized.length === 0) return;
       setWorkspaceFolders(previous => {
-        // 如果 folderPath 直接匹配某个工作区根路径，整体替换顶层树，但保留
-        // 已懒加载的子目录内容（read_folder 对目录恒返回空 children）。
-        const rootMatch = previous.find(f => f.path === folderPath);
-        if (rootMatch) {
-          return previous.map(f => f.path === folderPath ? { ...f, tree: mergeLoadedChildren(f.tree, normalized) } : f);
-        }
-        // 否则作为子目录刷新，找到包含该路径的工作区根，替换其子孙节点，同样
-        // 保留该子目录下已加载的更深处目录内容。
-        return previous.map(folder =>
-          folder.path === folderPath || folderPath.startsWith(folder.path + '/') || folderPath.startsWith(folder.path + '\\')
-            ? { ...folder, tree: replaceNodeChildrenMerged(folder.tree, folderPath, normalized) }
-            : folder
-        );
+        return refreshWorkspaceFolderTree(previous, folderPath, normalized);
       });
     } catch (error) {
       console.error('刷新文件夹失败:', error);
@@ -561,12 +553,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
         const tree = await invoke<RawFileNode[]>('read_folder', { path: folderPath }).catch(() => null);
         if (!tree || version !== refreshVersionRef.current) continue;
         const normalized = (tree || []).map(normalizeNode);
-        if (normalized.length === 0 && (knownTreeSizeRef.current.get(folderPath) ?? 0) > 0) continue;
-        if (normalized.length > 0) knownTreeSizeRef.current.set(folderPath, normalized.length);
-        setWorkspaceFolders(previous => previous.map(f => f.path === folderPath
-          ? { ...f, tree: mergeLoadedChildren(f.tree, normalized) }
-          : f
-        ));
+        setWorkspaceFolders(previous => refreshWorkspaceFolderTree(previous, folderPath, normalized));
       }
     }, intervalMs);
     return () => { if (refreshIntervalRef.current) clearInterval(refreshIntervalRef.current); };

@@ -282,7 +282,7 @@ interface AIState {
   chatbotLoading: boolean;
   chatbotStreamingPhase: 'reasoning' | 'content' | null;
   reasoningEffort: ReasoningEffort;
-  linkedDocument: { title: string; content: string } | null;
+  linkedDocument: { title: string; path?: string; content: string } | null;
 
   // 操作
   setStatus: (status: AIStatus, message?: string) => void;
@@ -312,7 +312,7 @@ interface AIState {
   selectChatConversation: (conversationId: string) => void;
   setReasoningEffort: (effort: ReasoningEffort) => void;
   toggleLinkDocument: () => void;
-  setLinkedDocument: (doc: { title: string; content: string } | null) => void;
+  setLinkedDocument: (doc: { title: string; path?: string; content: string } | null) => void;
   setCompanionVisible: (visible: boolean, position?: { x: number; y: number }) => void;
   setCurrentStyle: (style: 'formal' | 'casual' | 'academic' | 'creative' | 'custom') => void;
   setTranslationVisible: (visible: boolean, position?: { x: number; y: number }, original?: string, result?: string) => void;
@@ -1235,6 +1235,7 @@ ${beforeText.slice(-2000)}`,
         set({
           linkedDocument: {
             title: activeTab.title,
+            path: activeTab.path || undefined,
             content: activeTab.content,
           },
         });

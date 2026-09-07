@@ -26,6 +26,25 @@ test('AI provider profile storage treats JSON null as an empty profile map', () 
   assert.deepEqual(parseAIProviderProfiles('{malformed'), {});
 });
 
+test('AI chat automatically tracks a removable current-document context', () => {
+  const panel = read('src/components/Chatbot/AIChatbotPanel.tsx');
+  const contextPanel = read('src/components/Chatbot/WorkspaceContextPanel.tsx');
+
+  assert.match(panel, /buildAutomaticEditorContext/);
+  assert.match(panel, /dismissedDocumentKeyRef/);
+  assert.match(panel, /setLinkedDocument/);
+  assert.match(panel, /activeTabId/);
+  assert.match(contextPanel, /linkedDocument\.path/);
+  assert.match(contextPanel, /startsWith\('current-'\)/);
+});
+
+test('AI assistant output uses the same separated editor insertion as Agent', () => {
+  const panel = read('src/components/Chatbot/AIChatbotPanel.tsx');
+  assert.match(panel, /const insertIntoEditor/);
+  assert.match(panel, /formatAssistantInsertion/);
+  assert.match(panel, /插入编辑器/);
+});
+
 test('AI actions never log settings, document content, or model responses', () => {
   const store = read('src/stores/aiStore.ts');
   assert.doesNotMatch(store, /console\.log\(/);

@@ -2824,6 +2824,19 @@ html.panel-resizing .chatbot-divider::after {
 .chatbot-bubble.user-bubble .chatbot-copy-btn { color: rgba(255, 255, 255, 0.6); }
 .chatbot-bubble.user-bubble .chatbot-copy-btn:hover { background: rgba(255, 255, 255, 0.15); color: #fff; }
 
+.chatbot-insert-btn {
+  border: 1px solid var(--border-color);
+  background: var(--bg-secondary);
+  cursor: pointer;
+  font-size: 11px;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: background 0.15s, color 0.15s, border-color 0.15s;
+}
+
+.chatbot-insert-btn:hover { background: var(--bg-hover); color: var(--text-color); border-color: var(--accent-color); }
+
 /* Thinking dots */
 .chatbot-bubble.thinking {
   display: flex;

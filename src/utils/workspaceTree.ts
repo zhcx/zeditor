@@ -7,6 +7,11 @@ export interface FileNode {
   directoryHandle?: FileSystemDirectoryHandle;
 }
 
+export interface WorkspaceFolderTree {
+  path: string;
+  tree: FileNode[];
+}
+
 export const replaceNodeChildren = (nodes: FileNode[], path: string, children: FileNode[]): FileNode[] => nodes.map(node => {
   if (node.path === path) return { ...node, children };
   return node.children ? { ...node, children: replaceNodeChildren(node.children, path, children) } : node;
@@ -38,4 +43,21 @@ export const mergeLoadedChildren = (oldNodes: FileNode[], newNodes: FileNode[]):
 export const replaceNodeChildrenMerged = (nodes: FileNode[], path: string, newChildren: FileNode[]): FileNode[] => nodes.map(node => {
   if (node.path === path) return { ...node, children: mergeLoadedChildren(node.children ?? [], newChildren) };
   return node.children ? { ...node, children: replaceNodeChildrenMerged(node.children, path, newChildren) } : node;
+});
+
+/** Apply a shallow filesystem refresh without discarding lazily loaded descendants. */
+export const refreshWorkspaceFolderTree = <T extends WorkspaceFolderTree>(
+  folders: T[],
+  folderPath: string,
+  newChildren: FileNode[],
+): T[] => folders.map(folder => {
+  const isRoot = folder.path === folderPath;
+  const isNested = folderPath.startsWith(folder.path + '/') || folderPath.startsWith(folder.path + '\\');
+  if (!isRoot && !isNested) return folder;
+  return {
+    ...folder,
+    tree: isRoot
+      ? mergeLoadedChildren(folder.tree, newChildren)
+      : replaceNodeChildrenMerged(folder.tree, folderPath, newChildren),
+  };
 });

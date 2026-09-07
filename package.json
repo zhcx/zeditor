@@ -1,7 +1,7 @@
 {
   "name": "zeditor",
   "private": true,
-  "version": "0.4.4",
+  "version": "0.4.5",
   "type": "module",
   "engines": {
     "node": ">=22.6.0"

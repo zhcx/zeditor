@@ -39,7 +39,7 @@ export function WorkspaceContextPanel({
   providerLabel,
   onChange,
 }: {
-  linkedDocument: { title: string; content: string } | null;
+  linkedDocument: { title: string; path?: string; content: string } | null;
   query: string;
   providerLabel: string;
   onChange: (payload: WorkspaceContextPayload | null) => void;
@@ -52,13 +52,23 @@ export function WorkspaceContextPanel({
   const [sensitiveRules, setSensitiveRules] = useState('');
 
   useEffect(() => {
-    if (!linkedDocument) return;
-    const id = `current-${linkedDocument.title}`;
+    const id = linkedDocument ? `current-${linkedDocument.path || linkedDocument.title}` : null;
     let cancelled = false;
     queueMicrotask(() => {
       if (cancelled) return;
-      setSources((current) => current.some((source) => source.id === id) ? current : [...current, { id, name: linkedDocument.title, content: linkedDocument.content, sections: [] }]);
-      setSelected((current) => current.includes(id) ? current : [...current, id]);
+      setSources((current) => {
+        const otherSources = current.filter((source) => !source.id.startsWith('current-'));
+        return linkedDocument && id
+          ? [...otherSources, { id, name: linkedDocument.title, path: linkedDocument.path, content: linkedDocument.content, sections: [] }]
+          : otherSources;
+      });
+      setSelected((current) => {
+        const otherSelections = current.filter((sourceId) => !sourceId.startsWith('current-'));
+        return id ? [...otherSelections, id] : otherSelections;
+      });
+      setSections((current) => Object.fromEntries(
+        Object.entries(current).filter(([sourceId]) => !sourceId.startsWith('current-')),
+      ));
     });
     return () => { cancelled = true; };
   }, [linkedDocument]);

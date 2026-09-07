@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
@@ -9,6 +9,7 @@ import type { AgentApprovalMode, AgentBackendId, AgentEditorContext, AgentTimeli
 import { readStoredStringArray } from '../../utils/storage';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { ChatSelectMenu } from './ChatSelectMenu';
+import { buildAutomaticEditorContext, formatAssistantInsertion } from '../../utils/assistantEditor';
 
 const agentMarkdown = new MarkdownIt({ html: false, breaks: true, linkify: true, typographer: true });
 agentMarkdown.use(taskLists);
@@ -41,7 +42,7 @@ interface AgentPanelProps {
 }
 
 export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
-  const { settings, content, currentFile, editorView, setContent } = useAppStore();
+  const { settings, content, currentFile, editorView, setContent, activeTabId, tabs } = useAppStore();
   const { setChatbotVisible } = useAIStore();
   const {
     backends, modelCatalogs, modelsLoading, sessions, activeSessionId, timeline, pendingApproval, changes, loading, diagnostic,
@@ -57,9 +58,19 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
   const [contextPaths, setContextPaths] = useState<string[]>([]);
   const [editorContext, setEditorContext] = useState<AgentEditorContext | null>(null);
   const [selection, setSelection] = useState<{ key: string; excluded: string[] }>({ key: '', excluded: [] });
+  const automaticDocumentKeyRef = useRef<string | null>(null);
+  const dismissedDocumentKeyRef = useRef<string | null>(null);
   const roots = useMemo(() => readStoredStringArray('zeditor.workspace-roots'), []);
   const workspaceRoot = roots[0] || '';
   const activeSession = sessions.find((session) => session.id === activeSessionId);
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const automaticContext = useMemo(() => buildAutomaticEditorContext({
+    id: activeTabId,
+    title: activeTab?.title || '当前文档',
+    path: currentFile,
+    content,
+  }), [activeTab?.title, activeTabId, content, currentFile]);
+  const currentDocumentKey = automaticContext?.key || `${activeTabId || currentFile || 'untitled'}:untitled`;
   const backendConfig = settings.agent.backends[backend];
   const backendStatus = backends.find((item) => item.id === backend);
   const modelCatalog = modelCatalogs[backend];
@@ -84,6 +95,17 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
     if (!backendStatus?.compatible || modelCatalog || !workspaceRoot) return;
     void loadModels(backend, backendConfig.executable_path, profile, workspaceRoot);
   }, [backend, backendConfig.executable_path, backendStatus?.compatible, loadModels, modelCatalog, profile, workspaceRoot]);
+
+  useEffect(() => {
+    if (automaticDocumentKeyRef.current !== currentDocumentKey) {
+      automaticDocumentKeyRef.current = currentDocumentKey;
+      dismissedDocumentKeyRef.current = null;
+      setEditorContext(automaticContext?.context || null);
+      return;
+    }
+    if (!automaticContext || dismissedDocumentKeyRef.current === currentDocumentKey) return;
+    setEditorContext((current) => current?.selection ? current : automaticContext.context);
+  }, [automaticContext, currentDocumentKey]);
 
   const chooseContextFiles = async () => {
     if (!workspaceRoot || loading) return;
@@ -146,17 +168,19 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
     if (!text) return;
     if (editorView) {
       const range = editorView.getSelection();
-      editorView.replaceRange(range.from, range.to, text, { from: range.from + text.length, to: range.from + text.length });
+      const before = editorView.getText(0, range.from);
+      const insertedText = formatAssistantInsertion(text, before);
+      editorView.replaceRange(range.from, range.to, insertedText, { from: range.from + insertedText.length, to: range.from + insertedText.length });
       editorView.focus();
       return;
     }
-    const separator = content && !content.endsWith('\n') ? '\n\n' : '';
-    setContent(`${content}${separator}${text}`);
+    setContent(`${content}${formatAssistantInsertion(text, content)}`);
   };
 
   const submit = async () => {
     const text = prompt.trim();
     if (!text || !workspaceRoot || loading || !backendStatus?.compatible) return;
+    setPrompt('');
     try {
       await startTurn({
         backend,
@@ -171,10 +195,10 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
         approvalMode: effectiveApprovalMode,
         sessionId: activeSession?.backend === backend ? activeSession.id : undefined,
       });
-      setPrompt('');
       setContextPaths([]);
       setEditorContext(null);
     } catch {
+      setPrompt(text);
       // The store exposes a stable diagnostic in the panel.
     }
   };
@@ -363,7 +387,14 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
             <span aria-hidden="true">@</span>
             <strong>{editorContext.label}</strong>
             <small>{editorContext.selection ? '选区' : '文档'} · {editorContext.content.length.toLocaleString()} 字符</small>
-            <button type="button" onClick={() => setEditorContext(null)} aria-label="移除编辑器引用">×</button>
+            <button
+              type="button"
+              onClick={() => {
+                dismissedDocumentKeyRef.current = currentDocumentKey;
+                setEditorContext(null);
+              }}
+              aria-label="移除编辑器引用"
+            >×</button>
           </div>
         )}
         {contextPaths.length > 0 && (

@@ -50,6 +50,12 @@ test('editor uses immediate scrolling so split-view synchronization stays respon
   assert.match(source, /smoothScrolling:\s*false/);
 });
 
+test('editor does not highlight matching text when the cursor moves', async () => {
+  const source = await readFile(new URL('../src/components/Editor/Editor.tsx', import.meta.url), 'utf8');
+
+  assert.match(source, /occurrencesHighlight:\s*'off'/);
+});
+
 test('suppresses ambiguous Unicode warnings for multilingual documents', async () => {
   const { EDITOR_UNICODE_HIGHLIGHT_OPTIONS } = await import('../src/utils/editorLayout.ts');
 

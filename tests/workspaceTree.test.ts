@@ -1,5 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import * as workspaceTree from '../src/utils/workspaceTree.ts';
 import {
   mergeLoadedChildren,
   replaceNodeChildren,
@@ -72,4 +73,20 @@ test('replaceNodeChildrenMerged refreshes a nested path while keeping its loaded
   assert.equal(b?.children?.length, 2);
   assert.deepEqual(b?.children?.find(n => n.path === '/b/c')?.children, [file('deep.md', '/b/c/deep.md')]);
   assert.ok(b?.children?.some(n => n.name === 'b-new.md'));
+});
+
+test('refreshing a workspace folder with no remaining files removes the deleted node', () => {
+  const refreshWorkspaceFolderTree = (workspaceTree as typeof workspaceTree & {
+    refreshWorkspaceFolderTree?: (
+      folders: Array<{ path: string; tree: FileNode[] }>,
+      folderPath: string,
+      newChildren: FileNode[],
+    ) => Array<{ path: string; tree: FileNode[] }>;
+  }).refreshWorkspaceFolderTree;
+
+  assert.equal(typeof refreshWorkspaceFolderTree, 'function', 'workspace refresh helper must be exported');
+  const folders = [{ path: '/workspace', tree: [file('deleted.md', '/workspace/deleted.md')] }];
+  const refreshed = refreshWorkspaceFolderTree!(folders, '/workspace', []);
+
+  assert.deepEqual(refreshed[0].tree, []);
 });

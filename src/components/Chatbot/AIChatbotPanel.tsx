@@ -12,6 +12,7 @@ import { AgentPanel, RuntimeTabs } from './AgentPanel';
 import { ChatSelectMenu } from './ChatSelectMenu';
 import type { AIRuntime } from '../../types/agent';
 import { parseAIProviderProfiles } from '../../utils/aiProviderProfiles';
+import { buildAutomaticEditorContext, formatAssistantInsertion } from '../../utils/assistantEditor';
 
 const md = new MarkdownIt({ html: false, breaks: true, linkify: true });
 
@@ -105,10 +106,19 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
     reasoningEffort,
     setReasoningEffort,
     linkedDocument,
+    setLinkedDocument,
     toggleLinkDocument,
   } = useAIStore();
 
-  const { settings } = useAppStore();
+  const { settings, activeTabId, tabs, content, currentFile } = useAppStore();
+  const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const automaticContext = useMemo(() => buildAutomaticEditorContext({
+    id: activeTabId,
+    title: activeTab?.title || '当前文档',
+    path: currentFile,
+    content,
+  }), [activeTab?.title, activeTabId, content, currentFile]);
+  const currentDocumentKey = automaticContext?.key || `${activeTabId || currentFile || 'untitled'}:untitled`;
   const workspaceConfig = useMemo(() => {
     try {
       const roots = readStoredStringArray('zeditor.workspace-roots');
@@ -134,6 +144,8 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
   const [workspaceContext, setWorkspaceContext] = useState<WorkspaceContextPayload | null>(null);
   const [historyOpen, setHistoryOpen] = useState(false);
   const historyRef = useRef<HTMLDivElement>(null);
+  const automaticDocumentKeyRef = useRef<string | null>(null);
+  const dismissedDocumentKeyRef = useRef<string | null>(null);
   const webSearchEnabled = settings.web_search.enabled;
   useEffect(() => {
     if (!workspaceConfigKey) return;
@@ -146,6 +158,46 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
       listRef.current.scrollTop = listRef.current.scrollHeight;
     }
   }, [chatbotMessages, webSearchLoading]);
+
+  useEffect(() => {
+    if (automaticDocumentKeyRef.current !== currentDocumentKey) {
+      automaticDocumentKeyRef.current = currentDocumentKey;
+      dismissedDocumentKeyRef.current = null;
+      setLinkedDocument(automaticContext ? {
+        title: automaticContext.context.label,
+        path: automaticContext.context.path,
+        content: automaticContext.context.content,
+      } : null);
+      return;
+    }
+    if (!automaticContext || dismissedDocumentKeyRef.current === currentDocumentKey) return;
+    const next = automaticContext.context;
+    if (
+      linkedDocument?.title !== next.label
+      || linkedDocument.path !== next.path
+      || linkedDocument.content !== next.content
+    ) {
+      setLinkedDocument({ title: next.label, path: next.path, content: next.content });
+    }
+  }, [automaticContext, currentDocumentKey, linkedDocument, setLinkedDocument]);
+
+  const toggleCurrentDocumentLink = () => {
+    if (linkedDocument) {
+      dismissedDocumentKeyRef.current = currentDocumentKey;
+      setLinkedDocument(null);
+      return;
+    }
+    dismissedDocumentKeyRef.current = null;
+    if (automaticContext) {
+      setLinkedDocument({
+        title: automaticContext.context.label,
+        path: automaticContext.context.path,
+        content: automaticContext.context.content,
+      });
+    } else {
+      toggleLinkDocument();
+    }
+  };
 
   useEffect(() => {
     if (!historyOpen) return;
@@ -424,7 +476,7 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
         <div className="chatbot-linked-doc-bar">
           <span className="chatbot-linked-doc-icon"><ComposerIcon type="document" /></span>
           <span className="chatbot-linked-doc-name">{linkedDocument.title}</span>
-          <button className="chatbot-linked-doc-unlink" onClick={toggleLinkDocument} title="取消关联">×</button>
+          <button className="chatbot-linked-doc-unlink" onClick={toggleCurrentDocumentLink} title="取消关联">×</button>
         </div>
       )}
 
@@ -453,7 +505,7 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
           </button>
           <button
             className={`chatbot-toolbar-btn chatbot-link-btn ${linkedDocument ? 'linked' : ''}`}
-            onClick={toggleLinkDocument}
+            onClick={toggleCurrentDocumentLink}
             title={linkedDocument ? '取消关联文档' : '关联当前文档'}
           >
             <span className="chatbot-toolbar-icon"><ComposerIcon type="document" /></span>
@@ -609,6 +661,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   const userToggledRef = useRef(false);
 
   const { chatbotLoading, chatbotStreamingPhase, chatbotMessages } = useAIStore();
+  const { editorView, content, setContent } = useAppStore();
   const isStreaming = chatbotLoading && !isUser &&
     chatbotMessages.length > 0 &&
     chatbotMessages[chatbotMessages.length - 1].id === message.id;
@@ -638,6 +691,19 @@ function ChatBubble({ message }: { message: ChatMessage }) {
       setCopied(true);
       setTimeout(() => setCopied(false), 2000);
     } catch { /* ignored */ }
+  };
+
+  const insertIntoEditor = () => {
+    if (!message.content) return;
+    if (editorView) {
+      const range = editorView.getSelection();
+      const before = editorView.getText(0, range.from);
+      const insertedText = formatAssistantInsertion(message.content, before);
+      editorView.replaceRange(range.from, range.to, insertedText, { from: range.from + insertedText.length, to: range.from + insertedText.length });
+      editorView.focus();
+      return;
+    }
+    setContent(`${content}${formatAssistantInsertion(message.content, content)}`);
   };
 
   const renderedHtml = useMemo(() => {
@@ -686,9 +752,12 @@ function ChatBubble({ message }: { message: ChatMessage }) {
           ) : null}
           <div className="chatbot-bubble-footer">
             {!isUser && message.content && (
-              <button className="chatbot-copy-btn" onClick={handleCopy} title="复制">
-                {copied ? '✓' : '📋'}
-              </button>
+              <>
+                <button className="chatbot-insert-btn" onClick={insertIntoEditor} title="插入当前编辑器">插入编辑器</button>
+                <button className="chatbot-copy-btn" onClick={handleCopy} title="复制">
+                  {copied ? '✓' : '📋'}
+                </button>
+              </>
             )}
           </div>
         </div>
