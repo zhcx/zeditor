@@ -156,7 +156,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.4.4**
+**Zeditor v0.4.6**
 
 一款现代化的 Markdown 编辑器
 
@@ -179,6 +179,7 @@ graph TD
 - **v0.4.1**：优化资源管理器，目录层级缩进更清晰、时间线标题单行显示、一级目录可关闭、刷新保留展开内容
 - **v0.4.2**：优化分栏拖拽与编辑/预览滚动浏览体验；预览框链接改为系统浏览器打开
 - **v0.4.4**：修复跨标签撤销、异步 AI 回写、保存关闭竞态和自动保存；输入法与 WebView2 行布局修复继续保留
+- **v0.4.6**：新增 Mermaid 图表命令与 Reveal.js 演示模式，支持富文本粘贴转 Markdown，并修复任务列表、代码块和演示图表渲染问题
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it
@@ -671,6 +672,7 @@ export function MenuBar() {
         { label: '分屏模式', action: () => useAppStore.getState().setMode('split') },
         { label: '沉浸阅读', action: () => useAppStore.getState().setMode('immersive') },
         { label: '沉浸写作', action: () => useAppStore.getState().setMode('zen') },
+        { label: '演示模式', action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); setActiveMenu(null); } },
         { divider: true, label: '' },
         {
           label: '主题',

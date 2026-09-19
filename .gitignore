@@ -47,6 +47,7 @@ test-output/
 .superpowers/
 .worktrees/
 .workbuddy/
+.codebuddy/
 docs/superpowers/
 *.png.bak
 

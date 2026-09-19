@@ -16,6 +16,8 @@ import { SlashCommandMenu, type SlashMenuAnchor } from './SlashCommandMenu';
 import { ImageOptionsModal, Toolbar } from '../Toolbar/Toolbar';
 import { normalizeLanguage, t } from '../../i18n';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
+import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
+import { prepareMarkdownPaste } from '../../utils/markdownPaste';
 
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -150,7 +152,10 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
     getSelection,
     getText: (from, to) => model.getValueInRange(monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to))),
     replaceRange: (from, to, text, selection) => {
+      // 工具栏、任务切换和富文本粘贴各自形成完整的撤销步骤。
+      editor.pushUndoStop();
       editor.executeEdits('zeditor', [{ range: monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to)), text, forceMoveMarkers: true }]);
+      editor.pushUndoStop();
       if (selection) setSelection(selection.from, selection.to);
     },
     setSelection,
@@ -636,9 +641,27 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     window.addEventListener('zeditor-theme-change', handleTheme);
 
     const handlePaste = async (event: ClipboardEvent) => {
+      if (!(event.target instanceof Node) || !root.contains(event.target)) return;
       const image = Array.from(event.clipboardData?.items || []).find((item) => item.type.startsWith('image/'))?.getAsFile();
-      if (!image) return;
+      if (!image) {
+        // 富文本粘贴：将剪贴板 HTML 转为 Markdown 插入，保留标题 / 列表 / 链接等语义
+        const clipboardHtml = event.clipboardData?.getData('text/html') ?? '';
+        const clipboardText = event.clipboardData?.getData('text/plain') ?? '';
+        if (clipboardHtml && shouldConvertHtmlToMarkdown(clipboardHtml, clipboardText)) {
+          event.preventDefault();
+          event.stopImmediatePropagation();
+          const selection = controller.getSelection();
+          const markdown = prepareMarkdownPaste(htmlToMarkdown(clipboardHtml), controller.getValue(), selection.from, selection.to);
+          controller.replaceRange(selection.from, selection.to, markdown, {
+            from: selection.from + markdown.length,
+            to: selection.from + markdown.length,
+          });
+          controller.focus();
+        }
+        return;
+      }
       event.preventDefault();
+      event.stopImmediatePropagation();
 
       const store = useAppStore.getState();
       if (!imageHostConfigured(store.settings)) {
@@ -670,11 +693,14 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         store.setUploadStatus('error', 0, String(error));
       }
     };
-    root.addEventListener('paste', handlePaste, true);
+    // Monaco 的粘贴扩展在 root 上先注册 capture，并会截断后续监听器。
+    // 在父容器捕获，且只接管编辑器内部事件，保证两个输入引擎都能转换。
+    const pasteRoot = root.parentElement ?? root;
+    pasteRoot.addEventListener('paste', handlePaste, true);
 
     return () => {
       clearCompanionTimer();
-      root.removeEventListener('paste', handlePaste, true);
+      pasteRoot.removeEventListener('paste', handlePaste, true);
       root.removeEventListener('contextmenu', handleContextMenu, true);
       window.removeEventListener('mousedown', closeContextMenu);
       window.removeEventListener('blur', closeContextMenu);

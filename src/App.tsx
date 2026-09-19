@@ -23,6 +23,7 @@ const AIChatbotPanel = lazy(() => import('./components/Chatbot/AIChatbotPanel').
 const ImmersiveOutline = lazy(() => import('./components/Immersive/ImmersiveOutline').then(m => ({ default: m.ImmersiveOutline })));
 const UnsavedChangesDialog = lazy(() => import('./components/UnsavedChangesDialog/UnsavedChangesDialog').then(m => ({ default: m.UnsavedChangesDialog })));
 const ConverterDialog = lazy(() => import('./components/ConverterDialog/ConverterDialog').then(m => ({ default: m.ConverterDialog })));
+const PresentationView = lazy(() => import('./components/Presentation/PresentationView').then(m => ({ default: m.PresentationView })));
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -128,6 +129,8 @@ function App() {
   const closeGuardInProgress = useRef(false);
   const closeCancelled = useRef(false);
   const [closeSaving, setCloseSaving] = useState(false);
+  const [presentationVisible, setPresentationVisible] = useState(false);
+  const closePresentation = useCallback(() => setPresentationVisible(false), []);
   const closePromptResolver = useRef<((action: UnsavedChangesAction) => void) | null>(null);
   const dragValues = useRef({ splitRatio, sidebarWidth, proofreadPanelWidth, chatbotPanelWidth });
   const immersivePolicy = getImmersiveWorkspacePolicy(mode, chatbotVisible);
@@ -214,6 +217,13 @@ function App() {
     window.addEventListener('zeditor-install-update', install);
     return () => window.removeEventListener('zeditor-install-update', install);
   }, [requestAppClose]);
+
+  // 演示模式：监听来自菜单/工具栏的演示请求事件
+  useEffect(() => {
+    const startPresentation = () => setPresentationVisible(true);
+    window.addEventListener('zeditor-presentation-request', startPresentation);
+    return () => window.removeEventListener('zeditor-presentation-request', startPresentation);
+  }, []);
 
   useEffect(() => {
     const interval = settings.editor.auto_save_interval;
@@ -1100,6 +1110,11 @@ function App() {
       {closePromptTabs && (
         <Suspense fallback={null}>
           <UnsavedChangesDialog tabs={closePromptTabs} busy={closeSaving} onAction={resolveClosePrompt} />
+        </Suspense>
+      )}
+      {presentationVisible && (
+        <Suspense fallback={null}>
+          <PresentationView onExit={closePresentation} />
         </Suspense>
       )}
     </div>

@@ -1,0 +1,221 @@
+/* ===== Reveal.js 演示模式 ===== */
+
+.presentation-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  z-index: 99999;
+  background: var(--bg-primary, #ffffff);
+}
+
+/* 覆盖 Reveal 白色主题的默认文字色，表格等元素也要继承应用主题。 */
+.presentation-overlay .reveal {
+  color: var(--text-primary, #1a1a2e);
+}
+
+/* 退出按钮 */
+.presentation-exit-btn {
+  position: fixed;
+  top: 16px;
+  right: 16px;
+  z-index: 100000;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 14px;
+  border: 1px solid var(--border-secondary, rgba(0, 0, 0, 0.15));
+  border-radius: 6px;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.85));
+  color: var(--text-secondary, #555);
+  font-size: 13px;
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.25s ease, background 0.15s ease;
+  backdrop-filter: blur(8px);
+  -webkit-backdrop-filter: blur(8px);
+  user-select: none;
+}
+
+.presentation-overlay:hover .presentation-exit-btn,
+.presentation-exit-btn:focus-visible {
+  opacity: 1;
+}
+
+.presentation-exit-btn:hover {
+  background: var(--bg-hover, rgba(0, 0, 0, 0.06));
+}
+
+/* ===== 幻灯片内容样式 ===== */
+
+.presentation-overlay .reveal .slides section {
+  text-align: left;
+  font-family: var(--font-content, 'Microsoft YaHei', sans-serif);
+  line-height: 1.7;
+  padding: 40px 60px;
+}
+
+.presentation-overlay .reveal .slides section h1,
+.presentation-overlay .reveal .slides section h2,
+.presentation-overlay .reveal .slides section h3,
+.presentation-overlay .reveal .slides section h4,
+.presentation-overlay .reveal .slides section h5,
+.presentation-overlay .reveal .slides section h6 {
+  color: var(--text-primary, #1a1a2e);
+  font-weight: 600;
+  margin-bottom: 0.5em;
+  text-transform: none;
+}
+
+.presentation-overlay .reveal .slides section h1 {
+  font-size: 2em;
+}
+
+.presentation-overlay .reveal .slides section h2 {
+  font-size: 1.6em;
+}
+
+.presentation-overlay .reveal .slides section h3 {
+  font-size: 1.3em;
+}
+
+.presentation-overlay .reveal .slides section p {
+  margin-bottom: 0.75em;
+  color: var(--text-primary, #333);
+}
+
+.presentation-overlay .reveal .slides section ul,
+.presentation-overlay .reveal .slides section ol {
+  margin: 0.5em 0;
+  padding-left: 1.5em;
+}
+
+.presentation-overlay .reveal .slides section li {
+  margin-bottom: 0.3em;
+}
+
+.presentation-overlay .reveal .slides section code {
+  font-size: 0.9em;
+  background: var(--bg-code-inline, rgba(0, 0, 0, 0.06));
+  padding: 2px 6px;
+  border-radius: 4px;
+}
+
+.presentation-overlay .reveal .slides section pre {
+  width: 100%;
+  margin: 1em 0;
+  box-shadow: none;
+}
+
+.presentation-overlay .reveal .slides section pre code {
+  background: var(--bg-code-block, #1e1e1e);
+  padding: 16px 20px;
+  border-radius: 8px;
+  font-size: 0.8em;
+  max-height: 60vh;
+  overflow: auto;
+}
+
+.presentation-overlay .reveal .slides section blockquote {
+  border-left: 4px solid var(--accent-primary, #4a9eff);
+  padding: 0.5em 1em;
+  margin: 1em 0;
+  background: var(--bg-blockquote, rgba(74, 158, 255, 0.06));
+  border-radius: 0 6px 6px 0;
+}
+
+.presentation-overlay .reveal .slides section img {
+  max-width: 80%;
+  max-height: 60vh;
+  border-radius: 6px;
+  margin: 0.5em auto;
+  display: block;
+}
+
+.presentation-overlay .reveal .slides section table {
+  margin: 1em 0;
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.presentation-overlay .reveal .slides section th,
+.presentation-overlay .reveal .slides section td {
+  border: 1px solid var(--border-primary, #ddd);
+  padding: 8px 12px;
+  text-align: left;
+}
+
+.presentation-overlay .reveal .slides section th {
+  background: var(--bg-table-header, rgba(0, 0, 0, 0.04));
+  font-weight: 600;
+}
+
+/* KaTeX 公式 */
+.presentation-overlay .katex-block {
+  margin: 1em 0;
+  text-align: center;
+}
+
+/* Mermaid 图表 */
+.presentation-overlay .mermaid-container {
+  margin: 1em 0;
+  text-align: center;
+}
+
+.presentation-overlay .mermaid-container figcaption {
+  display: none;
+}
+
+.presentation-overlay .mermaid-container svg {
+  max-width: 100%;
+  max-height: 55vh;
+}
+
+/* ===== 暗色主题适配 ===== */
+
+[data-theme$="-dark"] .presentation-overlay {
+  background: #0d1117;
+}
+
+[data-theme$="-dark"] .presentation-exit-btn {
+  background: rgba(30, 30, 30, 0.85);
+  color: #ccc;
+  border-color: rgba(255, 255, 255, 0.12);
+}
+
+[data-theme$="-dark"] .presentation-exit-btn:hover {
+  background: rgba(255, 255, 255, 0.1);
+}
+
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section h1,
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section h2,
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section h3,
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section h4,
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section h5,
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section h6 {
+  color: #e6edf3;
+}
+
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section p,
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section li {
+  color: #c9d1d9;
+}
+
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section code {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section blockquote {
+  background: rgba(74, 158, 255, 0.08);
+  border-left-color: #4a9eff;
+}
+
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section th {
+  background: rgba(255, 255, 255, 0.06);
+}
+
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section th,
+[data-theme$="-dark"] .presentation-overlay .reveal .slides section td {
+  border-color: #30363d;
+}

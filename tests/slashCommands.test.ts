@@ -39,3 +39,26 @@ test('every slash command has a valid post-insertion selection', () => {
     assert.ok(selectionEnd >= selectionStart && selectionEnd <= text.length, command.id);
   }
 });
+
+test('diagram commands preselect their placeholder text', () => {
+  const placeholders: Record<string, string> = {
+    gantt: '项目计划',
+    sequence: '用户',
+    state: '待处理',
+    'class-diagram': '类名',
+  };
+
+  for (const [id, expected] of Object.entries(placeholders)) {
+    const command = SLASH_COMMANDS.find((item) => item.id === id);
+    assert.ok(command, id);
+    const { text, selectionStart, selectionEnd } = command.insertion;
+    assert.equal(text.slice(selectionStart, selectionEnd), expected, id);
+    assert.ok(text.startsWith('```mermaid'), id);
+  }
+});
+
+test('slide separator command inserts a horizontal rule', () => {
+  const command = SLASH_COMMANDS.find((item) => item.id === 'slide');
+  assert.ok(command);
+  assert.match(command.insertion.text, /^---$/m);
+});

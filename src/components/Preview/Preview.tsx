@@ -9,6 +9,7 @@ import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { findActiveSourceElement } from '../../utils/activeSourceLine';
 import { addHeadingAnchors, findLocalHeadingTarget } from '../../utils/headingAnchors';
 import { open } from '@tauri-apps/plugin-shell';
+import { toggleTaskLine } from '../../utils/taskList';
 
 interface PreviewProps {
   className?: string;
@@ -63,6 +64,9 @@ md.renderer.rules.heading_open = (tokens, index, options, _env, self) => {
 };
 
 function addListItemContentAnchors(container: HTMLElement) {
+  // 插件的 enabled 选项是模块级状态，不能影响演示模式的只读任务列表。
+  container.querySelectorAll<HTMLInputElement>('li.task-list-item input.task-list-item-checkbox')
+    .forEach((checkbox) => { checkbox.disabled = false; });
   container.querySelectorAll<HTMLLIElement>('li[data-source-line]').forEach((item) => {
     // Loose lists already have a paragraph anchor that excludes nested lists.
     if (item.querySelector(':scope > p[data-source-line]')) return;
@@ -210,6 +214,8 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     const mermaidPromise = mermaidBlocks.length > 0
       ? import('mermaid').then(({ default: mermaid }) => {
         mermaid.initialize({
+          // 安全清洗会移除 foreignObject，使用 SVG 文字保留节点标签。
+          htmlLabels: false,
           startOnLoad: false,
           securityLevel: 'strict',
           theme: resolvedThemeRef.current.endsWith('-dark') ? 'dark' : 'neutral',
@@ -286,6 +292,26 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
   const handleSourceClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const clickedElement = event.target instanceof Element ? event.target : null;
+
+    // 任务列表交互：点击预览区 checkbox 直接切换编辑器源码中的 [ ] ↔ [x]
+    if (clickedElement instanceof HTMLInputElement && clickedElement.matches('input.task-list-item-checkbox')) {
+      event.preventDefault();
+      const listItem = clickedElement.closest<HTMLElement>('li.task-list-item[data-source-line]');
+      const lineNumber = Number(listItem?.dataset.sourceLine);
+      const editor = useAppStore.getState().editorView;
+      if (Number.isInteger(lineNumber) && lineNumber > 0 && editor
+        && editor.getValue() === deferredContent && lineNumber <= editor.state.doc.lines) {
+        const line = editor.line(lineNumber);
+        // click 发生时浏览器已经切换 checked，源码才是可靠的当前状态。
+        const toggled = toggleTaskLine(line.text);
+        if (toggled !== line.text) {
+          editor.replaceRange(line.from, line.to, toggled);
+        }
+        return;
+      }
+      return;
+    }
+
     const localLink = clickedElement?.closest<HTMLAnchorElement>('a[href^="#"]');
     const container = containerRef.current;
     if (localLink && container) {
@@ -326,7 +352,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       : null;
     const lineNumber = Number(target?.dataset.sourceLine);
     if (Number.isFinite(lineNumber) && lineNumber > 0) onSourceLineClick?.(lineNumber);
-  }, [onSourceLineClick]);
+  }, [onSourceLineClick, deferredContent]);
 
   const containerStyle: React.CSSProperties = {
     fontFamily: settings.appearance.font_family,
