@@ -1,9 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { resolveSmartPair, type SmartPairDecision } from '../src/utils/smartPairs.ts';
+import {
+  resolveSmartPair,
+  type SmartPairDecision,
+  type SmartPairInput,
+} from '../src/utils/smartPairs.ts';
 
-const decide = (value: string, offset: number, key: string, enabled = true): SmartPairDecision =>
-  resolveSmartPair({ value, offset, key, enabled });
+const decide = (value: string, offset: number, key: string, enabled = true): SmartPairDecision => {
+  const input: SmartPairInput = { value, offset, key, enabled };
+  return resolveSmartPair(input);
+};
 
 test('inserts ordinary, CJK, curly quote and backtick pairs', () => {
   for (const [key, text] of [
@@ -47,4 +53,36 @@ test('does not intercept code blocks, non-empty inline code or disabled settings
 test('allows Tab and Backspace to finish an empty auto-created backtick pair', () => {
   assert.deepEqual(decide('``', 1, 'Tab'), { kind: 'move', cursor: 2 });
   assert.deepEqual(decide('``', 1, 'Backspace'), { kind: 'delete', from: 0, to: 2, cursor: 0 });
+  assert.deepEqual(decide('```', 1, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('```', 1, 'Backspace'), { kind: 'default' });
+});
+
+test('closes fenced code only with the same marker and sufficient run length', () => {
+  for (const value of ['````\n```\n', '```\n~~~\n']) {
+    assert.deepEqual(decide(value, value.length, '('), { kind: 'default' });
+  }
+
+  const closed = '````\n`````\n';
+  assert.deepEqual(decide(closed, closed.length, '('), {
+    kind: 'insert', from: closed.length, to: closed.length, text: '()', cursor: closed.length + 1,
+  });
+});
+
+test('does not intercept Tab or Backspace in fenced and non-empty inline code', () => {
+  assert.deepEqual(decide('```\n[]()', 5, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('```\n()', 5, 'Backspace'), { kind: 'default' });
+  assert.deepEqual(decide('`()`', 2, 'Backspace'), { kind: 'default' });
+});
+
+test('matches inline code delimiters by backtick run length', () => {
+  assert.deepEqual(decide('``code``', 6, '('), { kind: 'default' });
+  assert.deepEqual(decide('``()``', 3, 'Backspace'), { kind: 'default' });
+
+  const unmatched = '``code`';
+  assert.deepEqual(decide(unmatched, unmatched.length, '('), { kind: 'default' });
+});
+
+test('ignores Tab near incomplete link-like text', () => {
+  assert.deepEqual(decide(']()', 0, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('](x)', 3, 'Tab'), { kind: 'default' });
 });
