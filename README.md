@@ -164,36 +164,33 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.4.6 更新
+## v0.4.7 更新
 
 ### 更新日志
 
-- **Mermaid 图表命令**：新增 `/gantt`、`/sequence`、`/state`、`/class` 和 `/slide`，快速插入图表或演示模板。
-- **Reveal.js 演示模式**：通过「功能 → 演示模式」将 Markdown 按顶层 `---` 拆页，支持 Mermaid、KaTeX、代码高亮、暗色主题、键盘翻页和 Esc 退出。
-- **富文本粘贴转换**：网页、Word 等 HTML 内容可转换为标题、列表、表格、引用、链接、图片和代码等 Markdown；纯文本和 HTML 源码继续原生粘贴。
-- **任务列表交互**：预览区复选框直接同步编辑器源码，支持 `-`、`*`、`+`、有序列表、缩进和引用；演示模式保持只读。
-- **转换与演示修复**：修复嵌套列表、HTML 实体、代码块空行与反引号、Mermaid 节点文字、演示焦点和退出清理问题。
-- **粘贴撤销体验**：EditContext 与 textarea 两种输入引擎均可独立撤销富文本粘贴。
-- **依赖安全**：升级 Mermaid 与 sharp，发布质量门禁通过 npm 高危审计。
-- **转换模块**：继续沿用 AnyDoc v1.2.0（本版本未变更转换引擎）。
+- **文本清理**：新增「格式 → 文本清理」，删除行尾空白并合并连续空白行；支持选区或全文处理，保留一次撤销操作。
+- **自动配对**：支持括号、引号、中日韩括号、弯引号及 Markdown 粗体、斜体、代码、删除线和链接标记。
+- **Tab 跳出与 Backspace**：可用 Tab 跳过自动闭合字符，空配对按 Backspace 一次删除；代码块和行内代码中保持原样。
+- **编辑器设置**：在「设置 → 编辑器」中配置自动配对与 Tab 跳出，设置可持久保存。
+- **转换模块**：继续沿用 AnyDoc v1.2.0，本版本未变更转换引擎。
 
-### v0.4.6 平台安装包对照
+### v0.4.7 平台安装包对照
 
-> 以下链接指向 v0.4.6 Release 资产；安装包由 GitHub Actions 根据 v0.4.6 标签源码构建。
+> 以下链接指向 v0.4.7 Release 资产；安装包由 GitHub Actions 根据 v0.4.7 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_0.4.6_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_0.4.6_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_0.4.6_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_0.4.6_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_0.4.6_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor-0.4.6-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.4.6/Zeditor_0.4.6_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_0.4.7_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_0.4.7_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_0.4.7_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_0.4.7_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_0.4.7_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor-0.4.7-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.4.7/Zeditor_0.4.7_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.4.6.md`](docs/releases/v0.4.6.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.4.7.md`](docs/releases/v0.4.7.md)。
 
 ## Contributors
 
@@ -396,20 +393,8 @@ SignPath Foundation 申请目前处于准备/审核阶段；在正式启用前�
 
 ## 🚀 版本更新日志
 
- - **v0.4.6**（2026-09-19）：新增 Mermaid 图表命令、Reveal.js 演示模式和富文本粘贴转 Markdown，修复任务列表、嵌套列表、代码块、Mermaid 节点文字与演示退出清理问题。详见 [v0.4.6 发布说明](docs/releases/v0.4.6.md)。
-   - 平台安装包（由 `v0.4.6` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.6_x64-setup.exe` / `Zeditor_0.4.6_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.4.5**（2026-09-07）：修复资源管理器删除残留、Agent 输入与完全访问权限问题，Agent / AI 自动识别当前文档并支持可移除上下文，生成内容插入编辑器时自动添加 Markdown 横线，关闭编辑器单击后的同词高亮。详见 [v0.4.5 发布说明](docs/releases/v0.4.5.md)。
-   - 平台安装包（由 `v0.4.5` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.5_x64-setup.exe` / `Zeditor_0.4.5_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.4.4**（2026-09-06）：修复跨标签撤销、AI 异步回写、保存关闭竞态和自动保存，继续保留 WebView2 输入与行布局修复。详见 [v0.4.4 发布说明](docs/releases/v0.4.4.md)。
-   - 平台安装包（由 `v0.4.4` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.4_x64-setup.exe` / `Zeditor_0.4.4_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
-- **v0.4.2**（2026-08-26）：编辑与预览体验打磨 —— 分栏拖拽改用 Pointer Events 更顺滑、编辑/预览滚动浏览更跟手，预览框链接改为系统默认浏览器打开。详见 [v0.4.2 发布说明](docs/releases/v0.4.2.md)。
-  - 平台安装包（由 `v0.4.2` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.2_x64-setup.exe` / `Zeditor_0.4.2_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
-- **v0.4.1**（2026-08-26）：资源管理器体验修复 —— 目录层级逐级缩进、时间线标题单行显示、一级目录关闭按钮（悬停 `×` + 右键菜单，关闭后收起其下所有文件夹并防止子目录被自动重新添加）、刷新保留已展开目录内容。详见 [v0.4.1 发布说明](docs/releases/v0.4.1.md)。
-  - 平台安装包（由 `v0.4.1` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.1_x64-setup.exe` / `Zeditor_0.4.1_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
-- **v0.4.0**（2026-08-22）：全新蓝色 `Z` 应用图标与 GitHub 首页横幅；延续云同步面板（WebDAV / S3）开关样式统一、未配置拦截、设置按钮层级修复与视觉打磨。详见 [v0.4.0 发布说明](docs/releases/v0.4.0.md)。
-  - 平台安装包（由 `v0.4.0` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.0_x64-setup.exe` / `Zeditor_0.4.0_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
-- **v0.3.9**：云同步面板交互与视觉打磨（状态显示、开关样式统一、历史版本打开）。详见 [v0.3.9 发布说明](docs/releases/v0.3.9.md)。
-- **v0.3.7**：品牌与转换引擎双重升级 —— 项目更名 **Zeditor**（原 MarkItDown），文档转换引擎由 markitdown(Python) 全面替换为原生 Rust 的 **AnyDoc**。
+ - **v0.4.7**（2026-09-21）：新增文本清理、自动配对与 Tab 跳出，支持 Markdown 格式标记和代码上下文保护。详见 [v0.4.7 发布说明](docs/releases/v0.4.7.md)。
+   - 平台安装包（由 `v0.4.7` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.7_x64-setup.exe` / `Zeditor_0.4.7_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
 
 完整发布说明见 [`docs/releases/`](docs/releases/)。
 
