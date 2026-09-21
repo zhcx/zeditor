@@ -31,6 +31,7 @@ test('editor routes supported empty-selection keys through smart pair decisions'
   assert.match(editorSource, /import\s+\{\s*resolveSmartPair\s*\}\s+from\s+['"]\.\.\/\.\.\/utils\/smartPairs['"]/);
   assert.match(editorSource, /autoClosingBrackets:\s*['"]never['"]/);
   assert.match(editorSource, /autoClosingQuotes:\s*['"]never['"]/);
+  assert.match(editorSource, /autoClosingComments:\s*['"]never['"]/);
   assert.match(editorSource, /autoClosingDelete:\s*['"]never['"]/);
   assert.match(editorSource, /autoClosingOvertype:\s*['"]never['"]/);
   assert.match(editorSource, /autoSurround:\s*['"]never['"]/);

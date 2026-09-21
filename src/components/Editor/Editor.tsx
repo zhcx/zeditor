@@ -426,6 +426,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       suggestOnTriggerCharacters: false,
       autoClosingBrackets: 'never',
       autoClosingQuotes: 'never',
+      autoClosingComments: 'never',
       autoClosingDelete: 'never',
       autoClosingOvertype: 'never',
       autoSurround: 'never',
