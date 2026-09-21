@@ -18,6 +18,7 @@ import { normalizeLanguage, t } from '../../i18n';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste';
+import { resolveSmartPair } from '../../utils/smartPairs';
 
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -598,40 +599,70 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     });
     const slashKeyDisposable = editor.onKeyDown((event) => {
       const menu = slashMenuRef.current;
-      if (!menu) return;
-
-      const commands = filterSlashCommands(menu.query);
       const key = event.browserEvent.key;
-      if (key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        slashMenuRef.current = null;
-        setSlashMenu(null);
-        return;
+
+      if (menu) {
+        const commands = filterSlashCommands(menu.query);
+        if (key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          slashMenuRef.current = null;
+          setSlashMenu(null);
+          return;
+        }
+        if (key === 'ArrowDown' || key === 'ArrowUp') {
+          event.preventDefault();
+          event.stopPropagation();
+          if (commands.length === 0) return;
+          const direction = key === 'ArrowDown' ? 1 : -1;
+          const next = (slashSelectedIndexRef.current + direction + commands.length) % commands.length;
+          slashSelectedIndexRef.current = next;
+          setSlashSelectedIndex(next);
+          return;
+        }
+        if ((key === 'Enter' || key === 'Tab') && commands.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          const command = commands[Math.min(slashSelectedIndexRef.current, commands.length - 1)];
+          const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
+          slashMenuRef.current = null;
+          setSlashMenu(null);
+          controller.replaceRange(menu.from, menu.to, text, {
+            from: menu.from + selectionStart,
+            to: menu.from + selectionEnd,
+          });
+          controller.focus();
+          return;
+        }
       }
-      if (key === 'ArrowDown' || key === 'ArrowUp') {
-        event.preventDefault();
-        event.stopPropagation();
-        if (commands.length === 0) return;
-        const direction = key === 'ArrowDown' ? 1 : -1;
-        const next = (slashSelectedIndexRef.current + direction + commands.length) % commands.length;
-        slashSelectedIndexRef.current = next;
-        setSlashSelectedIndex(next);
-        return;
-      }
-      if ((key === 'Enter' || key === 'Tab') && commands.length > 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        const command = commands[Math.min(slashSelectedIndexRef.current, commands.length - 1)];
-        const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
-        slashMenuRef.current = null;
-        setSlashMenu(null);
-        controller.replaceRange(menu.from, menu.to, text, {
-          from: menu.from + selectionStart,
-          to: menu.from + selectionEnd,
+
+      const selection = controller.getSelection();
+      if (!selection.empty) return;
+
+      const decision = resolveSmartPair({
+        value: model.getValue(),
+        offset: selection.to,
+        key: event.browserEvent.key,
+        enabled: Boolean(useAppStore.getState().settings.editor.smart_pairs ?? true),
+      });
+      if (decision.kind === 'default') return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (decision.kind === 'insert' || decision.kind === 'replace') {
+        controller.replaceRange(decision.from, decision.to, decision.text, {
+          from: decision.from + decision.cursor,
+          to: decision.from + decision.cursor,
         });
-        controller.focus();
+      } else if (decision.kind === 'move') {
+        controller.setSelection(decision.cursor);
+      } else if (decision.kind === 'delete') {
+        controller.replaceRange(decision.from, decision.to, '', {
+          from: decision.cursor,
+          to: decision.cursor,
+        });
       }
+      controller.focus();
     });
 
     const handleTheme = (event: Event) => {
