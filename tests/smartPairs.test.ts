@@ -22,6 +22,12 @@ test('inserts ordinary, CJK, curly quote and backtick pairs', () => {
   }
 });
 
+test('returns an absolute cursor when inserting after existing text', () => {
+  assert.deepEqual(decide('abc', 3, '('), {
+    kind: 'insert', from: 3, to: 3, text: '()', cursor: 4,
+  });
+});
+
 test('creates Markdown emphasis pairs and upgrades them to double markers', () => {
   assert.deepEqual(decide('', 0, '*'), { kind: 'insert', from: 0, to: 0, text: '**', cursor: 1 });
   assert.deepEqual(decide('**', 1, '*'), { kind: 'replace', from: 0, to: 2, text: '****', cursor: 2 });

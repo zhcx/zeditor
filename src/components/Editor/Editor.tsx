@@ -651,8 +651,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       event.stopPropagation();
       if (decision.kind === 'insert' || decision.kind === 'replace') {
         controller.replaceRange(decision.from, decision.to, decision.text, {
-          from: decision.from + decision.cursor,
-          to: decision.from + decision.cursor,
+          from: decision.cursor,
+          to: decision.cursor,
         });
       } else if (decision.kind === 'move') {
         controller.setSelection(decision.cursor);

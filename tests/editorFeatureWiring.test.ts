@@ -34,7 +34,8 @@ test('editor routes supported empty-selection keys through smart pair decisions'
   assert.match(editorSource, /resolveSmartPair\(\s*\{[\s\S]*?value:\s*model\.getValue\(\)[\s\S]*?offset:\s*selection\.to[\s\S]*?key:\s*event\.browserEvent\.key[\s\S]*?enabled:\s*Boolean\(useAppStore\.getState\(\)\.settings\.editor\.smart_pairs\s*\?\?\s*true\)[\s\S]*?\}\s*\)/);
   assert.match(smartPairsSource, /SMART_KEYS\s*=\s*new Set\(\[\s*['"]Tab['"],\s*['"]Backspace['"]/);
   assert.match(editorSource, /if\s*\(\s*decision\.kind\s*===\s*['"]default['"]\s*\)\s*return/);
-  assert.match(editorSource, /controller\.replaceRange\(decision\.from,\s*decision\.to,\s*decision\.text,\s*\{\s*from:\s*decision\.from\s*\+\s*decision\.cursor,\s*to:\s*decision\.from\s*\+\s*decision\.cursor,?\s*\}\s*\)/);
+  assert.match(editorSource, /controller\.replaceRange\(decision\.from,\s*decision\.to,\s*decision\.text,\s*\{\s*from:\s*decision\.cursor,\s*to:\s*decision\.cursor,?\s*\}\s*\)/);
+  assert.doesNotMatch(editorSource, /decision\.from\s*\+\s*decision\.cursor/);
   assert.match(editorSource, /controller\.setSelection\(decision\.cursor\)/);
   assert.match(editorSource, /controller\.replaceRange\(decision\.from,\s*decision\.to,\s*['"]{2},\s*\{\s*from:\s*decision\.cursor,\s*to:\s*decision\.cursor,?\s*\}\s*\)/);
 });
