@@ -1009,6 +1009,190 @@ pub async fn rename_fs_item(old_path: String, new_path: String) -> Result<(), St
         .map_err(|e| format!("重命名失败：{e}"))
 }
 
+/// 允许写入 `.assets` 的媒体扩展名，与前端 `MEDIA_FILE_EXTENSIONS` 保持一致。
+const MEDIA_EXTENSIONS: [&str; 18] = [
+    "mp4", "m4v", "webm", "ogv", "mov", "mkv", "avi", "wmv", "flv",
+    "mp3", "m4a", "aac", "wav", "oga", "ogg", "opus", "flac", "weba",
+];
+
+/// 单个媒体文件的大小上限：再大的素材应通过外链引用。
+const MAX_MEDIA_BYTES: u64 = 512 * 1024 * 1024;
+
+/// 媒体导入结果：绝对路径用于播放，相对路径写入 Markdown。
+#[derive(Debug, Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct MediaAssetImport {
+    pub file_name: String,
+    pub absolute_path: String,
+    pub relative_path: String,
+    pub size: u64,
+}
+
+fn is_media_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|value| MEDIA_EXTENSIONS.contains(&value.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn is_remote_media_source(source: &str) -> bool {
+    source.starts_with("http://")
+        || source.starts_with("https://")
+        || source.starts_with("data:")
+        || source.starts_with("blob:")
+        || source.starts_with("asset:")
+        || source.starts_with("//")
+}
+
+// Windows 的 canonicalize 会带 `\\?\` 前缀，前端 convertFileSrc 无法直接使用。
+fn path_without_verbatim_prefix(path: &Path) -> String {
+    let text = path.to_string_lossy().to_string();
+    text.strip_prefix(r"\\?\").unwrap_or(&text).to_string()
+}
+
+fn sanitize_media_file_name(raw: &str) -> String {
+    let cleaned: String = raw
+        .chars()
+        .map(|character| match character {
+            '/' | '\\' | ':' | '*' | '?' | '"' | '<' | '>' | '|' => '_',
+            _ => character,
+        })
+        .collect();
+    let trimmed = cleaned.trim().to_string();
+    if trimmed.is_empty() {
+        "media".to_string()
+    } else {
+        trimmed
+    }
+}
+
+fn document_dir_of(document_path: &str) -> Option<PathBuf> {
+    let document = PathBuf::from(document_path);
+    document
+        .parent()
+        .filter(|parent| !parent.as_os_str().is_empty())
+        .map(|parent| parent.to_path_buf())
+}
+
+/// 把外部媒体文件复制到文档同级的 `.assets` 目录，返回可直接引用的相对路径。
+#[tauri::command]
+pub async fn import_media_asset(
+    source_path: String,
+    document_path: String,
+    assets_dir: Option<String>,
+) -> Result<MediaAssetImport, String> {
+    let source = PathBuf::from(&source_path);
+    if !is_media_extension(&source) {
+        return Err("仅支持导入视频或音频文件".to_string());
+    }
+    let source_meta = tokio::fs::metadata(&source)
+        .await
+        .map_err(|e| format!("无法读取媒体文件：{e}"))?;
+    if !source_meta.is_file() {
+        return Err("媒体源不是一个文件".to_string());
+    }
+    if source_meta.len() > MAX_MEDIA_BYTES {
+        return Err("媒体文件超过 512MB，请改用外链引用".to_string());
+    }
+
+    let document_dir = document_dir_of(&document_path)
+        .ok_or_else(|| "请先保存文档，媒体文件将复制到文档同级的 .assets 目录".to_string())?;
+    let folder = assets_dir.unwrap_or_else(|| ".assets".to_string());
+    let folder = folder.trim();
+    let folder = if folder.is_empty() { ".assets" } else { folder };
+    // 只允许文档同级下的单个目录名，避免 `..` 或绝对路径越权写入。
+    if folder.contains("..") || Path::new(folder).is_absolute() {
+        return Err("媒体资源目录名称不合法".to_string());
+    }
+    let target_dir = document_dir.join(folder);
+
+    let original_name = source
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let safe_name = sanitize_media_file_name(&original_name);
+    let (stem, extension) = match safe_name.rfind('.') {
+        Some(index) if index > 0 => (safe_name[..index].to_string(), safe_name[index..].to_string()),
+        _ => (safe_name.clone(), String::new()),
+    };
+
+    let mut candidate = safe_name.clone();
+    let mut counter = 1u32;
+    loop {
+        let target = target_dir.join(&candidate);
+        match tokio::fs::metadata(&target).await {
+            // 同名同大小视为同一素材，直接复用，避免重复拖入产生副本。
+            Ok(existing) if existing.is_file() && existing.len() == source_meta.len() => break,
+            Ok(_) => {
+                candidate = format!("{stem}-{counter}{extension}");
+                counter += 1;
+                if counter > 999 {
+                    return Err("同名媒体文件过多，请重命名后再导入".to_string());
+                }
+            }
+            Err(_) => break,
+        }
+    }
+
+    tokio::fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| format!("创建媒体资源目录失败：{e}"))?;
+    let target_path = target_dir.join(&candidate);
+    let same_file = tokio::fs::canonicalize(&source)
+        .await
+        .ok()
+        .zip(tokio::fs::canonicalize(&target_path).await.ok())
+        .map(|(left, right)| left == right)
+        .unwrap_or(false);
+    if !same_file {
+        tokio::fs::copy(&source, &target_path)
+            .await
+            .map_err(|e| format!("复制媒体文件失败：{e}"))?;
+    }
+
+    Ok(MediaAssetImport {
+        file_name: candidate.clone(),
+        absolute_path: path_without_verbatim_prefix(&target_path),
+        relative_path: format!("{folder}/{candidate}"),
+        size: source_meta.len(),
+    })
+}
+
+/// 把 Markdown 中的媒体引用解析为可播放的本地绝对路径；无法解析的位置返回 null。
+#[tauri::command]
+pub async fn resolve_media_sources(
+    document_path: String,
+    sources: Vec<String>,
+) -> Result<Vec<Option<String>>, String> {
+    let document_dir = document_dir_of(&document_path);
+    let mut resolved = Vec::with_capacity(sources.len());
+
+    for source in sources {
+        let trimmed = source.trim();
+        if trimmed.is_empty() || is_remote_media_source(trimmed) {
+            resolved.push(None);
+            continue;
+        }
+        let candidate = if Path::new(trimmed).is_absolute() {
+            PathBuf::from(trimmed)
+        } else {
+            match &document_dir {
+                Some(dir) => dir.join(trimmed.replace('\\', "/")),
+                None => {
+                    resolved.push(None);
+                    continue;
+                }
+            }
+        };
+        match tokio::fs::metadata(&candidate).await {
+            Ok(meta) if meta.is_file() => resolved.push(Some(path_without_verbatim_prefix(&candidate))),
+            _ => resolved.push(None),
+        }
+    }
+
+    Ok(resolved)
+}
+
 #[tauri::command]
 pub async fn copy_fs_item(source: String, destination: String) -> Result<(), String> {
     ensure_fs_authorized(&source, "复制")?;

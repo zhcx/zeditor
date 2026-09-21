@@ -34,6 +34,8 @@ import { getImmersiveWorkspacePolicy } from './utils/immersiveWorkspace';
 import { guardWindowClose, type CloseGuardTab, type UnsavedChangesAction } from './utils/windowCloseGuard';
 import { resolveSaveBaseName } from './utils/saveName';
 import { findActiveSourceElement } from './utils/activeSourceLine';
+import { isMediaFilePath } from './utils/media';
+import { insertMediaFromPath } from './services/mediaAssets';
 import './styles/main.css';
 import './styles/workbench.css';
 import { contentFontStack } from './utils/appearanceSettings';
@@ -460,6 +462,12 @@ function App() {
     const unlisten = webview.listen<DragDropPayload>('tauri://drag-drop', async (event) => {
       const paths = event.payload.paths;
       for (const path of paths) {
+        // 视频 / 音频按素材处理：复制到文档资源目录并插入媒体语法，
+        // 而不是当作文档打开。
+        if (isMediaFilePath(path)) {
+          await insertMediaFromPath(path);
+          continue;
+        }
         try {
           await openFile(path);
         } catch (error) {

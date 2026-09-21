@@ -4151,6 +4151,55 @@ textarea {
   text-align: center;
 }
 
+/* 本地媒体播放器：视频按内容宽度自适应，音频只占一行原生控件。 */
+.media-embed {
+  margin: 1.25rem 0;
+}
+
+.media-embed video {
+  display: block;
+  width: 100%;
+  max-height: 70vh;
+  border: 1px solid var(--border-color);
+  border-radius: 10px;
+  background: #000;
+}
+
+.media-embed audio {
+  display: block;
+  width: 100%;
+}
+
+.media-embed figcaption {
+  margin-top: 6px;
+  color: var(--text-secondary);
+  font-size: .82em;
+  text-align: center;
+  word-break: break-all;
+}
+
+/* 路径解析期间的占位块，避免播放器出现时预览跳动。 */
+.preview-document span.media-embed {
+  display: block;
+  min-height: 2.4em;
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 45%, transparent);
+}
+
+.media-embed.is-missing {
+  padding: 12px 14px;
+  border: 1px dashed var(--border-color);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-secondary) 60%, transparent);
+}
+
+.media-embed-missing {
+  display: block;
+  color: var(--text-secondary);
+  font-size: .86em;
+  word-break: break-all;
+}
+
 .video-insert-modal {
   width: min(520px, calc(100vw - 40px));
 }

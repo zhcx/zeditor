@@ -8,6 +8,16 @@ import { useAppStore } from '../../stores/appStore';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { findActiveSourceElement } from '../../utils/activeSourceLine';
 import { addHeadingAnchors, findLocalHeadingTarget } from '../../utils/headingAnchors';
+import {
+  findMediaEmbeds,
+  isPlatformPageUrl,
+  isRemoteMediaSource,
+  resolveRenderKind,
+  videoPlatformEmbed,
+  youtubeEmbedUrl,
+  type MediaEmbedMatch,
+} from '../../utils/media';
+import { resolveMediaSources } from '../../services/mediaAssets';
 import { open } from '@tauri-apps/plugin-shell';
 import { toggleTaskLine } from '../../utils/taskList';
 
@@ -87,49 +97,109 @@ function addListItemContentAnchors(container: HTMLElement) {
   });
 }
 
-function videoEmbedUrl(rawUrl: string) {
-  try {
-    const url = new URL(rawUrl);
-    const host = url.hostname.toLowerCase().replace(/^www\./, '');
-    if (host === 'youtube.com' || host === 'm.youtube.com') {
-      const id = url.pathname.startsWith('/shorts/') ? url.pathname.split('/')[2] : url.searchParams.get('v');
-      if (id && /^[\w-]{6,}$/.test(id)) return { src: `https://www.youtube-nocookie.com/embed/${id}`, title: 'YouTube 视频' };
+/**
+ * 媒体语法先替换为占位元素：平台视频交回 safeHtml 重建 iframe，
+ * 播放器（video / audio）在渲染完成后按需构建，避免跨进程解析阻塞 Markdown 渲染。
+ */
+function buildMediaPlaceholder(match: MediaEmbedMatch): string | null {
+  // 占位元素随后还要经过公式渲染，属性里的 $ 必须换成实体，
+  // 否则 `title="A$B$"` 会被当成行内公式渲染。
+  const escape = (value: string) => md.utils.escapeHtml(value).replace(/\$/g, '&#36;');
+  const renderKind = resolveRenderKind(match);
+
+  if (renderKind === 'youtube' || renderKind === 'embed') {
+    const youtube = youtubeEmbedUrl(match.src);
+    const platform = videoPlatformEmbed(match.src)
+      ?? (youtube ? { src: youtube, title: 'YouTube 视频' } : null);
+    if (platform) {
+      return `<figure class="video-embed" data-zeditor-video-src="${escape(platform.src)}" data-zeditor-video-title="${escape(platform.title)}"><figcaption><a href="${escape(match.src)}" target="_blank" rel="noreferrer">${escape(platform.title)}</a></figcaption></figure>`;
     }
-    if (host === 'youtu.be') {
-      const id = url.pathname.slice(1).split('/')[0];
-      if (id && /^[\w-]{6,}$/.test(id)) return { src: `https://www.youtube-nocookie.com/embed/${id}`, title: 'YouTube 视频' };
-    }
-    if (host === 'bilibili.com' || host === 'm.bilibili.com' || host === 'b23.tv') {
-      const id = url.pathname.match(/\/(BV[\w]+|av\d+)/i)?.[1];
-      if (id) {
-        const key = id.toLowerCase().startsWith('av') ? `aid=${id.slice(2)}` : `bvid=${id}`;
-        return { src: `https://player.bilibili.com/player.html?${key}&high_quality=1`, title: '哔哩哔哩视频' };
-      }
-    }
-    if (host === 'vimeo.com' || host === 'player.vimeo.com') {
-      const id = url.pathname.match(/(?:video\/)?(\d+)/)?.[1];
-      if (id) return { src: `https://player.vimeo.com/video/${id}`, title: 'Vimeo 视频' };
-    }
-  } catch { /* Invalid URLs remain regular text. */ }
-  return null;
+  }
+
+  // 平台页面链接拿不到可嵌入的视频 id（例如 b23.tv 短链）时保留原文，
+  // 让作者能直接看到并修正语法，而不是显示一个空播放器。
+  if (isPlatformPageUrl(match.src)) return null;
+
+  return `<span class="media-embed" data-zeditor-media-key="${match.index}" data-zeditor-media-kind="${renderKind === 'audio' ? 'audio' : 'video'}" data-zeditor-media-src="${escape(match.src)}" data-zeditor-media-title="${escape(match.title ?? '')}" data-zeditor-media-poster="${escape(match.poster ?? '')}" data-source-line="${match.line}"></span>`;
 }
 
-function renderVideoExtensions(source: string) {
-  let fence = '';
-  return source.split('\n').map((line) => {
-    const fenceMatch = line.match(/^\s*(```+|~~~+)/);
-    if (fenceMatch) {
-      if (!fence) fence = fenceMatch[1][0];
-      else if (fence === fenceMatch[1][0]) fence = '';
-      return line;
+function renderMediaPlaceholders(source: string): string {
+  const matches = findMediaEmbeds(source);
+  if (matches.length === 0) return source;
+
+  let output = source;
+  // 从后往前替换，前面的偏移量才不会被前面的替换破坏。
+  for (const match of [...matches].reverse()) {
+    const placeholder = buildMediaPlaceholder(match);
+    if (!placeholder) continue;
+    output = output.slice(0, match.from) + placeholder + output.slice(match.to);
+  }
+  return output;
+}
+
+interface MediaPlaceholder {
+  node: HTMLElement;
+  kind: 'video' | 'audio';
+  src: string;
+  title: string;
+  poster: string;
+  line: string;
+}
+
+function readMediaPlaceholder(node: HTMLElement): MediaPlaceholder {
+  return {
+    node,
+    kind: node.dataset.zeditorMediaKind === 'audio' ? 'audio' : 'video',
+    src: node.dataset.zeditorMediaSrc || '',
+    title: node.dataset.zeditorMediaTitle || '',
+    poster: node.dataset.zeditorMediaPoster || '',
+    line: node.dataset.sourceLine || '',
+  };
+}
+
+/** 相对路径在示例里可能被编码，标题显示时还原成文件名。 */
+function mediaFileName(source: string): string {
+  const name = source.split('#')[0].split('?')[0].split(/[\\/]/).pop() || source;
+  try {
+    return decodeURIComponent(name);
+  } catch {
+    return name;
+  }
+}
+
+function createMediaFigure(
+  placeholder: MediaPlaceholder,
+  url: string | null,
+  posterUrl: string | undefined,
+  onReady: () => void,
+): HTMLElement {
+  const figure = document.createElement('figure');
+  figure.className = `media-embed media-embed-${placeholder.kind}`;
+  if (placeholder.line) figure.dataset.sourceLine = placeholder.line;
+
+  if (!url) {
+    figure.classList.add('is-missing');
+    const missing = document.createElement('span');
+    missing.className = 'media-embed-missing';
+    missing.textContent = `无法读取媒体文件：${placeholder.src}`;
+    figure.appendChild(missing);
+  } else {
+    const player = document.createElement(placeholder.kind === 'audio' ? 'audio' : 'video');
+    player.controls = true;
+    player.preload = 'metadata';
+    player.src = url;
+    if (posterUrl && player instanceof HTMLVideoElement) {
+      player.poster = posterUrl;
+      player.setAttribute('playsinline', '');
     }
-    if (fence) return line;
-    const match = line.trim().match(/^@\[video\]\((https?:\/\/[^\s)]+)\)$/i);
-    if (!match) return line;
-    const embed = videoEmbedUrl(match[1]);
-    if (!embed) return line;
-    return `<figure class="video-embed" data-zeditor-video-src="${md.utils.escapeHtml(embed.src)}" data-zeditor-video-title="${embed.title}"><figcaption><a href="${md.utils.escapeHtml(match[1])}" target="_blank" rel="noreferrer">${embed.title}</a></figcaption></figure>`;
-  }).join('\n');
+    player.addEventListener('loadedmetadata', onReady);
+    figure.appendChild(player);
+  }
+
+  const caption = document.createElement('figcaption');
+  caption.textContent = placeholder.title || mediaFileName(placeholder.src);
+  figure.appendChild(caption);
+  return figure;
 }
 
 const renderFormula = (tex: string, displayMode: boolean) => {
@@ -166,7 +236,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
   const contentRef = useRef('');
   const mermaidSequenceRef = useRef(0);
   const [mermaidThemeVersion, setMermaidThemeVersion] = useState(0);
-  const { content, settings } = useAppStore();
+  const { content, settings, currentFile } = useAppStore();
   // Markdown parsing, sanitization and DOM replacement are comparatively
   // expensive. Deferring them keeps Monaco's keystroke updates responsive.
   const deferredContent = useDeferredValue(content);
@@ -201,11 +271,40 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     if (!containerRef.current) return;
     let disposed = false;
 
-    const rendered = sanitizeRenderedHtml(md.render(renderMath(renderVideoExtensions(deferredContent))));
-    containerRef.current.innerHTML = rendered;
-    addHeadingAnchors(containerRef.current);
-    addListItemContentAnchors(containerRef.current);
+    const container = containerRef.current;
+    const rendered = sanitizeRenderedHtml(md.render(renderMath(renderMediaPlaceholders(deferredContent))));
+    container.innerHTML = rendered;
+    addHeadingAnchors(container);
+    addListItemContentAnchors(container);
     onContentRendered?.();
+
+    // 本地媒体需要先解析成 asset 地址才能播放，解析完成后再替换占位元素。
+    const placeholders = Array.from(container.querySelectorAll<HTMLElement>('[data-zeditor-media-key]'));
+    if (placeholders.length > 0) {
+      const items = placeholders.map(readMediaPlaceholder);
+      const localSources = [
+        ...items.filter((item) => !isRemoteMediaSource(item.src)).map((item) => item.src),
+        ...items.filter((item) => item.poster && !isRemoteMediaSource(item.poster)).map((item) => item.poster),
+      ];
+      void resolveMediaSources(currentFile, localSources).then((resolved) => {
+        if (disposed) return;
+        items.forEach((item) => {
+          const url = isRemoteMediaSource(item.src) ? item.src : resolved.get(item.src) || null;
+          const poster = item.poster
+            ? (isRemoteMediaSource(item.poster) ? item.poster : resolved.get(item.poster))
+            : undefined;
+          const figure = createMediaFigure(item, url, poster, () => onContentRendered?.());
+          const parent = item.node.parentElement;
+          // 整行只有一条媒体语法时，占位元素所在段落一起替换，避免播放器被段落包裹。
+          if (parent && parent.tagName === 'P' && parent.childElementCount === 1 && !(parent.textContent || '').trim()) {
+            parent.replaceWith(figure);
+          } else {
+            item.node.replaceWith(figure);
+          }
+        });
+        onContentRendered?.();
+      });
+    }
 
     // Mermaid is imported and rendered only when a diagram is close to the
     // visible preview. A long document can therefore contain many diagrams
@@ -277,7 +376,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
         if (onContentRendered) img.removeEventListener('load', onContentRendered);
       });
     };
-  }, [deferredContent, mermaidThemeVersion, onContentRendered]);
+  }, [deferredContent, mermaidThemeVersion, onContentRendered, currentFile]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -292,6 +391,9 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
   const handleSourceClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (event.button !== 0) return;
     const clickedElement = event.target instanceof Element ? event.target : null;
+
+    // 播放器自己处理播放、进度与音量点击，预览不再抢走这些操作。
+    if (clickedElement?.closest('video, audio')) return;
 
     // 任务列表交互：点击预览区 checkbox 直接切换编辑器源码中的 [ ] ↔ [x]
     if (clickedElement instanceof HTMLInputElement && clickedElement.matches('input.task-list-item-checkbox')) {

@@ -6,6 +6,13 @@ import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { TablePicker } from '../Editor/TablePicker';
 import { formatMarkdown, type MarkdownFormatResult } from '../../utils/markdownFormatter';
+import {
+  formatMediaEmbed,
+  mediaDialogFilters,
+  mediaKindOfSource,
+  videoPlatformEmbed,
+} from '../../utils/media';
+import { insertMediaFromPath } from '../../services/mediaAssets';
 
 type ToolbarIconName = 'link' | 'image' | 'video' | 'table' | 'folder' | 'chat' | 'proofread' | 'sparkle' | 'palette' | 'rewrite' | 'translate' | 'summary' | 'outline';
 
@@ -140,26 +147,68 @@ export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; 
   );
 }
 
-function VideoInsertModal({ onClose, onInsert }: { onClose: () => void; onInsert: (url: string) => void }) {
+function MediaInsertModal({ onClose, onInsertSyntax }: { onClose: () => void; onInsertSyntax: (markdown: string) => void }) {
+  const [step, setStep] = useState<'choose' | 'link'>('choose');
   const [url, setUrl] = useState('');
-  const supported = /^(https?:\/\/)?(?:www\.|m\.)?(?:youtube\.com|youtu\.be|bilibili\.com|b23\.tv|vimeo\.com)\//i.test(url.trim());
+  const [importing, setImporting] = useState(false);
+  const trimmed = url.trim();
+  const linkKind = mediaKindOfSource(trimmed);
+  const linkSupported = linkKind !== null || videoPlatformEmbed(trimmed) !== null;
+
+  const handleLocalFiles = async () => {
+    try {
+      const selected = await open({ multiple: true, filters: mediaDialogFilters('auto') });
+      if (!selected) return;
+      const paths = Array.isArray(selected) ? selected : [selected];
+      setImporting(true);
+      for (const path of paths) {
+        await insertMediaFromPath(path);
+      }
+      onClose();
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  const handleLinkInsert = () => {
+    onInsertSyntax(formatMediaEmbed({ kind: linkKind === 'audio' ? 'audio' : 'video', src: trimmed }));
+    onClose();
+  };
+
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content video-insert-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
-          <h2>插入视频</h2>
+          <h2>插入媒体</h2>
           <button className="modal-close" onClick={onClose} aria-label="关闭">×</button>
         </div>
-        <div className="modal-body link-form">
-          <div className="form-field">
-            <label>视频链接</label>
-            <input autoFocus type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="粘贴 B站、YouTube 或 Vimeo 视频链接" />
-            <small>支持 B站、YouTube、YouTube Shorts 与 Vimeo，预览中将显示响应式播放器。</small>
-          </div>
-          <div className="form-actions">
-            <button className="cancel-btn" onClick={onClose}>取消</button>
-            <button className="save-btn" disabled={!supported} onClick={() => { onInsert(url.trim()); onClose(); }}>插入视频</button>
-          </div>
+        <div className="modal-body">
+          {step === 'choose' ? (
+            <div className="image-options">
+              <button className="image-option-btn" disabled={importing} onClick={() => void handleLocalFiles()}>
+                <span className="option-icon"><ToolbarGlyph name="folder" /></span>
+                <span className="option-text">{importing ? '正在导入…' : '本地视频 / 音频'}</span>
+                <span className="option-desc">复制到文档同级的 .assets 目录，离线也能播放</span>
+              </button>
+              <button className="image-option-btn" disabled={importing} onClick={() => setStep('link')}>
+                <span className="option-icon"><ToolbarGlyph name="video" /></span>
+                <span className="option-text">在线媒体链接</span>
+                <span className="option-desc">支持 B站、YouTube、Vimeo，以及 mp4 / mp3 直链</span>
+              </button>
+            </div>
+          ) : (
+            <div className="link-form">
+              <div className="form-field">
+                <label>媒体链接</label>
+                <input autoFocus type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="粘贴 B站、YouTube、Vimeo 链接，或 mp4 / mp3 直链" />
+                <small>在线地址需要网络才能播放；离线素材请返回上一步选择本地文件。</small>
+              </div>
+              <div className="form-actions">
+                <button className="cancel-btn" onClick={() => setStep('choose')}>返回</button>
+                <button className="save-btn" disabled={!linkSupported} onClick={handleLinkInsert}>插入媒体</button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
     </div>
@@ -215,7 +264,7 @@ function MarkdownFormatModal({ result, onClose, onApply }: { result: MarkdownFor
 export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   const { editorView, setContent, content, settings } = useAppStore();
   const [showImageModal, setShowImageModal] = useState(false);
-  const [showVideoModal, setShowVideoModal] = useState(false);
+  const [showMediaModal, setShowMediaModal] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [showTablePicker, setShowTablePicker] = useState(false);
@@ -319,7 +368,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     setShowTablePicker(false);
   };
 
-  const insertVideo = (url: string) => insertAtCursor(`\n@[video](${url})\n`);
+  const insertMedia = (markdown: string) => insertAtCursor(`\n${markdown}\n`);
 
   const runEditorCommand = (command: 'undo' | 'redo') => {
     if (!editorView) return;
@@ -408,7 +457,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       buttons: [
         { icon: 'link', title: '链接', action: () => wrapSelection('[', '](url)') },
         { icon: 'image', title: '图片', action: () => setShowImageModal(true) },
-        { icon: 'video', title: '插入视频（B站 / YouTube / Vimeo）', action: () => setShowVideoModal(true) },
+        { icon: 'video', title: '插入媒体（本地视频 / 音频 / B站 / YouTube / Vimeo）', action: () => setShowMediaModal(true) },
         { label: '😊', title: '插入原生 Emoji', action: () => setShowEmojiPicker(true) },
         { icon: 'table', title: '表格', action: () => insertAtCursor('\n| 列1 | 列2 | 列3 |\n|---|---|---|\n| 内容 | 内容 | 内容 |\n') },
         { label: '</>', title: '代码块', action: () => insertAtCursor('\n```\ncode\n```\n', 5) },
@@ -593,7 +642,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
           onInsert={insertImage}
         />
       )}
-      {showVideoModal && <VideoInsertModal onClose={() => setShowVideoModal(false)} onInsert={insertVideo} />}
+      {showMediaModal && <MediaInsertModal onClose={() => setShowMediaModal(false)} onInsertSyntax={insertMedia} />}
       {showEmojiPicker && <EmojiPicker favorites={settings.editor.favorite_emojis} onClose={() => setShowEmojiPicker(false)} onInsert={insertAtCursor} />}
       {showFormatModal && (
         <MarkdownFormatModal

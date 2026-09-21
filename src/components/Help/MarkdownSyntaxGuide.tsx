@@ -29,7 +29,8 @@ const SYNTAX_ITEMS: SyntaxItem[] = [
 
   { id: 'link', group: '链接与媒体', title: '链接', summary: '方括号中写显示文字，紧跟的圆括号中写网址；网址后可加可选标题。', code: '[访问 GitHub](https://github.com "GitHub 首页")\n\n<https://github.com>', result: '第一行显示命名链接，第二行直接把网址变成可点击链接。' },
   { id: 'image', group: '链接与媒体', title: '图片', summary: '在链接语法前加 !。替代文字用于图片加载失败和无障碍阅读。', code: '![一张风景图片](https://example.com/photo.jpg "可选标题")', result: '显示图片；无法加载时显示“一张风景图片”。', tip: '也可点击工具栏“图片”，或直接把图片粘贴到编辑器。' },
-  { id: 'video', group: '链接与媒体', title: '在线视频', summary: '使用 Zeditor 的视频扩展语法插入 B站、YouTube 或 Vimeo 链接。', code: '@[video](https://www.youtube.com/watch?v=VIDEO_ID)', result: '预览中显示响应式视频播放器。', tip: '推荐点击工具栏“插入视频”，粘贴链接后自动生成语法。' },
+  { id: 'video', group: '链接与媒体', title: '视频', summary: '在线视频填写平台链接，本地视频填写相对路径，预览都会渲染成播放器。', code: '@[video](https://www.youtube.com/watch?v=VIDEO_ID)\n\n@[video](.assets/demo.mp4)\n\n@[video](.assets/demo.mp4){title="演示片段" poster=".assets/cover.jpg"}', result: '第一条是隐私增强的 YouTube 播放器，后两条是带进度、音量与全屏的本地视频播放器，第三条额外显示标题与封面。', tip: '推荐点击工具栏“插入媒体”：选择本地文件会复制到文档同级的 .assets 目录，素材不会随文档移动而失效。' },
+  { id: 'audio', group: '链接与媒体', title: '音频', summary: '音频使用 @[audio](...) 写法，支持本地文件与 mp3、wav 等直链。', code: '@[audio](.assets/podcast.mp3){title="第 1 期"}', result: '显示带播放、进度与音量控制的音频播放器，下方是说明文字。', tip: '图片语法中的媒体文件会被自动识别，例如 ![](demo.mp4) 同样渲染成播放器。' },
   { id: 'emoji', group: '链接与媒体', title: 'Emoji', summary: 'Emoji 可以像普通文字一样直接插入标题、段落和列表。', code: '## 今日进度 🚀\n\n- [x] 完成初稿 ✅\n- [ ] 发布文章 📣', result: '显示包含原生 Emoji 的标题和任务列表。' },
 
   { id: 'inline-code', group: '代码与数据', title: '行内代码', summary: '用一对反引号包住短命令、变量名或文件名。', code: '运行 `npm run build` 构建项目。', result: 'npm run build 会以等宽字体和代码背景显示。' },

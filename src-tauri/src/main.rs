@@ -212,6 +212,8 @@ fn main() {
             commands::delete_fs_item,
             commands::rename_fs_item,
             commands::copy_fs_item,
+            commands::import_media_asset,
+            commands::resolve_media_sources,
             commands::get_recent_folders,
             commands::update_recent_folder,
             commands::remove_recent_folder,

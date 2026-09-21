@@ -10,7 +10,8 @@ tauri-build = { version = "2", features = [] }
 
 [dependencies]
 # 不再强制启用 devtools：release 启动更轻量；debug 构建默认自带 devtools。
-tauri = { version = "2", features = [] }
+# protocol-asset 是 tauri.conf.json 中 assetProtocol 允许本地媒体播放的前提。
+tauri = { version = "2", features = ["protocol-asset"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
