@@ -5,8 +5,6 @@ export type SmartPairInput = {
   enabled: boolean;
 };
 
-export type SmartPairRequest = SmartPairInput;
-
 export type SmartPairDecision =
   | { kind: 'default' }
   | { kind: 'insert'; from: number; to: number; text: string; cursor: number }
@@ -14,7 +12,7 @@ export type SmartPairDecision =
   | { kind: 'move'; cursor: number }
   | { kind: 'delete'; from: number; to: number; cursor: number };
 
-const PAIRS: Readonly<Record<string, string>> = {
+const PAIRS: Readonly<Partial<Record<string, string>>> = {
   '(': ')',
   '[': ']',
   '{': '}',
@@ -32,6 +30,7 @@ const PAIRS: Readonly<Record<string, string>> = {
 };
 
 const MARKERS = new Set(['*', '_', '~']);
+const SMART_KEYS = new Set(['Tab', 'Backspace', ...Object.keys(PAIRS), ...MARKERS]);
 
 const defaultDecision = (): SmartPairDecision => ({ kind: 'default' });
 
@@ -40,13 +39,17 @@ function isInsideFencedCode(value: string, offset: number): boolean {
   let fence: { marker: string; length: number } | null = null;
 
   for (const line of beforeCursor.split(/\r?\n/)) {
-    const match = /^\s*(`{3,}|~{3,})/.exec(line);
+    const match = /^ {0,3}(`{3,}|~{3,})(.*)$/.exec(line);
     if (match === null) continue;
 
     const run = match[1];
     if (fence === null) {
       fence = { marker: run[0], length: run.length };
-    } else if (run[0] === fence.marker && run.length >= fence.length) {
+    } else if (
+      run[0] === fence.marker
+      && run.length >= fence.length
+      && /^[ \t]*$/.test(match[2])
+    ) {
       fence = null;
     }
   }
@@ -72,7 +75,7 @@ function isInsideInlineCode(value: string, offset: number): boolean {
     }
 
     if (length !== opening.length) continue;
-    if (opening.end < cursor && cursor <= start) return true;
+    if (opening.end < start && opening.end <= cursor && cursor <= start) return true;
     opening = null;
   }
 
@@ -83,20 +86,38 @@ function isInCode(value: string, offset: number): boolean {
   return isInsideFencedCode(value, offset) || isInsideInlineCode(value, offset);
 }
 
+function isEscaped(value: string, index: number): boolean {
+  let backslashes = 0;
+  for (let cursor = index - 1; cursor >= 0 && value[cursor] === '\\'; cursor -= 1) {
+    backslashes += 1;
+  }
+  return backslashes % 2 === 1;
+}
+
+function hasUnescapedLinkSuffix(
+  value: string,
+  lineStart: number,
+  end: number,
+  pattern: RegExp,
+): boolean {
+  const match = pattern.exec(value.slice(lineStart, end));
+  return match !== null && !isEscaped(value, lineStart + (match.index ?? 0));
+}
+
 function resolveTab(value: string, offset: number): SmartPairDecision | null {
   const lineStart = value.lastIndexOf('\n', Math.max(0, offset - 1)) + 1;
 
   if (
     value[offset] === ']'
     && value.slice(offset + 1, offset + 3) === '()'
-    && /\[[^\]\r\n]*\]\(\)$/.test(value.slice(lineStart, offset + 3))
+    && hasUnescapedLinkSuffix(value, lineStart, offset + 3, /\[[^\]\r\n]*\]\(\)$/)
   ) {
     return { kind: 'move', cursor: offset + 2 };
   }
 
   if (
     value[offset] === ')'
-    && /\[[^\]\r\n]*\]\([^\r\n)]*\)$/.test(value.slice(lineStart, offset + 1))
+    && hasUnescapedLinkSuffix(value, lineStart, offset + 1, /\[[^\]\r\n]*\]\([^\r\n)]*\)$/)
   ) {
     return { kind: 'move', cursor: offset + 1 };
   }
@@ -125,7 +146,14 @@ function resolveBackspace(value: string, offset: number): SmartPairDecision | nu
 }
 
 export function resolveSmartPair({ value, offset, key, enabled }: SmartPairInput): SmartPairDecision {
-  if (!enabled) return defaultDecision();
+  if (
+    !enabled
+    || !Number.isInteger(offset)
+    || offset < 0
+    || offset > value.length
+    || !SMART_KEYS.has(key)
+  ) return defaultDecision();
+
   if (isInCode(value, offset)) return defaultDecision();
 
   const isEmptyBacktickPair = value.slice(offset - 1, offset + 1) === '``'
