@@ -29,6 +29,18 @@ test('editor routes supported empty-selection keys through smart pair decisions'
   const smartPairsSource = await readFile(new URL('../src/utils/smartPairs.ts', import.meta.url), 'utf8');
 
   assert.match(editorSource, /import\s+\{\s*resolveSmartPair\s*\}\s+from\s+['"]\.\.\/\.\.\/utils\/smartPairs['"]/);
+  assert.match(editorSource, /autoClosingBrackets:\s*['"]never['"]/);
+  assert.match(editorSource, /autoClosingQuotes:\s*['"]never['"]/);
+  assert.match(editorSource, /autoClosingDelete:\s*['"]never['"]/);
+  assert.match(editorSource, /autoClosingOvertype:\s*['"]never['"]/);
+  assert.match(editorSource, /autoSurround:\s*['"]never['"]/);
+  assert.match(editorSource, /const\s+browserEvent\s*=\s*event\.browserEvent/);
+  assert.match(editorSource, /browserEvent\.ctrlKey/);
+  assert.match(editorSource, /browserEvent\.metaKey/);
+  assert.match(editorSource, /browserEvent\.altKey/);
+  assert.match(editorSource, /browserEvent\.isComposing/);
+  assert.match(editorSource, /browserEvent\.shiftKey\s*&&\s*key\s*===\s*['"]Tab['"]/);
+  assert.match(editorSource, /editor\.getSelections\(\)\?\.length\s*\?\?\s*0\)\s*>\s*1/);
   assert.match(editorSource, /const\s+selection\s*=\s*controller\.getSelection\(\)/);
   assert.match(editorSource, /if\s*\(\s*!selection\.empty\s*\)\s*return/);
   assert.match(editorSource, /resolveSmartPair\(\s*\{[\s\S]*?value:\s*model\.getValue\(\)[\s\S]*?offset:\s*selection\.to[\s\S]*?key:\s*event\.browserEvent\.key[\s\S]*?enabled:\s*Boolean\(useAppStore\.getState\(\)\.settings\.editor\.smart_pairs\s*\?\?\s*true\)[\s\S]*?\}\s*\)/);
@@ -38,4 +50,10 @@ test('editor routes supported empty-selection keys through smart pair decisions'
   assert.doesNotMatch(editorSource, /decision\.from\s*\+\s*decision\.cursor/);
   assert.match(editorSource, /controller\.setSelection\(decision\.cursor\)/);
   assert.match(editorSource, /controller\.replaceRange\(decision\.from,\s*decision\.to,\s*['"]{2},\s*\{\s*from:\s*decision\.cursor,\s*to:\s*decision\.cursor,?\s*\}\s*\)/);
+
+  const slashMenuGuard = editorSource.indexOf('if (menu) {');
+  const browserGuard = editorSource.indexOf('browserEvent.ctrlKey');
+  const smartPairDecision = editorSource.indexOf('const decision = resolveSmartPair');
+  assert.ok(slashMenuGuard >= 0 && slashMenuGuard < browserGuard);
+  assert.ok(browserGuard >= 0 && browserGuard < smartPairDecision);
 });

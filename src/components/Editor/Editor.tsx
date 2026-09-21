@@ -424,6 +424,11 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       padding: { top: 24, bottom: 40 },
       quickSuggestions: false,
       suggestOnTriggerCharacters: false,
+      autoClosingBrackets: 'never',
+      autoClosingQuotes: 'never',
+      autoClosingDelete: 'never',
+      autoClosingOvertype: 'never',
+      autoSurround: 'never',
       accessibilitySupport: 'off',
       // 默认使用原生 EditContext，让 Monaco 直接维护组合范围与字符边界；
       // 传统 textarea 仅作为旧版 WebView 的兼容回退。
@@ -599,7 +604,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     });
     const slashKeyDisposable = editor.onKeyDown((event) => {
       const menu = slashMenuRef.current;
-      const key = event.browserEvent.key;
+      const browserEvent = event.browserEvent;
+      const key = browserEvent.key;
 
       if (menu) {
         const commands = filterSlashCommands(menu.query);
@@ -635,6 +641,15 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           return;
         }
       }
+
+      if (
+        browserEvent.ctrlKey
+        || browserEvent.metaKey
+        || browserEvent.altKey
+        || browserEvent.isComposing
+        || (browserEvent.shiftKey && key === 'Tab')
+        || (editor.getSelections()?.length ?? 0) > 1
+      ) return;
 
       const selection = controller.getSelection();
       if (!selection.empty) return;
