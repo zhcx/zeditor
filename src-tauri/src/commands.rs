@@ -158,11 +158,17 @@ fn default_favorite_emojis() -> Vec<String> {
         .collect()
 }
 
+fn default_smart_pairs() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSettings {
     pub auto_save_interval: u32,
     pub spell_check: bool,
     pub auto_complete: bool,
+    #[serde(default = "default_smart_pairs")]
+    pub smart_pairs: bool,
     #[serde(default = "default_favorite_emojis")]
     pub favorite_emojis: Vec<String>,
     #[serde(default)]
@@ -265,6 +271,7 @@ impl Default for Settings {
                 auto_save_interval: 30000,
                 spell_check: false,
                 auto_complete: true,
+                smart_pairs: true,
                 favorite_emojis: default_favorite_emojis(),
                 input_engine: EditorInputEngine::default(),
                 pin_toolbar: false,

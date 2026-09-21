@@ -18,6 +18,7 @@ import { normalizeLanguage, t } from '../../i18n';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste';
+import { resolveSmartPair } from '../../utils/smartPairs';
 
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -423,6 +424,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       padding: { top: 24, bottom: 40 },
       quickSuggestions: false,
       suggestOnTriggerCharacters: false,
+      autoClosingBrackets: 'never',
+      autoClosingQuotes: 'never',
+      autoClosingComments: 'never',
+      autoClosingDelete: 'never',
+      autoClosingOvertype: 'never',
+      autoSurround: 'never',
       accessibilitySupport: 'off',
       // 默认使用原生 EditContext，让 Monaco 直接维护组合范围与字符边界；
       // 传统 textarea 仅作为旧版 WebView 的兼容回退。
@@ -598,40 +605,80 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     });
     const slashKeyDisposable = editor.onKeyDown((event) => {
       const menu = slashMenuRef.current;
-      if (!menu) return;
+      const browserEvent = event.browserEvent;
+      const key = browserEvent.key;
 
-      const commands = filterSlashCommands(menu.query);
-      const key = event.browserEvent.key;
-      if (key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
-        slashMenuRef.current = null;
-        setSlashMenu(null);
-        return;
+      if (menu) {
+        const commands = filterSlashCommands(menu.query);
+        if (key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          slashMenuRef.current = null;
+          setSlashMenu(null);
+          return;
+        }
+        if (key === 'ArrowDown' || key === 'ArrowUp') {
+          event.preventDefault();
+          event.stopPropagation();
+          if (commands.length === 0) return;
+          const direction = key === 'ArrowDown' ? 1 : -1;
+          const next = (slashSelectedIndexRef.current + direction + commands.length) % commands.length;
+          slashSelectedIndexRef.current = next;
+          setSlashSelectedIndex(next);
+          return;
+        }
+        if ((key === 'Enter' || key === 'Tab') && commands.length > 0) {
+          event.preventDefault();
+          event.stopPropagation();
+          const command = commands[Math.min(slashSelectedIndexRef.current, commands.length - 1)];
+          const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
+          slashMenuRef.current = null;
+          setSlashMenu(null);
+          controller.replaceRange(menu.from, menu.to, text, {
+            from: menu.from + selectionStart,
+            to: menu.from + selectionEnd,
+          });
+          controller.focus();
+          return;
+        }
       }
-      if (key === 'ArrowDown' || key === 'ArrowUp') {
-        event.preventDefault();
-        event.stopPropagation();
-        if (commands.length === 0) return;
-        const direction = key === 'ArrowDown' ? 1 : -1;
-        const next = (slashSelectedIndexRef.current + direction + commands.length) % commands.length;
-        slashSelectedIndexRef.current = next;
-        setSlashSelectedIndex(next);
-        return;
-      }
-      if ((key === 'Enter' || key === 'Tab') && commands.length > 0) {
-        event.preventDefault();
-        event.stopPropagation();
-        const command = commands[Math.min(slashSelectedIndexRef.current, commands.length - 1)];
-        const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
-        slashMenuRef.current = null;
-        setSlashMenu(null);
-        controller.replaceRange(menu.from, menu.to, text, {
-          from: menu.from + selectionStart,
-          to: menu.from + selectionEnd,
+
+      if (
+        browserEvent.ctrlKey
+        || browserEvent.metaKey
+        || browserEvent.altKey
+        || browserEvent.isComposing
+        || (browserEvent.shiftKey && key === 'Tab')
+        || (editor.getSelections()?.length ?? 0) > 1
+      ) return;
+
+      const selection = controller.getSelection();
+      if (!selection.empty) return;
+
+      const decision = resolveSmartPair({
+        value: model.getValue(),
+        offset: selection.to,
+        key: event.browserEvent.key,
+        enabled: Boolean(useAppStore.getState().settings.editor.smart_pairs ?? true),
+      });
+      if (decision.kind === 'default') return;
+
+      event.preventDefault();
+      event.stopPropagation();
+      if (decision.kind === 'insert' || decision.kind === 'replace') {
+        controller.replaceRange(decision.from, decision.to, decision.text, {
+          from: decision.cursor,
+          to: decision.cursor,
         });
-        controller.focus();
+      } else if (decision.kind === 'move') {
+        controller.setSelection(decision.cursor);
+      } else if (decision.kind === 'delete') {
+        controller.replaceRange(decision.from, decision.to, '', {
+          from: decision.cursor,
+          to: decision.cursor,
+        });
       }
+      controller.focus();
     });
 
     const handleTheme = (event: Event) => {

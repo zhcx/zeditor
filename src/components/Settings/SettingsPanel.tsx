@@ -513,6 +513,15 @@ export function SettingsPanel() {
                 })}
               />
               <SettingToggle
+                label="启用自动配对与 Tab 跳出"
+                description="输入括号、引号和 Markdown 格式标记时自动补全；在代码区域中自动停用"
+                checked={Boolean(localSettings.editor.smart_pairs)}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  editor: { ...localSettings.editor, smart_pairs: checked },
+                })}
+              />
+              <SettingToggle
                 label="固定显示编辑快捷栏"
                 description="关闭后，选中文本时会在选区附近显示快捷编辑栏；输入 / 可打开完整命令菜单"
                 checked={Boolean(localSettings.editor.pin_toolbar)}

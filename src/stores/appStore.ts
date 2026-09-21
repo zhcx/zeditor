@@ -44,6 +44,7 @@ export interface Settings {
     auto_save_interval: number;
     spell_check: boolean;
     auto_complete: boolean;
+    smart_pairs?: boolean;
     /** Keep the command bar visible above the editor instead of selection-only. */
     pin_toolbar?: boolean;
     favorite_emojis: string[];
@@ -301,6 +302,7 @@ const defaultSettings: Settings = {
     auto_save_interval: 30000,
     spell_check: false,
     auto_complete: true,
+    smart_pairs: true,
     pin_toolbar: false,
     favorite_emojis: ['😀', '👍', '❤️', '🎉', '✅', '⚠️', '💡', '🚀'],
     input_engine: 'editContext',
