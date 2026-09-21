@@ -74,6 +74,13 @@ test('does not intercept Tab or Backspace in fenced and non-empty inline code', 
   assert.deepEqual(decide('`()`', 2, 'Backspace'), { kind: 'default' });
 });
 
+test('does not treat two backticks inside code as an empty auto-created pair', () => {
+  for (const key of ['Tab', 'Backspace']) {
+    assert.deepEqual(decide('```\n``\n```', 5, key), { kind: 'default' });
+    assert.deepEqual(decide('`a``b`', 3, key), { kind: 'default' });
+  }
+});
+
 test('matches inline code delimiters by backtick run length', () => {
   assert.deepEqual(decide('``code``', 6, '('), { kind: 'default' });
   assert.deepEqual(decide('``()``', 3, 'Backspace'), { kind: 'default' });

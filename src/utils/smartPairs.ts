@@ -126,6 +126,7 @@ function resolveBackspace(value: string, offset: number): SmartPairDecision | nu
 
 export function resolveSmartPair({ value, offset, key, enabled }: SmartPairInput): SmartPairDecision {
   if (!enabled) return defaultDecision();
+  if (isInCode(value, offset)) return defaultDecision();
 
   const isEmptyBacktickPair = value.slice(offset - 1, offset + 1) === '``'
     && value[offset - 2] !== '`'
@@ -137,7 +138,6 @@ export function resolveSmartPair({ value, offset, key, enabled }: SmartPairInput
     }
   }
 
-  if (isInCode(value, offset)) return defaultDecision();
   if (key === 'Tab') return resolveTab(value, offset) ?? defaultDecision();
   if (key === 'Backspace') return resolveBackspace(value, offset) ?? defaultDecision();
 
