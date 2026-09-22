@@ -15,8 +15,10 @@ test('editor wires table parsing, navigation, floating toolbar and shortcuts', a
   assert.match(editor, /applyTableEdit\(insertRow\(model\.getValue\(\), selection\.to, 'below'\)\)/);
   assert.match(editor, /<TableToolbar/);
   assert.match(editor, /refreshTableToolbar\(\);/);
-  // 快捷键与菜单入口
-  assert.match(editor, /insertTableAtCursor\(3, 3\)/);
+  // 快捷键、菜单与斜杠命令三个入口都用同一套 3 × 3 默认表格
+  assert.match(editor, /command\.id === 'table'/);
+  assert.match(editor, /slashCommandRunRef\.current\(command\)/);
+  assert.ok((editor.match(/insertTableAtCursor\(3, 3\)/g) ?? []).length >= 2, '表格插入入口应复用同一模板');
   assert.match(editor, /window\.addEventListener\('zeditor-table-action', handleTableActionRequest\)/);
   assert.match(editor, /window\.addEventListener\('zeditor-insert-table', handleInsertTableRequest\)/);
   assert.match(editor, /setShowContextImageModal\(true\)/);

@@ -57,6 +57,19 @@ test('diagram commands preselect their placeholder text', () => {
   }
 });
 
+test('table command defaults to a 3 × 3 table with the header cell selected', () => {
+  const command = SLASH_COMMANDS.find((item) => item.id === 'table');
+  assert.ok(command);
+  assert.equal(command.description, '插入 3 × 3 表格');
+
+  const { text, selectionStart, selectionEnd } = command.insertion;
+  const rows = text.split('\n');
+  assert.equal(rows.length, 3 + 1, '表头 + 分隔行 + 两行正文');
+  rows.forEach((row) => assert.equal(row.split('|').length - 2, 3, row));
+  assert.match(rows[1], /^\|\s*---\s*\|\s*---\s*\|\s*---\s*\|$/);
+  assert.equal(text.slice(selectionStart, selectionEnd), '列 1');
+});
+
 test('slide separator command inserts a horizontal rule', () => {
   const command = SLASH_COMMANDS.find((item) => item.id === 'slide');
   assert.ok(command);

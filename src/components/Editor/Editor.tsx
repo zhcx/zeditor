@@ -249,6 +249,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const [tableToolbar, setTableToolbar] = useState<TableToolbarState | null>(null);
   // 表格动作需要访问 Monaco 控制器，用 ref 把闭包里的实现暴露给渲染层与菜单事件。
   const tableActionRef = useRef<(action: TableAction) => void>(() => {});
+  // 斜杠命令的实际插入同样在编辑器实例里执行：表格命令复用统一的 3 × 3 模板。
+  const slashCommandRunRef = useRef<(command: SlashCommand) => void>(() => {});
   const { content, currentFile, activeTabId, tabs, updateTabContent, settings, setEditorView } = useAppStore();
   const { proofreadResults, rewriteSelection, translateText, setTranslationVisible, setStatus } = useAIStore();
   const slashCommands = useMemo(() => filterSlashCommands(slashMenu?.query || ''), [slashMenu?.query]);
@@ -398,18 +400,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   }, []);
 
   const applySlashCommand = useCallback((command: SlashCommand) => {
-    const menu = slashMenuRef.current;
-    const controller = controllerRef.current;
-    if (!menu || !controller) return;
-
-    const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
-    slashMenuRef.current = null;
-    setSlashMenu(null);
-    controller.replaceRange(menu.from, menu.to, text, {
-      from: menu.from + selectionStart,
-      to: menu.from + selectionEnd,
-    });
-    controller.focus();
+    slashCommandRunRef.current(command);
   }, []);
 
   useEffect(() => {
@@ -496,6 +487,27 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       });
       controller.focus();
     };
+
+    const runSlashCommand = (command: SlashCommand) => {
+      const menu = slashMenuRef.current;
+      if (!menu) return;
+      slashMenuRef.current = null;
+      setSlashMenu(null);
+      // 表格命令先删掉触发的 `/table`，再插入统一的 3 × 3 模板，
+      // 与工具栏网格、功能菜单的默认表格完全一致。
+      if (command.id === 'table') {
+        controller.replaceRange(menu.from, menu.to, '', { from: menu.from, to: menu.from });
+        insertTableAtCursor(3, 3);
+        return;
+      }
+      const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
+      controller.replaceRange(menu.from, menu.to, text, {
+        from: menu.from + selectionStart,
+        to: menu.from + selectionEnd,
+      });
+      controller.focus();
+    };
+    slashCommandRunRef.current = runSlashCommand;
 
     const refreshTableToolbar = () => {
       const selection = controller.getSelection();
@@ -711,15 +723,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         if ((key === 'Enter' || key === 'Tab') && commands.length > 0) {
           event.preventDefault();
           event.stopPropagation();
-          const command = commands[Math.min(slashSelectedIndexRef.current, commands.length - 1)];
-          const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
-          slashMenuRef.current = null;
-          setSlashMenu(null);
-          controller.replaceRange(menu.from, menu.to, text, {
-            from: menu.from + selectionStart,
-            to: menu.from + selectionEnd,
-          });
-          controller.focus();
+          runSlashCommand(commands[Math.min(slashSelectedIndexRef.current, commands.length - 1)]);
           return;
         }
       }
@@ -909,6 +913,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       window.removeEventListener('zeditor-insert-table', handleInsertTableRequest);
       window.removeEventListener('zeditor-insert-image', handleInsertImageRequest);
       tableActionRef.current = () => {};
+      slashCommandRunRef.current = () => {};
       contentDisposable.dispose();
       cursorDisposable.dispose();
       mouseDisposable.dispose();

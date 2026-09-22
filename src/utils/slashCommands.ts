@@ -57,7 +57,8 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: 'ordered-list', title: '有序列表', description: '编号列表', shortcut: '/ol', icon: '1.', keywords: 'ol numbered list 有序 编号 列表', insertion: insertion('1. ') },
   { id: 'task-list', title: '任务列表', description: '插入待办事项', shortcut: '/todo', icon: '☐', keywords: 'todo task checkbox 任务 待办 清单', insertion: insertion('- [ ] ') },
   { id: 'code', title: '代码块', description: '插入多行代码', shortcut: '/code', icon: '</>', keywords: 'code fence 代码 代码块', insertion: insertion('```\n\n```', 4) },
-  { id: 'table', title: '表格', description: '插入 3 × 2 表格', shortcut: '/table', icon: '▦', keywords: 'table grid 表格', insertion: insertion('| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |', 2, 5) },
+  // 默认 3 × 3（表头 + 两行正文），与工具栏网格和功能菜单的默认表格一致。
+  { id: 'table', title: '表格', description: '插入 3 × 3 表格', shortcut: '/table', icon: '▦', keywords: 'table grid 3x3 表格', insertion: insertion('| 列 1 | 列 2 | 列 3 |\n| --- | --- | --- |\n|  |  |  |\n|  |  |  |', 2, 5) },
   { id: 'image', title: '图片', description: '插入图片链接', shortcut: '/image', icon: '▧', keywords: 'image photo picture 图片 图像', insertion: insertion('![图片描述](https://)', 2, 6) },
   { id: 'video', title: '视频', description: '插入视频链接', shortcut: '/video', icon: '▶', keywords: 'video bilibili youtube vimeo 视频 影片', insertion: insertion('@[video](https://)', 9, 16) },
   { id: 'audio', title: '音频', description: '插入音频播放器', shortcut: '/audio', icon: '♪', keywords: 'audio music sound mp3 音频 音乐 声音 播客', insertion: insertion('@[audio](https://)', 9, 16) },
