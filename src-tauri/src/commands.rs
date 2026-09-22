@@ -1018,6 +1018,14 @@ const MEDIA_EXTENSIONS: [&str; 18] = [
 /// 单个媒体文件的大小上限：再大的素材应通过外链引用。
 const MAX_MEDIA_BYTES: u64 = 512 * 1024 * 1024;
 
+/// 允许写入 `.assets` 的图片扩展名，与前端 `IMAGE_FILE_EXTENSIONS` 保持一致。
+const IMAGE_EXTENSIONS: [&str; 12] = [
+    "png", "jpg", "jpeg", "gif", "webp", "bmp", "svg", "avif", "ico", "tif", "tiff", "heic",
+];
+
+/// 单张图片的大小上限：再大的素材应通过外链引用。
+const MAX_IMAGE_BYTES: u64 = 64 * 1024 * 1024;
+
 /// 媒体导入结果：绝对路径用于播放，相对路径写入 Markdown。
 #[derive(Debug, Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -1032,6 +1040,13 @@ fn is_media_extension(path: &Path) -> bool {
     path.extension()
         .and_then(|value| value.to_str())
         .map(|value| MEDIA_EXTENSIONS.contains(&value.to_ascii_lowercase().as_str()))
+        .unwrap_or(false)
+}
+
+fn is_image_extension(path: &Path) -> bool {
+    path.extension()
+        .and_then(|value| value.to_str())
+        .map(|value| IMAGE_EXTENSIONS.contains(&value.to_ascii_lowercase().as_str()))
         .unwrap_or(false)
 }
 
@@ -1074,6 +1089,61 @@ fn document_dir_of(document_path: &str) -> Option<PathBuf> {
         .map(|parent| parent.to_path_buf())
 }
 
+/// 解析 `.assets` 目标目录：只允许文档同级下的单个目录名，避免 `..` 或绝对路径越权写入。
+fn assets_target_dir(
+    document_path: &str,
+    assets_dir: Option<String>,
+    label: &str,
+) -> Result<(PathBuf, String), String> {
+    let document_dir = document_dir_of(document_path)
+        .ok_or_else(|| format!("请先保存文档，{label}文件将复制到文档同级的 .assets 目录"))?;
+    let folder = assets_dir.unwrap_or_else(|| ".assets".to_string());
+    let folder = folder.trim().to_string();
+    let folder = if folder.is_empty() {
+        ".assets".to_string()
+    } else {
+        folder
+    };
+    if folder.contains("..") || Path::new(&folder).is_absolute() {
+        return Err(format!("{label}资源目录名称不合法"));
+    }
+    Ok((document_dir.join(&folder), folder))
+}
+
+/// 在目标目录里挑一个不冲突的文件名；同名同大小视为同一素材直接复用，避免重复导入产生副本。
+async fn reserve_asset_name(
+    target_dir: &Path,
+    safe_name: &str,
+    source_len: u64,
+    label: &str,
+) -> Result<String, String> {
+    let (stem, extension) = match safe_name.rfind('.') {
+        Some(index) if index > 0 => (
+            safe_name[..index].to_string(),
+            safe_name[index..].to_string(),
+        ),
+        _ => (safe_name.to_string(), String::new()),
+    };
+
+    let mut candidate = safe_name.to_string();
+    let mut counter = 1u32;
+    loop {
+        let target = target_dir.join(&candidate);
+        match tokio::fs::metadata(&target).await {
+            Ok(existing) if existing.is_file() && existing.len() == source_len => break,
+            Ok(_) => {
+                candidate = format!("{stem}-{counter}{extension}");
+                counter += 1;
+                if counter > 999 {
+                    return Err(format!("同名{label}文件过多，请重命名后再导入"));
+                }
+            }
+            Err(_) => break,
+        }
+    }
+    Ok(candidate)
+}
+
 /// 把外部媒体文件复制到文档同级的 `.assets` 目录，返回可直接引用的相对路径。
 #[tauri::command]
 pub async fn import_media_asset(
@@ -1095,47 +1165,14 @@ pub async fn import_media_asset(
         return Err("媒体文件超过 512MB，请改用外链引用".to_string());
     }
 
-    let document_dir = document_dir_of(&document_path)
-        .ok_or_else(|| "请先保存文档，媒体文件将复制到文档同级的 .assets 目录".to_string())?;
-    let folder = assets_dir.unwrap_or_else(|| ".assets".to_string());
-    let folder = folder.trim();
-    let folder = if folder.is_empty() { ".assets" } else { folder };
-    // 只允许文档同级下的单个目录名，避免 `..` 或绝对路径越权写入。
-    if folder.contains("..") || Path::new(folder).is_absolute() {
-        return Err("媒体资源目录名称不合法".to_string());
-    }
-    let target_dir = document_dir.join(folder);
+    let (target_dir, folder) = assets_target_dir(&document_path, assets_dir, "媒体")?;
 
     let original_name = source
         .file_name()
         .map(|name| name.to_string_lossy().to_string())
         .unwrap_or_default();
     let safe_name = sanitize_media_file_name(&original_name);
-    let (stem, extension) = match safe_name.rfind('.') {
-        Some(index) if index > 0 => (
-            safe_name[..index].to_string(),
-            safe_name[index..].to_string(),
-        ),
-        _ => (safe_name.clone(), String::new()),
-    };
-
-    let mut candidate = safe_name.clone();
-    let mut counter = 1u32;
-    loop {
-        let target = target_dir.join(&candidate);
-        match tokio::fs::metadata(&target).await {
-            // 同名同大小视为同一素材，直接复用，避免重复拖入产生副本。
-            Ok(existing) if existing.is_file() && existing.len() == source_meta.len() => break,
-            Ok(_) => {
-                candidate = format!("{stem}-{counter}{extension}");
-                counter += 1;
-                if counter > 999 {
-                    return Err("同名媒体文件过多，请重命名后再导入".to_string());
-                }
-            }
-            Err(_) => break,
-        }
-    }
+    let candidate = reserve_asset_name(&target_dir, &safe_name, source_meta.len(), "媒体").await?;
 
     tokio::fs::create_dir_all(&target_dir)
         .await
@@ -1196,6 +1233,105 @@ pub async fn resolve_media_sources(
     }
 
     Ok(resolved)
+}
+
+/// 把外部图片复制到文档同级的 `.assets` 目录，返回可直接引用的相对路径。
+#[tauri::command]
+pub async fn import_image_asset(
+    source_path: String,
+    document_path: String,
+    assets_dir: Option<String>,
+) -> Result<MediaAssetImport, String> {
+    let source = PathBuf::from(&source_path);
+    if !is_image_extension(&source) {
+        return Err("仅支持导入图片文件".to_string());
+    }
+    let source_meta = tokio::fs::metadata(&source)
+        .await
+        .map_err(|e| format!("无法读取图片文件：{e}"))?;
+    if !source_meta.is_file() {
+        return Err("图片源不是一个文件".to_string());
+    }
+    if source_meta.len() > MAX_IMAGE_BYTES {
+        return Err("图片文件超过 64MB，请改用外链引用".to_string());
+    }
+
+    let (target_dir, folder) = assets_target_dir(&document_path, assets_dir, "图片")?;
+    let original_name = source
+        .file_name()
+        .map(|name| name.to_string_lossy().to_string())
+        .unwrap_or_default();
+    let safe_name = sanitize_media_file_name(&original_name);
+    let candidate = reserve_asset_name(&target_dir, &safe_name, source_meta.len(), "图片").await?;
+
+    tokio::fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| format!("创建图片资源目录失败：{e}"))?;
+    let target_path = target_dir.join(&candidate);
+    let same_file = tokio::fs::canonicalize(&source)
+        .await
+        .ok()
+        .zip(tokio::fs::canonicalize(&target_path).await.ok())
+        .map(|(left, right)| left == right)
+        .unwrap_or(false);
+    if !same_file {
+        tokio::fs::copy(&source, &target_path)
+            .await
+            .map_err(|e| format!("复制图片文件失败：{e}"))?;
+    }
+
+    Ok(MediaAssetImport {
+        file_name: candidate.clone(),
+        absolute_path: path_without_verbatim_prefix(&target_path),
+        relative_path: format!("{folder}/{candidate}"),
+        size: source_meta.len(),
+    })
+}
+
+/// 把剪贴板图片数据直接写进文档同级的 `.assets` 目录，不经过临时文件。
+#[tauri::command]
+pub async fn import_image_bytes(
+    data_base64: String,
+    extension: String,
+    document_path: String,
+    assets_dir: Option<String>,
+) -> Result<MediaAssetImport, String> {
+    let extension = extension
+        .trim()
+        .trim_start_matches('.')
+        .to_ascii_lowercase();
+    if !IMAGE_EXTENSIONS.contains(&extension.as_str()) {
+        return Err("不支持的图片格式".to_string());
+    }
+    if data_base64.len() as u64 > MAX_IMAGE_BYTES * 4 / 3 + 4 {
+        return Err("图片超过 64MB，请改用外链引用".to_string());
+    }
+    let bytes = general_purpose::STANDARD
+        .decode(data_base64.trim())
+        .map_err(|error| format!("图片数据解析失败：{error}"))?;
+    if bytes.len() as u64 > MAX_IMAGE_BYTES {
+        return Err("图片超过 64MB，请改用外链引用".to_string());
+    }
+
+    let (target_dir, folder) = assets_target_dir(&document_path, assets_dir, "图片")?;
+    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S");
+    let safe_name = sanitize_media_file_name(&format!("粘贴图片-{timestamp}.{extension}"));
+    let candidate = reserve_asset_name(&target_dir, &safe_name, bytes.len() as u64, "图片").await?;
+
+    tokio::fs::create_dir_all(&target_dir)
+        .await
+        .map_err(|e| format!("创建图片资源目录失败：{e}"))?;
+    let target_path = target_dir.join(&candidate);
+    tokio::fs::write(&target_path, &bytes)
+        .await
+        .map_err(|e| format!("写入图片文件失败：{e}"))?;
+
+    Ok(MediaAssetImport {
+        file_name: candidate.clone(),
+        absolute_path: path_without_verbatim_prefix(&target_path),
+        relative_path: format!("{folder}/{candidate}"),
+        size: bytes.len() as u64,
+    })
 }
 
 #[tauri::command]

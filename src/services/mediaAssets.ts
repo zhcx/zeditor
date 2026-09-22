@@ -27,6 +27,12 @@ export function clearResolvedMediaCache(): void {
   resolvedMediaCache.clear();
 }
 
+/** 同一路径被重新导入或换名后，让预览重新解析，避免继续使用旧结论。 */
+export function invalidateResolvedSource(documentPath: string | null, source: string): void {
+  if (!documentPath) return;
+  resolvedMediaCache.delete(cacheKey(documentPath, source));
+}
+
 /** 绝对路径 → WebView 可播放的 asset 协议地址。 */
 export function toPlayableMediaUrl(absolutePath: string): string {
   return convertFileSrc(absolutePath, 'asset');

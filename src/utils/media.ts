@@ -170,17 +170,25 @@ function unescapeAttributeValue(value: string): string {
   return value.replace(/\\(["\\])/g, '$1');
 }
 
-export function parseMediaAttributes(raw: string | undefined): { title?: string; poster?: string } {
+/** 解析 `{key="value"}` 形式的属性集合，供媒体指令与图片尺寸复用。 */
+export function parseAttributePairs(raw: string | undefined): Record<string, string> {
   if (!raw) return {};
-  const result: { title?: string; poster?: string } = {};
+  const result: Record<string, string> = {};
   for (const match of raw.matchAll(ATTRIBUTE_PATTERN)) {
     const key = match[1].toLowerCase();
     const value = unescapeAttributeValue(match[3] ?? match[4] ?? match[5] ?? '');
     if (!value) continue;
-    if (key === 'title') result.title = value;
-    if (key === 'poster') result.poster = value;
+    result[key] = value;
   }
   return result;
+}
+
+export function parseMediaAttributes(raw: string | undefined): { title?: string; poster?: string } {
+  const pairs = parseAttributePairs(raw);
+  return {
+    ...(pairs.title ? { title: pairs.title } : {}),
+    ...(pairs.poster ? { poster: pairs.poster } : {}),
+  };
 }
 
 export function formatMediaEmbed(spec: MediaEmbedSpec): string {

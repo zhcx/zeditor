@@ -36,6 +36,8 @@ import { resolveSaveBaseName } from './utils/saveName';
 import { findActiveSourceElement } from './utils/activeSourceLine';
 import { isMediaFilePath } from './utils/media';
 import { insertMediaFromPath } from './services/mediaAssets';
+import { insertImageFromPath } from './services/imageAssets';
+import { isImageFilePath } from './utils/imageSyntax';
 import './styles/main.css';
 import './styles/workbench.css';
 import { contentFontStack } from './utils/appearanceSettings';
@@ -466,6 +468,11 @@ function App() {
         // 而不是当作文档打开。
         if (isMediaFilePath(path)) {
           await insertMediaFromPath(path);
+          continue;
+        }
+        // 图片同样按素材处理：复制到 .assets 后插入图片语法。
+        if (isImageFilePath(path)) {
+          await insertImageFromPath(path);
           continue;
         }
         try {

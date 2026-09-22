@@ -13,6 +13,9 @@ import {
   videoPlatformEmbed,
 } from '../../utils/media';
 import { insertMediaFromPath } from '../../services/mediaAssets';
+import { insertImageFromPath } from '../../services/imageAssets';
+import { imageDialogFilters } from '../../utils/imageSyntax';
+import { insertTable as buildTableInsert } from '../../utils/markdownTable';
 
 type ToolbarIconName = 'link' | 'image' | 'video' | 'table' | 'folder' | 'chat' | 'proofread' | 'sparkle' | 'palette' | 'rewrite' | 'translate' | 'summary' | 'outline';
 
@@ -49,7 +52,7 @@ function ToolbarGlyph({ name }: { name: ToolbarIconName }) {
 }
 
 export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; onInsert: (url: string, alt?: string) => void }) {
-  const [mode, setMode] = useState<'link' | 'upload' | null>(null);
+  const [mode, setMode] = useState<'link' | 'upload' | 'local' | null>(null);
   const [imageUrl, setImageUrl] = useState('');
   const [altText, setAltText] = useState('');
   const { setUploadStatus, settings, setSettingsOpen, setSettingsTab } = useAppStore();
@@ -87,6 +90,19 @@ export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; 
     }
   };
 
+  const handleLocalImage = async () => {
+    try {
+      const selected = await open({ multiple: false, filters: imageDialogFilters() });
+      if (!selected) return;
+      setMode('local');
+      // 复制到文档同级的 .assets 目录，文档移动后素材不会失效，也不依赖图床配置。
+      await insertImageFromPath(selected, altText.trim() || undefined);
+      onClose();
+    } catch (error) {
+      setUploadStatus('error', 0, String(error));
+    }
+  };
+
   const handleLinkInsert = () => {
     if (imageUrl.trim()) {
       onInsert(imageUrl.trim(), altText.trim() || '图片');
@@ -104,6 +120,11 @@ export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; 
         <div className="modal-body">
           {!mode ? (
             <div className="image-options">
+              <button className="image-option-btn" onClick={() => void handleLocalImage()}>
+                <span className="option-icon"><ToolbarGlyph name="image" /></span>
+                <span className="option-text">本地图片（推荐）</span>
+                <span className="option-desc">复制到文档同级的 .assets 目录，离线可看</span>
+              </button>
               <button className="image-option-btn" onClick={() => setMode('link')}>
                 <span className="option-icon"><ToolbarGlyph name="link" /></span>
                 <span className="option-text">输入图片链接</span>
@@ -139,6 +160,10 @@ export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; 
                 <button className="cancel-btn" onClick={() => setMode(null)}>返回</button>
                 <button className="save-btn" onClick={handleLinkInsert} disabled={!imageUrl.trim()}>插入</button>
               </div>
+            </div>
+          ) : mode === 'local' ? (
+            <div className="link-form">
+              <p className="image-local-hint">正在把图片复制到文档同级的 .assets 目录…</p>
             </div>
           ) : null}
         </div>
@@ -361,10 +386,9 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   };
 
   const insertTable = (rows: number, columns: number) => {
-    const header = `| ${Array.from({ length: columns }, (_, index) => `列${index + 1}`).join(' | ')} |`;
-    const divider = `| ${Array.from({ length: columns }, () => '---').join(' | ')} |`;
-    const body = Array.from({ length: Math.max(1, rows - 1) }, () => `| ${Array.from({ length: columns }, () => '内容').join(' | ')} |`).join('\n');
-    insertAtCursor(`\n${header}\n${divider}\n${body}\n`);
+    // 与斜杠命令、菜单入口共用同一份表格模板，光标落在表头第一个单元格。
+    const { text, cursor } = buildTableInsert(rows, columns);
+    insertAtCursor(`\n${text}\n`, cursor + 1);
     setShowTablePicker(false);
   };
 
@@ -459,7 +483,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
         { icon: 'image', title: '图片', action: () => setShowImageModal(true) },
         { icon: 'video', title: '插入媒体（本地视频 / 音频 / B站 / YouTube / Vimeo）', action: () => setShowMediaModal(true) },
         { label: '😊', title: '插入原生 Emoji', action: () => setShowEmojiPicker(true) },
-        { icon: 'table', title: '表格', action: () => insertAtCursor('\n| 列1 | 列2 | 列3 |\n|---|---|---|\n| 内容 | 内容 | 内容 |\n') },
+        { icon: 'table', title: '表格 (Ctrl+Shift+T)', action: () => insertTable(3, 3) },
         { label: '</>', title: '代码块', action: () => insertAtCursor('\n```\ncode\n```\n', 5) },
         { label: 'Q', title: '引用', action: () => insertBlock('> ') },
         { label: '—', title: '分割线', action: () => insertAtCursor('\n---\n') },

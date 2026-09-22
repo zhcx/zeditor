@@ -1,4 +1,4 @@
-import { useCallback, useDeferredValue, useEffect, useRef, useState } from 'react';
+import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
 import hljs from '../../utils/highlight';
@@ -17,6 +17,14 @@ import {
   youtubeEmbedUrl,
   type MediaEmbedMatch,
 } from '../../utils/media';
+import {
+  findImages,
+  formatImageMarkdown,
+  parseImageAttributes,
+  withImageSize,
+  type ImageSpec,
+} from '../../utils/imageSyntax';
+import { ImagePropertiesModal } from '../Editor/ImagePropertiesModal';
 import { resolveMediaSources } from '../../services/mediaAssets';
 import { open } from '@tauri-apps/plugin-shell';
 import { toggleTaskLine } from '../../utils/taskList';
@@ -72,6 +80,150 @@ md.renderer.rules.heading_open = (tokens, index, options, _env, self) => {
   if (token.map) token.attrSet('data-source-line', String(token.map[0] + 1));
   return self.renderToken(tokens, index, options);
 };
+
+/**
+ * 图片尺寸语法：`![替代文本](路径){width=320 height=200}`。
+ * 属性后缀在 Markdown 里只是紧跟图片的普通文本，这里截掉并挂到 img 上，
+ * 让浏览器按指定像素渲染；解析失败时原样保留文本。
+ */
+md.core.ruler.after('inline', 'image_size_attributes', (state) => {
+  state.tokens.forEach((token) => {
+    if (token.type !== 'inline' || !token.children) return;
+    const children = token.children;
+    for (let index = children.length - 2; index >= 0; index -= 1) {
+      const child = children[index];
+      const next = children[index + 1];
+      if (child.type !== 'image' || !next || next.type !== 'text') continue;
+      const match = next.content.match(/^\s*\{([^}]*)\}/);
+      if (!match) continue;
+      const { width, height } = parseImageAttributes(match[1]);
+      if (!width && !height) continue;
+      if (width) child.attrSet('width', String(width));
+      if (height) child.attrSet('height', String(height));
+      next.content = next.content.slice(match[0].length);
+      if (!next.content) children.splice(index + 1, 1);
+    }
+  });
+});
+
+const isDesktopRuntime = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/** 预览表格的列宽只作用于视图：Markdown 没有列宽语义，不写回文档。 */
+const tableColumnWidths = new Map<string, number[]>();
+
+function tableLayoutKey(documentPath: string | null, table: HTMLTableElement, index: number): string {
+  const header = (table.querySelector('tr')?.textContent || '').trim().slice(0, 120);
+  return `${documentPath ?? ''}|${index}|${header}`;
+}
+
+function tableColumnCount(table: HTMLTableElement): number {
+  return table.querySelectorAll('tr:first-child > *').length;
+}
+
+function applyColumnWidths(table: HTMLTableElement, widths: number[]): void {
+  const columns = tableColumnCount(table);
+  const existing = table.querySelector('colgroup');
+  if (!widths.slice(0, columns).some((width) => width > 0)) {
+    existing?.remove();
+    table.style.removeProperty('table-layout');
+    return;
+  }
+
+  const colgroup = existing ?? document.createElement('colgroup');
+  if (!existing) table.insertBefore(colgroup, table.firstChild);
+  while (colgroup.children.length < columns) colgroup.appendChild(document.createElement('col'));
+  while (colgroup.children.length > columns) colgroup.lastElementChild?.remove();
+  for (let index = 0; index < columns; index += 1) {
+    const column = colgroup.children[index];
+    if (column instanceof HTMLElement) {
+      column.style.width = widths[index] > 0 ? `${Math.round(widths[index])}px` : '';
+    }
+  }
+  table.style.tableLayout = 'fixed';
+}
+
+function measureColumnWidths(table: HTMLTableElement): number[] {
+  return Array.from(table.querySelectorAll<HTMLTableCellElement>('tr:first-child > *'))
+    .map((cell) => Math.round(cell.getBoundingClientRect().width));
+}
+
+/** 给表格加列宽拖动把手：拖动改列宽，双击把手恢复该列的自动宽度。 */
+function enhanceTables(container: HTMLElement, documentPath: string | null): void {
+  Array.from(container.querySelectorAll<HTMLTableElement>('table')).forEach((table, tableIndex) => {
+    if (tableColumnCount(table) < 2) return;
+    const key = tableLayoutKey(documentPath, table, tableIndex);
+    const wrap = document.createElement('div');
+    wrap.className = 'table-resize-wrap';
+    table.parentElement?.insertBefore(wrap, table);
+    wrap.appendChild(table);
+
+    let widths = tableColumnWidths.get(key) ?? [];
+    applyColumnWidths(table, widths);
+
+    const handles: HTMLDivElement[] = [];
+    const currentWidths = () => (widths.some((width) => width > 0) ? widths.slice() : measureColumnWidths(table));
+    const reposition = () => {
+      const wrapRect = wrap.getBoundingClientRect();
+      const cells = Array.from(table.querySelectorAll<HTMLTableCellElement>('tr:first-child > *'));
+      const height = table.getBoundingClientRect().height;
+      handles.forEach((handle, index) => {
+        const cell = cells[index];
+        if (!cell || index === cells.length - 1) {
+          handle.style.display = 'none';
+          return;
+        }
+        handle.style.display = 'block';
+        handle.style.left = `${cell.getBoundingClientRect().right - wrapRect.left + wrap.scrollLeft}px`;
+        handle.style.height = `${Math.max(24, height)}px`;
+      });
+    };
+
+    for (let index = 0; index < tableColumnCount(table) - 1; index += 1) {
+      const handle = document.createElement('div');
+      handle.className = 'table-column-handle';
+      handle.setAttribute('role', 'separator');
+      handle.setAttribute('aria-label', `调整第 ${index + 1} 列宽度`);
+      wrap.appendChild(handle);
+      handles.push(handle);
+
+      handle.addEventListener('pointerdown', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const startX = event.clientX;
+        const startWidths = currentWidths();
+        handle.setPointerCapture(event.pointerId);
+
+        const move = (moveEvent: PointerEvent) => {
+          const next = startWidths.slice();
+          next[index] = Math.max(60, Math.round((startWidths[index] ?? 0) + (moveEvent.clientX - startX)));
+          widths = next;
+          applyColumnWidths(table, widths);
+          reposition();
+        };
+        const finish = () => {
+          handle.removeEventListener('pointermove', move);
+          handle.removeEventListener('pointerup', finish);
+          tableColumnWidths.set(key, widths);
+        };
+        handle.addEventListener('pointermove', move);
+        handle.addEventListener('pointerup', finish);
+      });
+
+      handle.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        event.stopPropagation();
+        const next = currentWidths();
+        next[index] = 0;
+        widths = next;
+        tableColumnWidths.set(key, next);
+        applyColumnWidths(table, next);
+        reposition();
+      });
+    }
+
+    window.requestAnimationFrame(reposition);
+  });
+}
 
 function addListItemContentAnchors(container: HTMLElement) {
   // 插件的 enabled 选项是模块级状态，不能影响演示模式的只读任务列表。
@@ -236,6 +388,13 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
   const contentRef = useRef('');
   const mermaidSequenceRef = useRef(0);
   const [mermaidThemeVersion, setMermaidThemeVersion] = useState(0);
+  const [imageEditorIndex, setImageEditorIndex] = useState<number | null>(null);
+  const [imageMenu, setImageMenu] = useState<{ x: number; y: number; index: number } | null>(null);
+  // DOM 事件监听里需要 React 回调，用 ref 取最新实现，避免重建整个预览。
+  const imageInteractionRef = useRef<{
+    openEditor: (index: number) => void;
+    openMenu: (event: MouseEvent, index: number) => void;
+  }>({ openEditor: () => {}, openMenu: () => {} });
   const { content, settings, currentFile } = useAppStore();
   // Markdown parsing, sanitization and DOM replacement are comparatively
   // expensive. Deferring them keeps Monaco's keystroke updates responsive.
@@ -272,6 +431,10 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     let disposed = false;
 
     const container = containerRef.current;
+    imageInteractionRef.current = {
+      openEditor: (index) => setImageEditorIndex(index),
+      openMenu: (event, index) => setImageMenu({ x: event.clientX, y: event.clientY, index }),
+    };
     const rendered = sanitizeRenderedHtml(md.render(renderMath(renderMediaPlaceholders(deferredContent))));
     container.innerHTML = rendered;
     addHeadingAnchors(container);
@@ -360,21 +523,64 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       else void renderMermaid(block);
     });
 
-    // Handle image clicks for upload
-    const images = containerRef.current.querySelectorAll('img');
+    // 图片：本地相对路径先解析成 asset 协议地址，缺失时给出可读提示，
+    // 并挂上双击编辑属性与右键尺寸菜单。
+    const imageSpecs = findImages(deferredContent);
+    const images = Array.from(container.querySelectorAll<HTMLImageElement>('img'));
+    const localImageSources = [...new Set(images
+      .map((img) => img.getAttribute('src') || '')
+      .filter((source) => source && !isRemoteMediaSource(source)))];
+    // 浏览器预览模式没有 asset 协议，相对路径只能保持原样，只有桌面端才解析与提示缺失。
+    if (isDesktopRuntime && localImageSources.length > 0) {
+      void resolveMediaSources(currentFile, localImageSources).then((resolved) => {
+        if (disposed) return;
+        images.forEach((img) => {
+          const source = img.getAttribute('src') || '';
+          if (!source || isRemoteMediaSource(source)) return;
+          const url = resolved.get(source);
+          if (url) {
+            img.src = url;
+            if (onContentRendered) img.addEventListener('load', onContentRendered);
+            return;
+          }
+          const missing = document.createElement('span');
+          missing.className = 'image-embed-missing';
+          missing.textContent = `无法读取图片：${source}`;
+          const parent = img.parentElement;
+          if (parent && parent.tagName === 'P' && parent.childElementCount === 1 && !(parent.textContent || '').trim()) {
+            parent.replaceWith(missing);
+          } else {
+            img.replaceWith(missing);
+          }
+        });
+        onContentRendered?.();
+      });
+    }
+
     images.forEach((img) => {
-      if (onContentRendered) img.addEventListener('load', onContentRendered);
-      img.addEventListener('click', () => {
-        img.setAttribute('data-src', img.src);
+      const source = img.getAttribute('src') || '';
+      const alt = img.getAttribute('alt') || '';
+      const match = imageSpecs.find((candidate) => candidate.src === source && candidate.alt === alt)
+        ?? imageSpecs.find((candidate) => candidate.src === source)
+        ?? null;
+      if (!match) return;
+      const index = imageSpecs.indexOf(match);
+      img.dataset.zeditorImageIndex = String(index);
+      img.addEventListener('dblclick', (event) => {
+        event.preventDefault();
+        imageInteractionRef.current.openEditor(index);
+      });
+      img.addEventListener('contextmenu', (event) => {
+        event.preventDefault();
+        imageInteractionRef.current.openMenu(event, index);
       });
     });
+
+    enhanceTables(container, currentFile);
 
     return () => {
       disposed = true;
       observer?.disconnect();
-      images.forEach((img) => {
-        if (onContentRendered) img.removeEventListener('load', onContentRendered);
-      });
     };
   }, [deferredContent, mermaidThemeVersion, onContentRendered, currentFile]);
 
@@ -456,6 +662,60 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     if (Number.isFinite(lineNumber) && lineNumber > 0) onSourceLineClick?.(lineNumber);
   }, [onSourceLineClick, deferredContent]);
 
+  const documentImages = useMemo(() => findImages(content), [content]);
+  const editingImage = imageEditorIndex !== null ? documentImages[imageEditorIndex] ?? null : null;
+  const menuImage = imageMenu ? documentImages[imageMenu.index] ?? null : null;
+
+  // 图片编辑始终基于最新源码：DOM 事件里的下标只在本次渲染内有效。
+  const applyImageSpec = useCallback((index: number, spec: ImageSpec) => {
+    const store = useAppStore.getState();
+    const editor = store.editorView;
+    const match = findImages(store.content)[index];
+    if (!editor || !match) return;
+    editor.replaceRange(match.from, match.to, formatImageMarkdown(spec));
+    editor.focus();
+  }, []);
+
+  const resizeImage = useCallback((index: number, width?: number) => {
+    const match = findImages(useAppStore.getState().content)[index];
+    if (!match) return;
+    applyImageSpec(index, withImageSize({
+      alt: match.alt,
+      src: match.src,
+      ...(match.title ? { title: match.title } : {}),
+    }, width));
+  }, [applyImageSpec]);
+
+  const deleteImage = useCallback((index: number) => {
+    const store = useAppStore.getState();
+    const editor = store.editorView;
+    const match = findImages(store.content)[index];
+    if (!editor || !match) return;
+    // 图片独占一行时连行一起删除，避免留下一行空白。
+    const line = editor.lineAt(match.from);
+    const aloneOnLine = line.text.trim() === match.raw.trim();
+    editor.replaceRange(
+      aloneOnLine ? line.from : match.from,
+      aloneOnLine ? Math.min(line.to + 1, editor.getValue().length) : match.to,
+      '',
+    );
+    editor.focus();
+  }, []);
+
+  useEffect(() => {
+    if (!imageMenu) return undefined;
+    const close = () => setImageMenu(null);
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') close();
+    };
+    window.addEventListener('mousedown', close);
+    window.addEventListener('keydown', handleKeyDown);
+    return () => {
+      window.removeEventListener('mousedown', close);
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [imageMenu]);
+
   const containerStyle: React.CSSProperties = {
     fontFamily: settings.appearance.font_family,
     fontSize: 'var(--font-content-size)',
@@ -477,6 +737,37 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
           </div>
         )}
       </div>
+      {imageMenu && menuImage && (
+        <div
+          className="preview-image-menu"
+          role="menu"
+          aria-label="图片操作"
+          style={{
+            left: Math.max(8, Math.min(imageMenu.x, window.innerWidth - 180)),
+            top: Math.max(8, Math.min(imageMenu.y, window.innerHeight - 230)),
+          }}
+          onMouseDown={(event) => event.stopPropagation()}
+        >
+          <button type="button" role="menuitem" onClick={() => { resizeImage(imageMenu.index, 240); setImageMenu(null); }}>小 (240px)</button>
+          <button type="button" role="menuitem" onClick={() => { resizeImage(imageMenu.index, 420); setImageMenu(null); }}>中 (420px)</button>
+          <button type="button" role="menuitem" onClick={() => { resizeImage(imageMenu.index, 640); setImageMenu(null); }}>大 (640px)</button>
+          <button type="button" role="menuitem" onClick={() => { resizeImage(imageMenu.index, undefined); setImageMenu(null); }}>原始尺寸</button>
+          <div className="preview-image-menu-divider" role="separator" />
+          <button type="button" role="menuitem" onClick={() => { setImageEditorIndex(imageMenu.index); setImageMenu(null); }}>编辑属性…</button>
+          <button type="button" role="menuitem" onClick={() => { void navigator.clipboard.writeText(menuImage.src); setImageMenu(null); }}>复制路径</button>
+          <button type="button" role="menuitem" className="is-danger" onClick={() => { deleteImage(imageMenu.index); setImageMenu(null); }}>删除图片</button>
+        </div>
+      )}
+      {editingImage && (
+        <ImagePropertiesModal
+          spec={editingImage}
+          onApply={(spec) => {
+            if (imageEditorIndex !== null) applyImageSpec(imageEditorIndex, spec);
+            setImageEditorIndex(null);
+          }}
+          onClose={() => setImageEditorIndex(null)}
+        />
+      )}
     </div>
   );
 }

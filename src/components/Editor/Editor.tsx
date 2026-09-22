@@ -19,6 +19,20 @@ import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste';
 import { resolveSmartPair } from '../../utils/smartPairs';
+import { TableToolbar } from './TableToolbar';
+import {
+  alignmentAt,
+  applyTableAction,
+  insertRow,
+  insertTable,
+  navigateTableCell,
+  parseTableAt,
+  type ColumnAlignment,
+  type TableAction,
+  type TableEdit,
+  type TableNavigationKey,
+} from '../../utils/markdownTable';
+import { insertImageFromBytes } from '../../services/imageAssets';
 
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -58,6 +72,14 @@ interface SelectionToolbarState {
   top: number;
   width: number;
   placement: 'above' | 'below';
+}
+
+interface TableToolbarState {
+  left: number;
+  top: number;
+  placement: 'above' | 'below';
+  alignment: ColumnAlignment;
+  columns: number;
 }
 
 type ContextMenuIconName = 'sparkles' | 'translate' | 'copy' | 'copyAs' | 'paste' | 'text' | 'pdf' | 'document' | 'code' | 'image' | 'folder' | 'undo' | 'redo' | 'select';
@@ -224,6 +246,9 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const [copyAsOpen, setCopyAsOpen] = useState(false);
   const [showContextImageModal, setShowContextImageModal] = useState(false);
   const [selectionToolbar, setSelectionToolbar] = useState<SelectionToolbarState | null>(null);
+  const [tableToolbar, setTableToolbar] = useState<TableToolbarState | null>(null);
+  // 表格动作需要访问 Monaco 控制器，用 ref 把闭包里的实现暴露给渲染层与菜单事件。
+  const tableActionRef = useRef<(action: TableAction) => void>(() => {});
   const { content, currentFile, activeTabId, tabs, updateTabContent, settings, setEditorView } = useAppStore();
   const { proofreadResults, rewriteSelection, translateText, setTranslationVisible, setStatus } = useAIStore();
   const slashCommands = useMemo(() => filterSlashCommands(slashMenu?.query || ''), [slashMenu?.query]);
@@ -444,6 +469,59 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     setEditorView(controller);
     onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
 
+    const applyTableEdit = (edit: TableEdit | null) => {
+      if (!edit) {
+        useAppStore.getState().setUploadStatus('error', 0, '光标不在表格内');
+        return;
+      }
+      controller.replaceRange(edit.from, edit.to, edit.text, { from: edit.cursor, to: edit.cursorEnd });
+      controller.focus();
+    };
+
+    const runTableAction = (action: TableAction) => {
+      const selection = controller.getSelection();
+      applyTableEdit(applyTableAction(controller.getValue(), selection.to, action));
+    };
+    tableActionRef.current = runTableAction;
+
+    const insertTableAtCursor = (rows = 3, columns = 3) => {
+      const selection = controller.getSelection();
+      const line = controller.lineAt(selection.from);
+      // 光标所在行有内容时先换行，避免表格粘在原有文字后面。
+      const prefix = line.text.trim().length === 0 ? '' : '\n';
+      const { text, cursor, cursorEnd } = insertTable(rows, columns);
+      controller.replaceRange(selection.from, selection.to, `${prefix}${text}\n`, {
+        from: selection.from + prefix.length + cursor,
+        to: selection.from + prefix.length + cursorEnd,
+      });
+      controller.focus();
+    };
+
+    const refreshTableToolbar = () => {
+      const selection = controller.getSelection();
+      if (!selection.empty) {
+        setTableToolbar(null);
+        return;
+      }
+      const value = model.getValue();
+      const table = parseTableAt(value, selection.to);
+      const coords = table ? controller.coordsAtPos(table.from) : null;
+      if (!table || !coords) {
+        setTableToolbar(null);
+        return;
+      }
+      const toolbarWidth = 560;
+      const left = Math.max(8, Math.min(coords.left, window.innerWidth - toolbarWidth - 8));
+      const above = coords.y >= 64;
+      setTableToolbar({
+        left,
+        top: above ? coords.y - 46 : coords.y + 8,
+        placement: above ? 'above' : 'below',
+        alignment: alignmentAt(value, selection.to) ?? 'none',
+        columns: table.columns,
+      });
+    };
+
     const handleContextMenu = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
@@ -588,12 +666,14 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       updateTabContent(activeTabId, model.getValue());
       scheduleCompanion();
       refreshSlashMenu();
+      refreshTableToolbar();
     });
     const cursorDisposable = editor.onDidChangeCursorSelection(() => {
       onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
       scheduleCompanion();
       refreshSlashMenu();
       refreshSelectionToolbar();
+      refreshTableToolbar();
     });
     const mouseDisposable = editor.onMouseUp((event) => {
       const lineNumber = event.target.position?.lineNumber;
@@ -602,6 +682,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     const scrollDisposable = editor.onDidScrollChange(() => {
       refreshSlashMenu();
       refreshSelectionToolbar();
+      refreshTableToolbar();
     });
     const slashKeyDisposable = editor.onKeyDown((event) => {
       const menu = slashMenuRef.current;
@@ -640,6 +721,53 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           });
           controller.focus();
           return;
+        }
+      }
+
+      const primaryModifier = browserEvent.ctrlKey || browserEvent.metaKey;
+      if (primaryModifier && browserEvent.shiftKey && !browserEvent.altKey) {
+        if (key.toLowerCase() === 't') {
+          event.preventDefault();
+          event.stopPropagation();
+          insertTableAtCursor(3, 3);
+          return;
+        }
+        if (key.toLowerCase() === 'i') {
+          // 插入图片：桌面端与工具栏、右键菜单共用同一个图片弹窗。
+          event.preventDefault();
+          event.stopPropagation();
+          setShowContextImageModal(true);
+          return;
+        }
+      }
+
+      // 表格键盘导航：Tab / Shift+Tab 跳到相邻单元格，方向键移动，Enter 新增一行。
+      const tableKey: TableNavigationKey | null = key === 'Tab'
+        ? (browserEvent.shiftKey ? 'Shift+Tab' : 'Tab')
+        : key === 'Enter' || key === 'ArrowUp' || key === 'ArrowDown' || key === 'ArrowLeft' || key === 'ArrowRight'
+          ? key
+          : null;
+      if (
+        tableKey
+        && !primaryModifier
+        && !browserEvent.altKey
+        && !browserEvent.isComposing
+        && (editor.getSelections()?.length ?? 0) <= 1
+      ) {
+        const selection = controller.getSelection();
+        if (key !== 'Tab' || selection.empty || !browserEvent.shiftKey) {
+          const navigation = navigateTableCell(model.getValue(), selection.to, tableKey);
+          if (navigation) {
+            event.preventDefault();
+            event.stopPropagation();
+            if (navigation.kind === 'insert-row') {
+              applyTableEdit(insertRow(model.getValue(), selection.to, 'below'));
+            } else {
+              controller.setSelection(navigation.cursor, navigation.cursorEnd);
+              controller.focus();
+            }
+            return;
+          }
         }
       }
 
@@ -687,6 +815,17 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     };
     window.addEventListener('zeditor-theme-change', handleTheme);
 
+    // 菜单栏的表格与图片入口通过事件驱动，避免菜单组件直接依赖编辑器实例。
+    const handleTableActionRequest = (event: Event) => {
+      const action = (event as CustomEvent<{ action?: TableAction }>).detail?.action;
+      if (action) runTableAction(action);
+    };
+    const handleInsertTableRequest = () => insertTableAtCursor(3, 3);
+    const handleInsertImageRequest = () => setShowContextImageModal(true);
+    window.addEventListener('zeditor-table-action', handleTableActionRequest);
+    window.addEventListener('zeditor-insert-table', handleInsertTableRequest);
+    window.addEventListener('zeditor-insert-image', handleInsertImageRequest);
+
     const handlePaste = async (event: ClipboardEvent) => {
       if (!(event.target instanceof Node) || !root.contains(event.target)) return;
       const image = Array.from(event.clipboardData?.items || []).find((item) => item.type.startsWith('image/'))?.getAsFile();
@@ -711,6 +850,17 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       event.stopImmediatePropagation();
 
       const store = useAppStore.getState();
+      // 桌面端优先把剪贴板图片写进文档同级的 .assets：离线可用且不依赖图床配置。
+      if (isTauriRuntime() && store.currentFile) {
+        try {
+          const dataUrl = await fileAsDataUrl(image);
+          const extension = image.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+          if (await insertImageFromBytes(dataUrl.split(',')[1], extension, '粘贴的图片')) return;
+        } catch {
+          // 落回图床 / dataURL 兜底路径
+        }
+      }
+
       if (!imageHostConfigured(store.settings)) {
         store.setUploadStatus('error', 0, '请先启用并配置图床服务');
         store.setSettingsTab('image');
@@ -754,7 +904,11 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       editorNode?.removeEventListener('pointerdown', handleSelectionPointerDown, true);
       window.removeEventListener('pointerup', handleSelectionPointerEnd, true);
       window.removeEventListener('pointercancel', handleSelectionPointerEnd, true);
-    window.removeEventListener('zeditor-theme-change', handleTheme);
+      window.removeEventListener('zeditor-theme-change', handleTheme);
+      window.removeEventListener('zeditor-table-action', handleTableActionRequest);
+      window.removeEventListener('zeditor-insert-table', handleInsertTableRequest);
+      window.removeEventListener('zeditor-insert-image', handleInsertImageRequest);
+      tableActionRef.current = () => {};
       contentDisposable.dispose();
       cursorDisposable.dispose();
       mouseDisposable.dispose();
@@ -841,6 +995,17 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         >
           <Toolbar variant="floating" />
         </div>
+      )}
+      {tableToolbar && (
+        <TableToolbar
+          left={tableToolbar.left}
+          top={tableToolbar.top}
+          placement={tableToolbar.placement}
+          alignment={tableToolbar.alignment}
+          columns={tableToolbar.columns}
+          onAction={(action) => tableActionRef.current(action)}
+          onClose={() => setTableToolbar(null)}
+        />
       )}
       {slashMenu && (
         <SlashCommandMenu

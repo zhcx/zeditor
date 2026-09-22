@@ -9,6 +9,7 @@ import hljs from '../../utils/highlight';
 import { applyExportTemplate, loadExportTemplate } from '../Export/exportTemplates';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { resolveSaveBaseName } from '../../utils/saveName';
+import type { TableAction } from '../../utils/markdownTable';
 
 // 导出对话框与语法手册只在对应菜单项打开时才需要，按需加载以缩小入口 chunk。
 const PdfExportDialog = lazy(() => import('../Export/PdfExportDialog').then(m => ({ default: m.PdfExportDialog })));
@@ -105,6 +106,14 @@ function HelpModal({ type, updateInfo, updateError, downloadProgress, downloadDo
 - Ctrl+B - 加粗
 - Ctrl+I - 斜体
 - Ctrl+K - 插入链接
+
+**插入与表格**
+- Ctrl+Shift+T - 插入 3 × 3 表格
+- Ctrl+Shift+I - 插入图片
+- 表格内 Tab - 跳到下一个单元格（末行时自动加一行）
+- 表格内 Shift+Tab - 跳到上一个单元格
+- 表格内方向键 - 在单元格之间移动
+- 表格内 Enter - 在当前行下方新增一行
 
 **视图**
 - F11 - 全屏切换
@@ -621,6 +630,21 @@ export function MenuBar() {
     return () => window.removeEventListener('zeditor-export-request', handleExportRequest);
   });
 
+  const closeMenus = () => {
+    setActiveMenu(null);
+    setMenuOpen(false);
+  };
+
+  // 表格与图片的实际操作在编辑器里执行：菜单只负责把请求派发过去。
+  const requestTableAction = (action: TableAction) => {
+    window.dispatchEvent(new CustomEvent('zeditor-table-action', { detail: { action } }));
+    closeMenus();
+  };
+  const requestInsert = (kind: 'table' | 'image') => {
+    window.dispatchEvent(new CustomEvent(kind === 'table' ? 'zeditor-insert-table' : 'zeditor-insert-image'));
+    closeMenus();
+  };
+
   const menus: MenuGroup[] = [
     {
       label: APP_NAME,
@@ -664,6 +688,25 @@ export function MenuBar() {
         { label: '剪切', action: () => document.execCommand('cut'), shortcut: 'Ctrl+X' },
         { label: '复制', action: () => document.execCommand('copy'), shortcut: 'Ctrl+C' },
         { label: '粘贴', action: () => document.execCommand('paste'), shortcut: 'Ctrl+V' },
+        { divider: true, label: '' },
+        { label: '插入图片…', action: () => requestInsert('image'), shortcut: 'Ctrl+Shift+I' },
+        { label: '插入表格', action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
+        {
+          label: '表格操作',
+          children: [
+            { label: '上方插入行', action: () => requestTableAction('row-above') },
+            { label: '下方插入行', action: () => requestTableAction('row-below') },
+            { label: '删除当前行', action: () => requestTableAction('row-delete') },
+            { label: '左侧插入列', action: () => requestTableAction('column-left') },
+            { label: '右侧插入列', action: () => requestTableAction('column-right') },
+            { label: '删除当前列', action: () => requestTableAction('column-delete') },
+            { label: '当前列左对齐', action: () => requestTableAction('align-left') },
+            { label: '当前列居中', action: () => requestTableAction('align-center') },
+            { label: '当前列右对齐', action: () => requestTableAction('align-right') },
+            { label: '整理表格格式', action: () => requestTableAction('format') },
+            { label: '删除整张表格', action: () => requestTableAction('table-delete') },
+          ],
+        },
         { divider: true, label: '' },
         { label: '全选', action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A' },
         { divider: true, label: '' },
