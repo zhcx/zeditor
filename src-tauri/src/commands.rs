@@ -1011,8 +1011,8 @@ pub async fn rename_fs_item(old_path: String, new_path: String) -> Result<(), St
 
 /// 允许写入 `.assets` 的媒体扩展名，与前端 `MEDIA_FILE_EXTENSIONS` 保持一致。
 const MEDIA_EXTENSIONS: [&str; 18] = [
-    "mp4", "m4v", "webm", "ogv", "mov", "mkv", "avi", "wmv", "flv",
-    "mp3", "m4a", "aac", "wav", "oga", "ogg", "opus", "flac", "weba",
+    "mp4", "m4v", "webm", "ogv", "mov", "mkv", "avi", "wmv", "flv", "mp3", "m4a", "aac", "wav",
+    "oga", "ogg", "opus", "flac", "weba",
 ];
 
 /// 单个媒体文件的大小上限：再大的素材应通过外链引用。
@@ -1112,7 +1112,10 @@ pub async fn import_media_asset(
         .unwrap_or_default();
     let safe_name = sanitize_media_file_name(&original_name);
     let (stem, extension) = match safe_name.rfind('.') {
-        Some(index) if index > 0 => (safe_name[..index].to_string(), safe_name[index..].to_string()),
+        Some(index) if index > 0 => (
+            safe_name[..index].to_string(),
+            safe_name[index..].to_string(),
+        ),
         _ => (safe_name.clone(), String::new()),
     };
 
@@ -1185,7 +1188,9 @@ pub async fn resolve_media_sources(
             }
         };
         match tokio::fs::metadata(&candidate).await {
-            Ok(meta) if meta.is_file() => resolved.push(Some(path_without_verbatim_prefix(&candidate))),
+            Ok(meta) if meta.is_file() => {
+                resolved.push(Some(path_without_verbatim_prefix(&candidate)))
+            }
             _ => resolved.push(None),
         }
     }
