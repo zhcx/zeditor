@@ -4040,6 +4040,12 @@ textarea {
   background: color-mix(in srgb, var(--accent-color) 78%, transparent);
 }
 
+/* 列表项：竖条画在项目符号（• / 编号）左侧的留白里，而不是紧贴文字。
+   ul / ol 的 padding-left 是 1.6em，-1.5em 正好落在标记前。 */
+.preview-document li.is-active-source-block::before {
+  left: -1.5em;
+}
+
 /* 行内锚点（紧排列表项）不适用悬浮竖条，回退为贴边细条。 */
 .preview-document span.is-active-source-block {
   box-shadow: -3px 0 0 color-mix(in srgb, var(--accent-color) 55%, transparent);

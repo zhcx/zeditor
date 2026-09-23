@@ -27,10 +27,12 @@ export function findActiveSourceElement(root: ParentNode, editorLine: number): H
 
   const matches = anchors.filter((element) => Number(element.dataset.sourceLine) === sourceLine);
 
-  // Quotes and tables are meaningful whole blocks. Tight list items need the
-  // generated content anchor so a parent item does not highlight its children.
+  // Quotes and tables are meaningful whole blocks. List items use the <li> itself
+  // so the indicator bar sits left of the bullet/number; the generated content
+  // anchor stays a click target for locating the source line.
   return matches.find((element) => element.tagName === 'BLOCKQUOTE')
     ?? matches.find((element) => element.tagName === 'TABLE')
+    ?? matches.find((element) => element.tagName === 'LI')
     ?? matches.find((element) => element.classList.contains('preview-list-item-content'))
     ?? matches.at(-1)
     ?? null;
