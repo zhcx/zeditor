@@ -51,6 +51,14 @@ test('prefers the list item so the marker bar stays left of the bullet', () => {
   assert.equal(findActiveSourceElement(root, 7), item);
 });
 
+test('preview tables only scroll when they overflow their column', () => {
+  const styles = read('src/styles/main.css');
+
+  assert.match(styles, /\.table-resize-wrap \{[\s\S]*?overflow: visible;/);
+  assert.match(styles, /\.table-resize-wrap\.is-scrollable \{[\s\S]*?overflow-x: auto;/);
+  assert.match(styles, /\.table-resize-wrap > table \{[\s\S]*?max-width: none;[\s\S]*?overflow: visible;/);
+});
+
 test('preview draws the list indicator left of the bullet', () => {
   const styles = read('src/styles/main.css');
 

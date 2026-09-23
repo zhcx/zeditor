@@ -11047,15 +11047,27 @@ html[data-theme] .preview-container,
 .toolbar-overflow-menu-row { margin: 2px 0; }
 .toolbar-overflow-menu-row .toolbar-btn { width: 100%; min-width: 0; justify-content: flex-start; }
 
+/* 默认不产生滚动条：只有表格真的比可用宽度更宽（或拖动加宽过列）时才切换到可滚动。 */
 .table-resize-wrap {
   position: relative;
   display: block;
   max-width: 100%;
   margin: 1.55em 0;
-  overflow-x: auto;
+  overflow: visible;
 }
 
-.table-resize-wrap > table { margin: 0; }
+.table-resize-wrap.is-scrollable {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
+/* 表格自身的 overflow-x: auto（旧的宽表兜底）交给外层容器处理，避免出现两层滚动条；
+   max-width 交给外层判断：表格可以按内容超出容器，由 .is-scrollable 决定是否出现滚动条。 */
+.table-resize-wrap > table {
+  margin: 0;
+  max-width: none;
+  overflow: visible;
+}
 
 .table-column-handle {
   position: absolute;

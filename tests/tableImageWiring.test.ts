@@ -145,6 +145,9 @@ test('preview resolves local images, renders sizes and hosts the image interacti
   assert.match(preview, /无法读取图片/);
   assert.match(preview, /enhanceTables\(container, currentFile\)/);
   assert.match(preview, /table-column-handle/);
+  // 只在表格真的超出可用宽度时才出现横向滚动条
+  assert.match(preview, /wrap\.classList\.toggle\('is-scrollable', overflow\)/);
+  assert.match(preview, /const overflow = table\.getBoundingClientRect\(\)\.width > wrap\.clientWidth \+ 1/);
   assert.match(preview, /<ImagePropertiesModal/);
   assert.match(preview, /className="preview-image-menu"/);
   assert.match(preview, /navigator\.clipboard\.writeText\(menuImage\.src\)/);

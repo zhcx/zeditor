@@ -162,10 +162,16 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): voi
 
     const handles: HTMLDivElement[] = [];
     const currentWidths = () => (widths.some((width) => width > 0) ? widths.slice() : measureColumnWidths(table));
+    // 只有内容真的超出可用宽度时才允许横向滚动：否则窄表格下方会出现一条空滚动条。
+    const syncScrollable = () => {
+      const overflow = table.getBoundingClientRect().width > wrap.clientWidth + 1;
+      wrap.classList.toggle('is-scrollable', overflow);
+    };
     const reposition = () => {
       const wrapRect = wrap.getBoundingClientRect();
       const cells = Array.from(table.querySelectorAll<HTMLTableCellElement>('tr:first-child > *'));
       const height = table.getBoundingClientRect().height;
+      syncScrollable();
       handles.forEach((handle, index) => {
         const cell = cells[index];
         if (!cell || index === cells.length - 1) {
