@@ -17,6 +17,7 @@ import { insertMediaFromPath } from '../../services/mediaAssets';
 import { insertImageFromPath } from '../../services/imageAssets';
 import { imageDialogFilters } from '../../utils/imageSyntax';
 import { insertTable as buildTableInsert } from '../../utils/markdownTable';
+import { stripInlineFormatting } from '../../utils/inlineFormatting';
 
 type ToolbarIconName = 'link' | 'image' | 'video' | 'table' | 'folder' | 'chat' | 'proofread' | 'sparkle' | 'palette' | 'rewrite' | 'translate' | 'summary' | 'outline';
 
@@ -128,7 +129,7 @@ export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; 
             <div className="image-options">
               <button className="image-option-btn" onClick={() => void handleLocalImage()}>
                 <span className="option-icon"><ToolbarGlyph name="image" /></span>
-                <span className="option-text">本地图片（推荐）</span>
+                <span className="option-text">本地图片</span>
                 <span className="option-desc">复制到文档同级的 .assets 目录，离线可看</span>
               </button>
               <button className="image-option-btn" onClick={() => setMode('link')}>
@@ -412,11 +413,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     if (selection.empty) return;
 
     const selected = editorView.state.sliceDoc(selection.from, selection.to);
-    const plainText = selected
-      .replace(/<\/?(?:u|sup|sub|mark|strong|em|del)>/gi, '')
-      .replace(/(\*\*|__|~~|==|`)/g, '')
-      .replace(/\*([^*]+)\*/g, '$1')
-      .replace(/_([^_]+)_/g, '$1');
+    const plainText = stripInlineFormatting(selected);
 
     if (plainText === selected) return;
     editorView.dispatch({

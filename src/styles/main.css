@@ -1864,7 +1864,7 @@ html.panel-resizing .chatbot-divider::after {
 
 /* ── Image Modal ───────────────────────────────────────────────── */
 
-.image-modal { width: 420px; }
+.image-modal { width: 480px; max-width: calc(100vw - 48px); }
 
 .image-options {
   display: flex;
@@ -1891,9 +1891,18 @@ html.panel-resizing .chatbot-divider::after {
   box-shadow: var(--shadow-sm);
 }
 
-.option-icon { font-size: 28px; width: 40px; text-align: center; }
-.option-text { font-size: 15px; font-weight: 600; }
-.option-desc { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+.option-icon { flex: 0 0 40px; font-size: 28px; width: 40px; text-align: center; }
+/* 选项标题不允许折行，说明文字占满剩余空间并右对齐，避免出现「本地图片（推 荐）」这类断字。 */
+.option-text { flex: 0 0 auto; font-size: 15px; font-weight: 600; white-space: nowrap; }
+.option-desc {
+  flex: 1 1 auto;
+  min-width: 0;
+  margin-left: auto;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+  text-align: right;
+}
 .image-option-btn:hover .option-text { color: var(--accent-color); }
 .image-option-btn:hover .option-desc { color: var(--accent-color); }
 

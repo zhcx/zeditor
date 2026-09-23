@@ -33,6 +33,7 @@ import {
   type TableNavigationKey,
 } from '../../utils/markdownTable';
 import { insertImageFromBytes } from '../../services/imageAssets';
+import { stripInlineFormatting } from '../../utils/inlineFormatting';
 
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -63,6 +64,8 @@ interface EditorContextMenuState {
   hasSelection: boolean;
   canUndo: boolean;
   canRedo: boolean;
+  /** 光标是否在 Markdown 表格内：表格子菜单据此启用。 */
+  inTable: boolean;
 }
 
 const contextMenuMarkdown = new MarkdownIt({ html: true, breaks: true, linkify: true, typographer: true });
@@ -82,7 +85,44 @@ interface TableToolbarState {
   columns: number;
 }
 
-type ContextMenuIconName = 'sparkles' | 'translate' | 'copy' | 'copyAs' | 'paste' | 'text' | 'pdf' | 'document' | 'code' | 'image' | 'folder' | 'undo' | 'redo' | 'select';
+type ContextMenuIconName = 'sparkles' | 'translate' | 'copy' | 'copyAs' | 'paste' | 'text' | 'pdf' | 'document' | 'code' | 'image' | 'folder' | 'undo' | 'redo' | 'table' | 'select';
+
+interface ContextSubmenuProps {
+  label: string;
+  icon: ContextMenuIconName;
+  direction: 'left' | 'right';
+  open: boolean;
+  disabled?: boolean;
+  onToggle: () => void;
+  onHover: (open: boolean) => void;
+  children: React.ReactNode;
+}
+
+/** 右键菜单里的二级菜单：悬停或点击展开，方向由菜单在窗口中的位置决定。 */
+function ContextSubmenu({ label, icon, direction, open, disabled, onToggle, onHover, children }: ContextSubmenuProps) {
+  return (
+    <div
+      className="editor-context-menu-group"
+      data-submenu-direction={direction}
+      onMouseEnter={() => onHover(true)}
+      onMouseLeave={() => onHover(false)}
+    >
+      <button
+        type="button"
+        role="menuitem"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        disabled={disabled}
+        onClick={onToggle}
+      >
+        <span className="editor-context-menu-icon"><ContextMenuIcon name={icon} /></span>
+        <span className="editor-context-menu-label">{label}</span>
+        <span className="editor-context-menu-chevron">›</span>
+      </button>
+      {open && !disabled && <div className="editor-context-submenu" role="menu">{children}</div>}
+    </div>
+  );
+}
 
 function ContextMenuIcon({ name }: { name: ContextMenuIconName }) {
   if (name === 'sparkles') return <svg viewBox="0 0 18 18"><path d="m6.2 2 .7 2.1L9 5l-2.1.8-.7 2.1-.8-2.1L3.3 5l2.1-.9zM12.3 7.2l.9 2.5 2.5.9-2.5.9-.9 2.5-.9-2.5-2.5-.9 2.5-.9z" /></svg>;
@@ -96,6 +136,7 @@ function ContextMenuIcon({ name }: { name: ContextMenuIconName }) {
   if (name === 'code') return <svg viewBox="0 0 18 18"><path d="m6.4 4-4 5 4 5M11.6 4l4 5-4 5M10.2 2.8 7.8 15.2" /></svg>;
   if (name === 'image') return <svg viewBox="0 0 18 18"><rect x="2.4" y="2.8" width="13.2" height="12.4" rx="1.4" /><circle cx="6.2" cy="6.7" r="1.2" /><path d="m3.5 13.5 3.6-3.8 2.5 2.4 2.1-2.2 2.8 3.1" /></svg>;
   if (name === 'folder') return <svg viewBox="0 0 18 18"><path d="M2 5.2h5l1.3 1.5H16v7.8H2zM2 5.2V3.5h5l1.3 1.7" /></svg>;
+  if (name === 'table') return <svg viewBox="0 0 18 18"><rect x="2.2" y="3.2" width="13.6" height="11.6" rx="1.2" /><path d="M2.2 7h13.6M2.2 10.9h13.6M9 3.2v11.6" /></svg>;
   if (name === 'undo') return <svg viewBox="0 0 18 18"><path d="M6.5 5 3 8.5 6.5 12M3.4 8.5h6.2c3 0 4.8 1.6 4.8 4.3" /></svg>;
   if (name === 'redo') return <svg viewBox="0 0 18 18"><path d="m11.5 5 3.5 3.5-3.5 3.5M14.6 8.5H8.4c-3 0-4.8 1.6-4.8 4.3" /></svg>;
   return <svg viewBox="0 0 18 18"><path d="M3 4h12M3 9h12M3 14h12" /></svg>;
@@ -243,7 +284,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
   const [contextMenu, setContextMenu] = useState<EditorContextMenuState | null>(null);
-  const [copyAsOpen, setCopyAsOpen] = useState(false);
+  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
+  const contextMenuRef = useRef<HTMLDivElement>(null);
   const [showContextImageModal, setShowContextImageModal] = useState(false);
   const [selectionToolbar, setSelectionToolbar] = useState<SelectionToolbarState | null>(null);
   const [tableToolbar, setTableToolbar] = useState<TableToolbarState | null>(null);
@@ -377,6 +419,78 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     controller.focus();
     setShowContextImageModal(false);
   }, []);
+
+  // 右键菜单里的格式化 / 插入动作：与浮动工具栏同源，但直接作用于当前选区。
+  const runContextWrap = useCallback((before: string, after: string) => {
+    setContextMenu(null);
+    const controller = controllerRef.current;
+    if (!controller) return;
+    const selection = controller.getSelection();
+    const selected = controller.getText(selection.from, selection.to);
+    const text = selected || '文本';
+    const cursor = selection.from + before.length;
+    controller.replaceRange(selection.from, selection.to, `${before}${text}${after}`, {
+      from: cursor,
+      to: cursor + text.length,
+    });
+    controller.focus();
+  }, []);
+
+  const runContextInsert = useCallback((text: string, cursorOffset?: number) => {
+    setContextMenu(null);
+    const controller = controllerRef.current;
+    if (!controller) return;
+    const selection = controller.getSelection();
+    const cursor = selection.from + (cursorOffset ?? text.length);
+    controller.replaceRange(selection.from, selection.to, text, { from: cursor, to: cursor });
+    controller.focus();
+  }, []);
+
+  const applyContextHeading = useCallback((level: number) => {
+    setContextMenu(null);
+    const controller = controllerRef.current;
+    if (!controller) return;
+    const selection = controller.getSelection();
+    const line = controller.lineAt(selection.from);
+    const content = line.text.replace(/^\s*#{1,6}\s+/, '');
+    const prefix = `${'#'.repeat(level)} `;
+    controller.replaceRange(line.from, line.to, `${prefix}${content}`, {
+      from: line.from + prefix.length,
+      to: line.from + prefix.length + content.length,
+    });
+    controller.focus();
+  }, []);
+
+  const clearContextInlineFormatting = useCallback(() => {
+    setContextMenu(null);
+    const controller = controllerRef.current;
+    if (!controller) return;
+    const selection = controller.getSelection();
+    const selected = controller.getText(selection.from, selection.to);
+    const plain = stripInlineFormatting(selected);
+    if (plain === selected) return;
+    controller.replaceRange(selection.from, selection.to, plain, {
+      from: selection.from,
+      to: selection.from + plain.length,
+    });
+    controller.focus();
+  }, []);
+
+  const runContextTableAction = useCallback((action: TableAction) => {
+    setContextMenu(null);
+    tableActionRef.current(action);
+  }, []);
+
+  const requestContextTable = useCallback(() => {
+    setContextMenu(null);
+    window.dispatchEvent(new CustomEvent('zeditor-insert-table'));
+  }, []);
+
+  const submenuHandlers = (id: string) => ({
+    open: openSubmenu === id,
+    onToggle: () => setOpenSubmenu((current) => (current === id ? null : id)),
+    onHover: (open: boolean) => setOpenSubmenu((current) => (open ? id : current === id ? null : current)),
+  });
 
   const requestExport = useCallback((format: 'pdf' | 'word' | 'html') => {
     setContextMenu(null);
@@ -537,10 +651,10 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     const handleContextMenu = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      setCopyAsOpen(false);
+      setOpenSubmenu(null);
       const selection = controller.getSelection();
       const menuWidth = 336;
-      const submenuWidth = 150;
+      const submenuWidth = 178;
       const menuHeight = 660;
       const x = Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8));
       setContextMenu({
@@ -550,6 +664,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         hasSelection: !selection.empty,
         canUndo: model.canUndo(),
         canRedo: model.canRedo(),
+        inTable: parseTableAt(model.getValue(), selection.to) !== null,
       });
     };
     const closeContextMenu = () => setContextMenu(null);
@@ -986,6 +1101,16 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, decorations);
   }, [proofreadResults]);
 
+  // 菜单变高后可能超出窗口底部：渲染完成后按真实高度上移，CSS 另行兜底滚动。
+  useEffect(() => {
+    const element = contextMenuRef.current;
+    if (!element || !contextMenu) return;
+    const maxTop = window.innerHeight - element.offsetHeight - 8;
+    if (contextMenu.y > maxTop) {
+      setContextMenu((menu) => (menu ? { ...menu, y: Math.max(8, maxTop) } : menu));
+    }
+  }, [contextMenu]);
+
   return (
     <div className={`editor-container monaco-editor-container ${className || ''}`} style={style}>
       <div className="editor-document-card monaco-document-card">
@@ -1025,6 +1150,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       )}
       {contextMenu && (
         <div
+          ref={contextMenuRef}
           className="editor-context-menu"
           role="menu"
           aria-label={t('编辑器', language)}
@@ -1044,28 +1170,78 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           <button type="button" role="menuitem" disabled={!contextMenu.canRedo} onClick={() => void runContextMenuAction('redo')}>
             <span className="editor-context-menu-icon"><ContextMenuIcon name="redo" /></span><span className="editor-context-menu-label">{t('重做', language)}</span><kbd>Ctrl+Y</kbd>
           </button>
-          <div className="editor-context-menu-divider" role="separator" />
+          <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('cut')}>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="text" /></span><span className="editor-context-menu-label">{t('剪切', language)}</span><kbd>Ctrl+X</kbd>
+          </button>
           <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('copy')}>
             <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="copy" /></span><span className="editor-context-menu-label">{t('复制', language)}</span><kbd>Ctrl+C</kbd>
           </button>
-          <div className="editor-context-copy-as" data-submenu-direction={contextMenu.submenuDirection} onMouseEnter={() => setCopyAsOpen(true)} onMouseLeave={() => setCopyAsOpen(false)}>
-            <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => setCopyAsOpen((open) => !open)}>
-              <span className="editor-context-menu-icon"><ContextMenuIcon name="copyAs" /></span><span className="editor-context-menu-label">复制为</span><span className="editor-context-menu-chevron">›</span>
-            </button>
-            {copyAsOpen && contextMenu.hasSelection && (
-              <div className="editor-context-submenu" role="menu">
-                <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyHtml')}><span>HTML</span></button>
-                <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyPlain')}><span>纯文本</span></button>
-              </div>
-            )}
-          </div>
+          <ContextSubmenu label="复制为" icon="copyAs" direction={contextMenu.submenuDirection} disabled={!contextMenu.hasSelection} {...submenuHandlers('copyAs')}>
+            <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyHtml')}><span>HTML</span></button>
+            <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyPlain')}><span>纯文本</span></button>
+          </ContextSubmenu>
           <button type="button" role="menuitem" onClick={() => void runContextMenuAction('paste')}>
             <span className="editor-context-menu-icon tone-green"><ContextMenuIcon name="paste" /></span><span className="editor-context-menu-label">{t('粘贴', language)}</span><kbd>Ctrl+V</kbd>
           </button>
           <button type="button" role="menuitem" onClick={() => void runContextMenuAction('paste')}>
             <span className="editor-context-menu-icon"><ContextMenuIcon name="text" /></span><span className="editor-context-menu-label">粘贴为纯文本</span><kbd>Ctrl+Shift+V</kbd>
           </button>
+          <button type="button" role="menuitem" onClick={() => void runContextMenuAction('selectAll')}>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="select" /></span><span className="editor-context-menu-label">{t('全选', language)}</span><kbd>Ctrl+A</kbd>
+          </button>
+
           <div className="editor-context-menu-divider" role="separator" />
+
+          {/* 格式与标题：与浮动工具栏同源的动作，右键就能就地处理选中文字 */}
+          <ContextSubmenu label="格式" icon="text" direction={contextMenu.submenuDirection} disabled={!contextMenu.hasSelection} {...submenuHandlers('format')}>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('**', '**')}><span>加粗</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('*', '*')}><span>斜体</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('~~', '~~')}><span>删除线</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('==', '==')}><span>高亮</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('<u>', '</u>')}><span>下划线</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('<sup>', '</sup>')}><span>上标</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('<sub>', '</sub>')}><span>下标</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('`', '`')}><span>行内代码</span></button>
+            <div className="editor-context-menu-divider" role="separator" />
+            <button type="button" role="menuitem" onClick={clearContextInlineFormatting}><span>清除行内格式</span></button>
+          </ContextSubmenu>
+          <ContextSubmenu label="标题" icon="select" direction={contextMenu.submenuDirection} {...submenuHandlers('heading')}>
+            {[1, 2, 3, 4, 5, 6].map((level) => (
+              <button key={level} type="button" role="menuitem" onClick={() => applyContextHeading(level)}>
+                <span>{level} 级标题</span>
+              </button>
+            ))}
+          </ContextSubmenu>
+
+          <div className="editor-context-menu-divider" role="separator" />
+
+          {/* 插入与表格：按当前场景提供常用内容块与表格结构操作 */}
+          <ContextSubmenu label="插入" icon="image" direction={contextMenu.submenuDirection} {...submenuHandlers('insert')}>
+            <button type="button" role="menuitem" onClick={() => runContextWrap('[', '](url)')}><span>链接</span></button>
+            <button type="button" role="menuitem" onClick={() => { setContextMenu(null); setShowContextImageModal(true); }}><span>插入图片</span></button>
+            <button type="button" role="menuitem" onClick={requestContextTable}><span>插入表格</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextInsert('\n```\ncode\n```\n', 5)}><span>代码块</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextInsert('> ')}><span>引用</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextInsert('\n---\n')}><span>分割线</span></button>
+          </ContextSubmenu>
+          <ContextSubmenu label="表格" icon="table" direction={contextMenu.submenuDirection} disabled={!contextMenu.inTable} {...submenuHandlers('table')}>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('row-above')}><span>上方插入行</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('row-below')}><span>下方插入行</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('row-delete')}><span>删除当前行</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('column-left')}><span>左侧插入列</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('column-right')}><span>右侧插入列</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('column-delete')}><span>删除当前列</span></button>
+            <div className="editor-context-menu-divider" role="separator" />
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('align-left')}><span>当前列左对齐</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('align-center')}><span>当前列居中</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('align-right')}><span>当前列右对齐</span></button>
+            <div className="editor-context-menu-divider" role="separator" />
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('format')}><span>整理表格格式</span></button>
+            <button type="button" role="menuitem" onClick={() => runContextTableAction('table-delete')}><span>删除整张表格</span></button>
+          </ContextSubmenu>
+
+          <div className="editor-context-menu-divider" role="separator" />
+
           <button type="button" role="menuitem" onClick={() => requestExport('pdf')}>
             <span className="editor-context-menu-icon tone-red"><ContextMenuIcon name="pdf" /></span><span className="editor-context-menu-label">导出 PDF</span>
           </button>
@@ -1076,9 +1252,6 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
             <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="code" /></span><span className="editor-context-menu-label">导出 HTML</span>
           </button>
           <div className="editor-context-menu-divider" role="separator" />
-          <button type="button" role="menuitem" onClick={() => { setContextMenu(null); setShowContextImageModal(true); }}>
-            <span className="editor-context-menu-icon tone-gold"><ContextMenuIcon name="image" /></span><span className="editor-context-menu-label">插入图片</span>
-          </button>
           <button type="button" role="menuitem" disabled={!currentFile || currentFile.startsWith('web://')} onClick={() => void revealCurrentFile()}>
             <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="folder" /></span><span className="editor-context-menu-label">在文件夹中显示</span>
           </button>

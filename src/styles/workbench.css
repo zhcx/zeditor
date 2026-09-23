@@ -2348,6 +2348,7 @@ body {
 }
 
 .editor-context-menu > button,
+.editor-context-menu-group > button,
 .editor-context-copy-as > button {
   display: grid;
   grid-template-columns: 24px minmax(0, 1fr) auto;
@@ -2367,6 +2368,8 @@ body {
 
 .editor-context-menu > button:hover:not(:disabled),
 .editor-context-menu > button:focus-visible,
+.editor-context-menu-group > button:hover:not(:disabled),
+.editor-context-menu-group > button:focus-visible,
 .editor-context-copy-as > button:hover:not(:disabled),
 .editor-context-copy-as > button:focus-visible {
   background: var(--ui-bg-hover);
@@ -2400,23 +2403,27 @@ body {
   background: var(--ui-border-default);
 }
 
+.editor-context-menu-group,
 .editor-context-copy-as { position: relative; }
 .editor-context-submenu {
   position: absolute;
   z-index: 1;
   top: -6px;
   left: calc(100% - 2px);
-  width: 150px;
+  width: 178px;
   padding: 6px;
   border: 1px solid var(--ui-border-strong);
   border-radius: 8px;
   background: var(--ui-bg-overlay);
   box-shadow: var(--ui-shadow-menu);
 }
+.editor-context-menu-group[data-submenu-direction="left"] .editor-context-submenu,
 .editor-context-copy-as[data-submenu-direction="left"] .editor-context-submenu {
   right: calc(100% - 2px);
   left: auto;
 }
+/* 子菜单里的分组线：菜单本身收缩在内容宽度内，分隔线跟着收窄。 */
+.editor-context-submenu .editor-context-menu-divider { margin: 5px 4px; }
 .editor-context-submenu button {
   width: 100%;
   min-height: 34px;

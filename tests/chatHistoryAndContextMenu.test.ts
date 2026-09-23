@@ -78,6 +78,43 @@ test('editor context menu exposes grouped editing, export, image, and file actio
   assert.match(styles, /data-submenu-direction="left"[\s\S]*right: calc\(100% - 2px\)/);
 });
 
+test('editor context menu groups actions by scenario and reuses toolbar formatting', () => {
+  const editor = read('src/components/Editor/Editor.tsx');
+  const styles = read('src/styles/workbench.css');
+
+  // 二级菜单容器与通用组件
+  assert.match(editor, /function ContextSubmenu\(\{ label, icon, direction, open, disabled, onToggle, onHover, children \}: ContextSubmenuProps\)/);
+  assert.match(editor, /data-submenu-direction=\{direction\}/);
+  assert.match(styles, /\.editor-context-menu-group,[\s\S]*\.editor-context-copy-as \{ position: relative; \}/);
+  assert.match(styles, /\.editor-context-menu-group > button,/);
+
+  // 剪贴板场景补上剪切与全选
+  assert.match(editor, /runContextMenuAction\('cut'\)/);
+  assert.match(editor, /runContextMenuAction\('selectAll'\)/);
+
+  // 格式 / 标题子菜单：与浮动工具栏同源，直接作用于选区
+  assert.match(editor, /label="格式" icon="text"/);
+  assert.match(editor, /runContextWrap\('\*\*', '\*\*'\)/);
+  assert.match(editor, /clearContextInlineFormatting/);
+  assert.match(editor, /stripInlineFormatting\(selected\)/);
+  assert.match(editor, /label="标题" icon="select"/);
+  assert.match(editor, /applyContextHeading\(level\)/);
+
+  // 插入与表格子菜单：表格操作仅在光标位于表格内时启用
+  assert.match(editor, /label="插入" icon="image"/);
+  assert.match(editor, /requestContextTable/);
+  assert.match(editor, /window\.dispatchEvent\(new CustomEvent\('zeditor-insert-table'\)\)/);
+  assert.match(editor, /label="表格" icon="table"/);
+  assert.match(editor, /disabled=\{!contextMenu\.inTable\}/);
+  assert.match(editor, /inTable: parseTableAt\(model\.getValue\(\), selection\.to\) !== null/);
+  for (const action of ['row-above', 'row-below', 'row-delete', 'column-left', 'column-right', 'column-delete', 'align-left', 'align-center', 'align-right', 'format', 'table-delete']) {
+    assert.match(editor, new RegExp(`runContextTableAction\\('${action}'\\)`), action);
+  }
+
+  // 菜单过高时按实际高度回夹，避免超出窗口底部
+  assert.match(editor, /const maxTop = window\.innerHeight - element\.offsetHeight - 8/);
+});
+
 test('floating editor toolbar stays compact and Monaco uses the shared scrollbar width', () => {
   const editor = read('src/components/Editor/Editor.tsx');
   const layout = read('src/utils/editorLayout.ts');
