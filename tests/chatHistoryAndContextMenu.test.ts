@@ -114,6 +114,10 @@ test('editor context menu groups actions by scenario and reuses toolbar formatti
   assert.match(editor, /window\.dispatchEvent\(new CustomEvent\('zeditor-insert-table'\)\)/);
   assert.match(editor, /label="表格" icon="table"/);
   assert.match(editor, /disabled=\{!contextMenu\.inTable\}/);
+  // 表格子菜单本身始终可用：插入与结构操作分开，插入不受光标位置限制
+  assert.doesNotMatch(editor, /label="表格" icon="table"[\s\S]{0,140}?disabled=\{/);
+  assert.match(editor, /<span>插入 3 × 3 表格<\/span>/);
+  assert.match(editor, /把光标放进表格即可使用行列与对齐操作/);
   assert.match(editor, /inTable: parseTableAt\(model\.getValue\(\), selection\.to\) !== null/);
   for (const action of ['row-above', 'row-below', 'row-delete', 'column-left', 'column-right', 'column-delete', 'align-left', 'align-center', 'align-right', 'format', 'table-delete']) {
     assert.match(editor, new RegExp(`runContextTableAction\\('${action}'\\)`), action);

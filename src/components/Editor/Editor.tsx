@@ -1338,20 +1338,24 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
             <button type="button" role="menuitem" onClick={() => runContextInsert('> ')}><span>引用</span></button>
             <button type="button" role="menuitem" onClick={() => runContextInsert('\n---\n')}><span>分割线</span></button>
           </ContextSubmenu>
-          <ContextSubmenu label="表格" icon="table" direction={contextMenu.submenuDirection} disabled={!contextMenu.inTable} {...submenuHandlers('table')}>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('row-above')}><span>上方插入行</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('row-below')}><span>下方插入行</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('row-delete')}><span>删除当前行</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('column-left')}><span>左侧插入列</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('column-right')}><span>右侧插入列</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('column-delete')}><span>删除当前列</span></button>
+          {/* 表格：插入随时可用；行列与对齐操作要求光标位于表格内 */}
+          <ContextSubmenu label="表格" icon="table" direction={contextMenu.submenuDirection} {...submenuHandlers('table')}>
+            <button type="button" role="menuitem" onClick={requestContextTable}><span>插入 3 × 3 表格</span></button>
             <div className="editor-context-menu-divider" role="separator" />
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('align-left')}><span>当前列左对齐</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('align-center')}><span>当前列居中</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('align-right')}><span>当前列右对齐</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('row-above')}><span>上方插入行</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('row-below')}><span>下方插入行</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('row-delete')}><span>删除当前行</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('column-left')}><span>左侧插入列</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('column-right')}><span>右侧插入列</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('column-delete')}><span>删除当前列</span></button>
             <div className="editor-context-menu-divider" role="separator" />
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('format')}><span>整理表格格式</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextTableAction('table-delete')}><span>删除整张表格</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('align-left')}><span>当前列左对齐</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('align-center')}><span>当前列居中</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('align-right')}><span>当前列右对齐</span></button>
+            <div className="editor-context-menu-divider" role="separator" />
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('format')}><span>整理表格格式</span></button>
+            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('table-delete')}><span>删除整张表格</span></button>
+            {!contextMenu.inTable && <div className="editor-context-menu-hint">把光标放进表格即可使用行列与对齐操作</div>}
           </ContextSubmenu>
 
           <div className="editor-context-menu-divider" role="separator" />

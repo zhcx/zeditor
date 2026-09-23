@@ -2434,7 +2434,16 @@ body {
   text-align: left;
   cursor: pointer;
 }
-.editor-context-submenu button:hover { background: var(--ui-bg-hover); color: var(--ui-text-primary); }
+.editor-context-submenu button:hover:not(:disabled) { background: var(--ui-bg-hover); color: var(--ui-text-primary); }
+
+/* 子菜单挂在 body 上，主菜单里的 :disabled 规则覆盖不到，这里单独补齐。 */
+.editor-context-submenu button:disabled { opacity: 0.38; cursor: default; }
+.editor-context-menu-hint {
+  padding: 5px 9px 3px;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  line-height: 1.4;
+}
 
 /* ===== WebDAV status bar ===== */
 
