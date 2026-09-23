@@ -167,34 +167,34 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.4.9 更新
+## v0.5.0 更新
 
 ### 更新日志
 
-- **表格编辑**：工具栏网格、功能菜单、`Ctrl+Shift+T` 与斜杠 `/table` 共用一套模板（默认 3 × 3），光标进入表格即出现浮动工具栏，可增删行列、切换左中右对齐、整理格式或删除表格。
-- **表格键盘导航**：Tab / Shift+Tab 切换单元格（末行自动补一行），方向键在单元格之间移动，Enter 在当前行下方新增一行。
-- **表格列宽拖动**：预览中拖动表头分隔线调整列宽，双击把手恢复自动宽度；列宽只作用于预览，不写入文档。
-- **图片素材目录**：文件对话框、拖拽与粘贴统一把图片复制到文档同级的 `.assets` 目录，离线可看且不依赖图床。
-- **图片尺寸与编辑**：支持 `![替代文本](路径){width=420 height=280}`；双击预览中的图片可改路径、替代文本与尺寸，右键可快速调整大小、复制路径或删除。
+- **右键菜单重组**：按场景分为 AI、编辑与剪贴板、格式、标题、插入、表格、导出与文件六类；选中文字后可直接右键加粗、设为标题、插入链接、换行引用或调整表格结构。
+- **表格菜单随手可用**：「表格」子菜单顶部「插入 3 × 3 表格」随时可点，行列增删与对齐在光标位于表格内时启用。
+- **浮动工具栏精简**：同类命令收进下拉菜单，直接按钮只留高频动作（按钮 40 → 13），统一为文字标签。
+- **表格修复**：新增行与新增列不再写入「内容 / 列 N」占位；表格选择器弹出位置准确；窄表格不再出现空滚动条。
+- **预览细节**：当前行指示条落在列表项目符号左侧；插入图片弹窗文字不再折行。
 - **转换模块**：继续沿用 AnyDoc v1.2.0，本版本未变更转换引擎。
 
-### v0.4.9 平台安装包对照
+### v0.5.0 平台安装包对照
 
-> 以下链接指向 v0.4.9 Release 资产；安装包由 GitHub Actions 根据 v0.4.9 标签源码构建。
+> 以下链接指向 v0.5.0 Release 资产；安装包由 GitHub Actions 根据 v0.5.0 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_0.4.9_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_0.4.9_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_0.4.9_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_0.4.9_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_0.4.9_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor-0.4.9-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.4.9/Zeditor_0.4.9_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_0.5.0_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_0.5.0_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_0.5.0_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_0.5.0_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_0.5.0_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor-0.5.0-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.0/Zeditor_0.5.0_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.4.9.md`](docs/releases/v0.4.9.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.0.md`](docs/releases/v0.5.0.md)。
 
 ## Contributors
 
@@ -397,6 +397,8 @@ SignPath Foundation 申请目前处于准备/审核阶段；在正式启用前�
 
 ## 🚀 版本更新日志
 
+ - **v0.5.0**（2026-09-23）：右键菜单按场景重组、浮动工具栏精简为文字标签，修复表格新增行列占位、选择器与滚动条、预览指示条位置等问题。详见 [v0.5.0 发布说明](docs/releases/v0.5.0.md)。
+   - 平台安装包（由 `v0.5.0` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.0_x64-setup.exe` / `Zeditor_0.5.0_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
  - **v0.4.9**（2026-09-22）：完善表格编辑与图片支持——表格增删行列、对齐、键盘导航与列宽拖动，图片统一复制到 `.assets` 并支持尺寸与双击编辑。详见 [v0.4.9 发布说明](docs/releases/v0.4.9.md)。
    - 平台安装包（由 `v0.4.9` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.9_x64-setup.exe` / `Zeditor_0.4.9_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
  - **v0.4.8**（2026-09-22）：新增本地视频 / 音频媒体语法、插入媒体与拖拽导入，素材复制到 `.assets` 目录，预览渲染原生播放器。详见 [v0.4.8 发布说明](docs/releases/v0.4.8.md)。
