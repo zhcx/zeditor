@@ -5,6 +5,7 @@ import { useAIStore } from '../../stores/aiStore';
 import { open } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { TablePicker } from '../Editor/TablePicker';
+import { ToolbarMenu, type ToolbarMenuItem } from './ToolbarMenu';
 import { formatMarkdown, type MarkdownFormatResult } from '../../utils/markdownFormatter';
 import {
   formatMediaEmbed,
@@ -23,7 +24,10 @@ interface ToolbarButton {
   label?: string;
   icon?: ToolbarIconName;
   title: string;
-  action: () => void | Promise<void>;
+  /** 直接执行的动作；与 menu 二选一。 */
+  action?: () => void | Promise<void>;
+  /** 同类命令收进下拉菜单，点击按钮展开。 */
+  menu?: ToolbarMenuItem[];
   /** 表格选择器的锚点按钮：弹层按它的位置定位。 */
   picker?: boolean;
 }
@@ -435,6 +439,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     editorView.focus();
   };
 
+  // 同类命令收进下拉菜单：直接按钮只保留最高频的动作，其余按主题归组。
   const toolbarGroups: ToolbarGroup[] = [
     {
       title: '格式',
@@ -442,30 +447,38 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
         { label: 'B', title: '加粗 (Ctrl+B)', action: () => wrapSelection('**', '**') },
         { label: 'I', title: '斜体 (Ctrl+I)', action: () => wrapSelection('*', '*') },
         { label: 'S', title: '删除线', action: () => wrapSelection('~~', '~~') },
-        { label: '==', title: '高亮', action: () => wrapSelection('==', '==') },
-        { label: 'U', title: '下划线', action: () => wrapSelection('<u>', '</u>') },
-        { label: '上', title: '上标', action: () => wrapSelection('<sup>', '</sup>') },
-        { label: '下', title: '下标', action: () => wrapSelection('<sub>', '</sub>') },
-      ],
-    },
-    {
-      title: '标题',
-      buttons: [
-        { label: 'H1', title: '一级标题', action: () => insertBlock('# ') },
-        { label: 'H2', title: '二级标题', action: () => insertBlock('## ') },
-        { label: 'H3', title: '三级标题', action: () => insertBlock('### ') },
-        { label: 'H4', title: '四级标题', action: () => insertBlock('#### ') },
-        { label: 'H5', title: '五级标题', action: () => insertBlock('##### ') },
-        { label: 'H6', title: '六级标题', action: () => insertBlock('###### ') },
-      ],
-    },
-    {
-      title: '列表',
-      buttons: [
-        { label: '•', title: '无序列表', action: () => insertBlock('- ') },
-        { label: '1.', title: '有序列表', action: () => insertBlock('1. ') },
-        { label: '☐', title: '任务列表', action: () => insertBlock('- [ ] ') },
-        { label: '→', title: '缩进', action: () => insertAtCursor('  ') },
+        {
+          label: '样式',
+          title: '更多行内样式',
+          menu: [
+            { label: '高亮', action: () => wrapSelection('==', '==') },
+            { label: '下划线', action: () => wrapSelection('<u>', '</u>') },
+            { label: '上标', action: () => wrapSelection('<sup>', '</sup>') },
+            { label: '下标', action: () => wrapSelection('<sub>', '</sub>') },
+          ],
+        },
+        {
+          label: '标题',
+          title: '插入标题（H1 - H6）',
+          menu: [
+            { label: '一级标题', action: () => insertBlock('# ') },
+            { label: '二级标题', action: () => insertBlock('## ') },
+            { label: '三级标题', action: () => insertBlock('### ') },
+            { label: '四级标题', action: () => insertBlock('#### ') },
+            { label: '五级标题', action: () => insertBlock('##### ') },
+            { label: '六级标题', action: () => insertBlock('###### ') },
+          ],
+        },
+        {
+          label: '列表',
+          title: '列表与缩进',
+          menu: [
+            { label: '无序列表', action: () => insertBlock('- ') },
+            { label: '有序列表', action: () => insertBlock('1. ') },
+            { label: '任务列表', action: () => insertBlock('- [ ] ') },
+            { label: '增加缩进', action: () => insertAtCursor('  ') },
+          ],
+        },
       ],
     },
     {
@@ -473,9 +486,15 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       buttons: [
         { label: '↶', title: '撤销 (Ctrl+Z)', action: () => runEditorCommand('undo') },
         { label: '↷', title: '重做 (Ctrl+Y)', action: () => runEditorCommand('redo') },
-        { label: '↤', title: '减少缩进', action: outdentSelection },
-        { label: '清', title: '清除选中文本的行内格式', action: clearInlineFormatting },
-        { label: 'MD', title: '检查并格式化 Markdown', action: () => setShowFormatModal(true) },
+        {
+          label: '编辑',
+          title: '缩进与文本整理',
+          menu: [
+            { label: '减少缩进', action: outdentSelection },
+            { label: '清除行内格式', action: clearInlineFormatting },
+            { label: '检查并格式化 Markdown', action: () => setShowFormatModal(true) },
+          ],
+        },
       ],
     },
     {
@@ -483,28 +502,41 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       buttons: [
         // 表格只有一个入口：点击打开尺寸选择器，拖动选行列或直接用默认 3 × 3。
         { icon: 'table', picker: true, title: '插入表格（拖动选择行列）', action: () => setShowTablePicker((visible) => !visible) },
-        { icon: 'link', title: '链接', action: () => wrapSelection('[', '](url)') },
-        { icon: 'image', title: '图片', action: () => setShowImageModal(true) },
-        { icon: 'video', title: '插入媒体（本地视频 / 音频 / B站 / YouTube / Vimeo）', action: () => setShowMediaModal(true) },
-        { label: '😊', title: '插入原生 Emoji', action: () => setShowEmojiPicker(true) },
-        { label: '</>', title: '代码块', action: () => insertAtCursor('\n```\ncode\n```\n', 5) },
-        { label: 'Q', title: '引用', action: () => insertBlock('> ') },
-        { label: '—', title: '分割线', action: () => insertAtCursor('\n---\n') },
-      ],
-    },
-    {
-      title: '高级',
-      buttons: [
-        { label: '∑', title: '行内公式', action: () => wrapSelection('$', '$') },
-        { label: 'Σ', title: '公式块', action: () => insertBlock('$$\n', '\n$$\n') },
-        { label: 'Ⓕ', title: '脚注', action: () => wrapSelection('[^', ']()') },
-        { label: 'M', title: 'Mermaid 流程图', action: () => insertAtCursor('\n```mermaid\nflowchart LR\n  A[开始] --> B{判断}\n  B -->|是| C[执行]\n  B -->|否| D[结束]\n```\n', 24) },
-        { label: '↔', title: 'Mermaid 时序图', action: () => insertAtCursor('\n```mermaid\nsequenceDiagram\n  participant 用户\n  participant 服务\n  用户->>服务: 请求\n  服务-->>用户: 响应\n```\n', 28) },
-        { label: '▥', title: 'Mermaid 甘特图', action: () => insertAtCursor('\n```mermaid\ngantt\n  title 项目计划\n  dateFormat YYYY-MM-DD\n  section 开发\n  功能开发 :a1, 2026-01-01, 7d\n  测试 :a2, after a1, 3d\n```\n', 22) },
-        { label: '❖', title: '目录', action: () => insertAtCursor('\n[TOC]\n') },
-        { label: '▸', title: '插入可折叠内容', action: () => insertAtCursor('\n<details>\n<summary>展开查看</summary>\n\n内容\n\n</details>\n', 32) },
-        { label: '※', title: '插入注释', action: () => insertAtCursor('<!-- 注释 -->', 5) },
-        { label: '⌁', title: '插入分页符', action: () => insertAtCursor('\n<div style="page-break-after: always;"></div>\n') },
+        {
+          label: '插入',
+          title: '插入内容块',
+          menu: [
+            { label: '链接', action: () => wrapSelection('[', '](url)') },
+            { label: '图片', action: () => setShowImageModal(true) },
+            { label: '视频 / 音频', action: () => setShowMediaModal(true) },
+            { label: 'Emoji', action: () => setShowEmojiPicker(true) },
+            { label: '代码块', action: () => insertAtCursor('\n```\ncode\n```\n', 5) },
+            { label: '引用', action: () => insertBlock('> ') },
+            { label: '分割线', action: () => insertAtCursor('\n---\n') },
+            { label: '目录', action: () => insertAtCursor('\n[TOC]\n') },
+            { label: '可折叠内容', action: () => insertAtCursor('\n<details>\n<summary>展开查看</summary>\n\n内容\n\n</details>\n', 32) },
+            { label: '注释', action: () => insertAtCursor('<!-- 注释 -->', 5) },
+            { label: '分页符', action: () => insertAtCursor('\n<div style="page-break-after: always;"></div>\n') },
+          ],
+        },
+        {
+          label: '公式',
+          title: '公式与脚注',
+          menu: [
+            { label: '行内公式', action: () => wrapSelection('$', '$') },
+            { label: '公式块', action: () => insertBlock('$$\n', '\n$$\n') },
+            { label: '脚注', action: () => wrapSelection('[^', ']()') },
+          ],
+        },
+        {
+          label: '图表',
+          title: 'Mermaid 图表',
+          menu: [
+            { label: 'Mermaid 流程图', action: () => insertAtCursor('\n```mermaid\nflowchart LR\n  A[开始] --> B{判断}\n  B -->|是| C[执行]\n  B -->|否| D[结束]\n```\n', 24) },
+            { label: 'Mermaid 时序图', action: () => insertAtCursor('\n```mermaid\nsequenceDiagram\n  participant 用户\n  participant 服务\n  用户->>服务: 请求\n  服务-->>用户: 响应\n```\n', 28) },
+            { label: 'Mermaid 甘特图', action: () => insertAtCursor('\n```mermaid\ngantt\n  title 项目计划\n  dateFormat YYYY-MM-DD\n  section 开发\n  功能开发 :a1, 2026-01-01, 7d\n  测试 :a2, after a1, 3d\n```\n', 22) },
+          ],
+        },
       ],
     },
   ];
@@ -606,17 +638,21 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   };
 
   const renderButton = (btn: ToolbarButton) => (
-    <button
-      key={btn.title}
-      ref={btn.picker ? tablePickerButtonRef : undefined}
-      className="toolbar-btn"
-      title={btn.title}
-      aria-label={btn.title}
-      onMouseDown={(event) => event.preventDefault()}
-      onClick={btn.action}
-    >
-      {btn.icon ? <ToolbarGlyph name={btn.icon} /> : btn.label}
-    </button>
+    btn.menu ? (
+      <ToolbarMenu key={btn.title} label={btn.label ?? btn.title} title={btn.title} items={btn.menu} />
+    ) : (
+      <button
+        key={btn.title}
+        ref={btn.picker ? tablePickerButtonRef : undefined}
+        className="toolbar-btn"
+        title={btn.title}
+        aria-label={btn.title}
+        onMouseDown={(event) => event.preventDefault()}
+        onClick={() => void btn.action?.()}
+      >
+        {btn.icon ? <ToolbarGlyph name={btn.icon} /> : btn.label}
+      </button>
+    )
   );
 
   return (
@@ -654,9 +690,13 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
           onMouseDown={(event) => event.preventDefault()}
         >
           {overflowButtons.map((btn) => (
-            <button key={btn.title} type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => { btn.action(); setOverflowOpen(false); }}>
-              <span>{btn.icon ? <ToolbarGlyph name={btn.icon} /> : btn.label}</span>{btn.title}
-            </button>
+            btn.menu ? (
+              <div key={btn.title} className="toolbar-overflow-menu-row">{renderButton(btn)}</div>
+            ) : (
+              <button key={btn.title} type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => { void btn.action?.(); setOverflowOpen(false); }}>
+                <span>{btn.icon ? <ToolbarGlyph name={btn.icon} /> : btn.label}</span>{btn.title}
+              </button>
+            )
           ))}
         </div>,
         document.body,

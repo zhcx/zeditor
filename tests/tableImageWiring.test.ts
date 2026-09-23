@@ -73,6 +73,57 @@ test('toolbar keeps a single table entry merging quick insert and the size picke
   assert.match(picker, /onInsertDefault/);
 });
 
+test('toolbar merges similar commands into dropdown menus and keeps only high-frequency buttons', async () => {
+  const toolbar = await read('../src/components/Toolbar/Toolbar.tsx');
+  const sliceBetween = (from: string, to: string) => {
+    const start = toolbar.indexOf(from);
+    const end = toolbar.indexOf(to, start + from.length);
+    assert.ok(start >= 0 && end > start, `${from} → ${to}`);
+    return toolbar.slice(start, end);
+  };
+  // 直接按钮位于 8 空格缩进，菜单项缩进更深，用它区分两者。
+  const countDirectButtons = (block: string) => (block.match(/\r?\n[ ]{8}\{/g) ?? []).length;
+
+  // 直接按钮只保留高频动作：B / I / S + 样式、标题、列表三个菜单
+  const formatGroup = sliceBetween("title: '格式'", "title: '编辑'");
+  assert.equal(countDirectButtons(formatGroup), 6);
+  assert.equal((formatGroup.match(/menu: \[/g) ?? []).length, 3);
+  for (const label of ["label: 'B'", "label: 'I'", "label: 'S'", "label: '样式'", "label: '标题'", "label: '列表'"]) {
+    assert.match(formatGroup, new RegExp(label), label);
+  }
+  // 标题与列表的层级按钮收进菜单
+  assert.match(formatGroup, /menu: \[[\s\S]*?\{ label: '一级标题'/);
+  assert.match(formatGroup, /\{ label: '六级标题'/);
+  assert.match(formatGroup, /menu: \[[\s\S]*?\{ label: '无序列表'/);
+
+  const editGroup = sliceBetween("title: '编辑'", "title: '插入'");
+  assert.equal(countDirectButtons(editGroup), 3);
+  assert.match(editGroup, /label: '编辑'/);
+  assert.match(editGroup, /menu: \[[\s\S]*?\{ label: '检查并格式化 Markdown'/);
+
+  const insertGroup = sliceBetween("title: '插入'", 'const toolbarButtons');
+  assert.equal(countDirectButtons(insertGroup), 4);
+  assert.match(insertGroup, /icon: 'table', picker: true/);
+  for (const label of ["label: '插入'", "label: '公式'", "label: '图表'"]) {
+    assert.match(insertGroup, new RegExp(label), label);
+  }
+  assert.match(insertGroup, /menu: \[[\s\S]*?\{ label: 'Mermaid 流程图'/);
+});
+
+test('toolbar dropdown component positions itself, closes on Escape and supports keyboard navigation', async () => {
+  const menu = await read('../src/components/Toolbar/ToolbarMenu.tsx');
+
+  assert.match(menu, /createPortal\(/);
+  assert.match(menu, /aria-haspopup="menu"/);
+  assert.match(menu, /aria-expanded=\{open\}/);
+  assert.match(menu, /requestAnimationFrame\(updatePosition\)/);
+  assert.match(menu, /Math\.min\(rect\.left, window\.innerWidth - width - 8\)/);
+  assert.match(menu, /event\.key === 'Escape'/);
+  assert.match(menu, /event\.key === 'ArrowDown' \|\| event\.key === 'ArrowUp'/);
+  assert.match(menu, /window\.addEventListener\('keydown', handleKeyDown, true\)/);
+  assert.match(menu, /data-active=\{index === activeIndex\}/);
+});
+
 test('dropped images go through the asset pipeline like media files', async () => {
   const app = await read('../src/App.tsx');
 
