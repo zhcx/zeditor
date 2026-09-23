@@ -55,6 +55,24 @@ test('toolbar inserts tables through the shared template and offers local image 
   assert.match(toolbar, /复制到文档同级的 \.assets 目录/);
 });
 
+test('toolbar keeps a single table entry merging quick insert and the size picker', async () => {
+  const toolbar = await read('../src/components/Toolbar/Toolbar.tsx');
+  const picker = await read('../src/components/Editor/TablePicker.tsx');
+
+  // 工具栏只保留一个表格按钮：点击打开尺寸选择器，内部再提供默认 3 × 3 快捷插入。
+  assert.equal((toolbar.match(/icon: 'table'/g) ?? []).length, 1);
+  assert.doesNotMatch(toolbar, /toolbarGroups\[3\]\.buttons\.unshift/);
+  assert.match(toolbar, /picker: true/);
+  assert.match(toolbar, /ref=\{btn\.picker \? tablePickerButtonRef : undefined\}/);
+  assert.match(toolbar, /onInsertDefault=\{\(\) => insertTable\(3, 3\)\}/);
+
+  // 弹层位置按锚点实时测量，越界夹取并在下方空间不足时翻转到上方
+  assert.match(picker, /requestAnimationFrame\(updatePosition\)/);
+  assert.match(picker, /Math\.min\(rect\.left, window\.innerWidth - width - 8\)/);
+  assert.match(picker, /flipsUp = below \+ height > window\.innerHeight - 8/);
+  assert.match(picker, /onInsertDefault/);
+});
+
 test('dropped images go through the asset pipeline like media files', async () => {
   const app = await read('../src/App.tsx');
 

@@ -24,6 +24,8 @@ interface ToolbarButton {
   icon?: ToolbarIconName;
   title: string;
   action: () => void | Promise<void>;
+  /** 表格选择器的锚点按钮：弹层按它的位置定位。 */
+  picker?: boolean;
 }
 
 interface ToolbarProps {
@@ -479,11 +481,12 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     {
       title: '插入',
       buttons: [
+        // 表格只有一个入口：点击打开尺寸选择器，拖动选行列或直接用默认 3 × 3。
+        { icon: 'table', picker: true, title: '插入表格（拖动选择行列）', action: () => setShowTablePicker((visible) => !visible) },
         { icon: 'link', title: '链接', action: () => wrapSelection('[', '](url)') },
         { icon: 'image', title: '图片', action: () => setShowImageModal(true) },
         { icon: 'video', title: '插入媒体（本地视频 / 音频 / B站 / YouTube / Vimeo）', action: () => setShowMediaModal(true) },
         { label: '😊', title: '插入原生 Emoji', action: () => setShowEmojiPicker(true) },
-        { icon: 'table', title: '表格 (Ctrl+Shift+T)', action: () => insertTable(3, 3) },
         { label: '</>', title: '代码块', action: () => insertAtCursor('\n```\ncode\n```\n', 5) },
         { label: 'Q', title: '引用', action: () => insertBlock('> ') },
         { label: '—', title: '分割线', action: () => insertAtCursor('\n---\n') },
@@ -505,8 +508,6 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       ],
     },
   ];
-
-  toolbarGroups[3].buttons.unshift({ icon: 'table', title: '插入表格（拖动选择行列）', action: () => setShowTablePicker((visible) => !visible) });
 
   const toolbarButtons = toolbarGroups.flatMap((group) => group.buttons.map((button) => ({ ...button, group: group.title })));
   const toolbarStructureKey = toolbarButtons.map((button) => `${button.group}:${button.title}`).join('|');
@@ -607,7 +608,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   const renderButton = (btn: ToolbarButton) => (
     <button
       key={btn.title}
-      ref={btn.title.includes('插入表格') ? tablePickerButtonRef : undefined}
+      ref={btn.picker ? tablePickerButtonRef : undefined}
       className="toolbar-btn"
       title={btn.title}
       aria-label={btn.title}
@@ -684,6 +685,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
         <TablePicker
           anchorRef={tablePickerButtonRef}
           onInsert={insertTable}
+          onInsertDefault={() => insertTable(3, 3)}
           onClose={() => setShowTablePicker(false)}
         />
       )}

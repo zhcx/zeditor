@@ -10944,6 +10944,25 @@ html[data-theme] .preview-container,
 .table-toolbar-size,
 .table-toolbar-hint { color: var(--text-muted); font-size: 10px; white-space: nowrap; }
 
+.table-picker-default {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  margin-top: 8px;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-primary);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.table-picker-default:hover { background: var(--surface-muted); }
+.table-picker-shortcut { color: var(--text-muted); font-size: 10px; }
+
 .table-resize-wrap {
   position: relative;
   display: block;
