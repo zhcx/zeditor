@@ -1,18 +1,20 @@
-import { useEffect, useLayoutEffect, useRef, useState, type RefObject } from 'react';
+import { useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 
 interface TablePickerProps {
+  /** 触发按钮本身：位置与「点外部关闭」都以它为准。 */
+  anchor: HTMLElement;
   onInsert: (rows: number, columns: number) => void;
   onClose: () => void;
-  anchorRef: RefObject<HTMLButtonElement | null>;
   /** 默认尺寸快捷插入：与 Ctrl+Shift+T、功能菜单共用同一套模板。 */
   onInsertDefault: () => void;
   defaultSize?: { rows: number; columns: number };
 }
 
 export function TablePicker({
+  anchor,
   onInsert,
   onClose,
-  anchorRef,
   onInsertDefault,
   defaultSize = { rows: 3, columns: 3 },
 }: TablePickerProps) {
@@ -27,11 +29,11 @@ export function TablePicker({
   useLayoutEffect(() => {
     let frame = 0;
     const updatePosition = () => {
-      const rect = anchorRef.current?.getBoundingClientRect();
+      const rect = anchor.getBoundingClientRect();
       const picker = pickerRef.current;
-      if (!rect || !picker) return;
+      if (!picker) return;
       const width = picker.offsetWidth || 282;
-      const height = picker.offsetHeight || 268;
+      const height = picker.offsetHeight || 300;
       const below = rect.bottom + 6;
       const flipsUp = below + height > window.innerHeight - 8 && rect.top >= height + 16;
       setPosition({
@@ -42,7 +44,7 @@ export function TablePicker({
     };
 
     updatePosition();
-    // 选中文字后浮动工具栏还会重新定位，下一帧再量一次可以避免弹层停留在旧位置。
+    // 工具栏可能在同一帧里重新定位，下一帧再量一次可以避免弹层停留在旧位置。
     frame = window.requestAnimationFrame(updatePosition);
     window.addEventListener('resize', updatePosition);
     window.addEventListener('scroll', updatePosition, true);
@@ -51,7 +53,7 @@ export function TablePicker({
       window.removeEventListener('resize', updatePosition);
       window.removeEventListener('scroll', updatePosition, true);
     };
-  }, [anchorRef]);
+  }, [anchor]);
 
   useEffect(() => {
     const stop = () => setDragging(false);
@@ -62,20 +64,21 @@ export function TablePicker({
   useEffect(() => {
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as Node;
-      if (pickerRef.current?.contains(target) || anchorRef.current?.contains(target)) return;
+      if (pickerRef.current?.contains(target) || anchor.contains(target)) return;
       onClose();
     };
 
     document.addEventListener('pointerdown', closeOnOutsidePointer);
     return () => document.removeEventListener('pointerdown', closeOnOutsidePointer);
-  }, [anchorRef, onClose]);
+  }, [anchor, onClose]);
 
   // 单击与拖动都通过 mousedown / mouseenter 更新 size，这里统一按当前 size 插入。
   const handleInsert = () => {
     if (size.rows > 0 && size.columns > 0) onInsert(size.rows, size.columns);
   };
 
-  return (
+  // 必须挂到 body：浮动工具栏带 transform，会成为 fixed 定位的包含块，导致弹层偏移。
+  return createPortal(
     <div
       ref={pickerRef}
       className="table-picker-popover"
@@ -119,6 +122,7 @@ export function TablePicker({
           <span className="table-picker-shortcut">Ctrl+Shift+T</span>
         </button>
       </div>
-    </div>
+    </div>,
+    document.body,
   );
 }

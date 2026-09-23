@@ -6777,7 +6777,7 @@ textarea:focus-visible {
 
 .table-picker-popover {
   position: fixed;
-  z-index: 10020;
+  z-index: 10050;
 }
 .table-picker-popover .table-picker {
   width: 282px;

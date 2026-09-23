@@ -300,7 +300,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showFormatModal, setShowFormatModal] = useState(false);
   const [showTablePicker, setShowTablePicker] = useState(false);
-  const tablePickerButtonRef = useRef<HTMLButtonElement>(null);
+  const [tablePickerAnchor, setTablePickerAnchor] = useState<HTMLElement | null>(null);
   const toolbarWheelDeltaRef = useRef(0);
   const toolbarWheelFrameRef = useRef<number | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
@@ -498,7 +498,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       title: '插入',
       buttons: [
         // 表格只有一个入口：点击打开尺寸选择器，拖动选行列或直接用默认 3 × 3。
-        { icon: 'table', picker: true, title: '插入表格（拖动选择行列）', action: () => setShowTablePicker((visible) => !visible) },
+        { icon: 'table', picker: true, title: '插入表格（拖动选择行列）' },
         {
           label: '插入',
           title: '插入内容块',
@@ -640,12 +640,19 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     ) : (
       <button
         key={btn.title}
-        ref={btn.picker ? tablePickerButtonRef : undefined}
         className="toolbar-btn"
         title={btn.title}
         aria-label={btn.title}
         onMouseDown={(event) => event.preventDefault()}
-        onClick={() => void btn.action?.()}
+        onClick={(event) => {
+          if (btn.picker) {
+            // 工具栏存在多套实例（固定 / 浮动），用点击到的元素做锚点才不会串位。
+            setTablePickerAnchor(event.currentTarget);
+            setShowTablePicker((visible) => !visible);
+            return;
+          }
+          void btn.action?.();
+        }}
       >
         {btn.icon ? <ToolbarGlyph name={btn.icon} /> : btn.label}
       </button>
@@ -687,7 +694,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
           onMouseDown={(event) => event.preventDefault()}
         >
           {overflowButtons.map((btn) => (
-            btn.menu ? (
+            btn.menu || btn.picker ? (
               <div key={btn.title} className="toolbar-overflow-menu-row">{renderButton(btn)}</div>
             ) : (
               <button key={btn.title} type="button" role="menuitem" onMouseDown={(event) => event.preventDefault()} onClick={() => { void btn.action?.(); setOverflowOpen(false); }}>
@@ -718,9 +725,9 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
           }}
         />
       )}
-      {showTablePicker && (
+      {showTablePicker && tablePickerAnchor && (
         <TablePicker
-          anchorRef={tablePickerButtonRef}
+          anchor={tablePickerAnchor}
           onInsert={insertTable}
           onInsertDefault={() => insertTable(3, 3)}
           onClose={() => setShowTablePicker(false)}

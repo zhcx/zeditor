@@ -63,10 +63,14 @@ test('toolbar keeps a single table entry merging quick insert and the size picke
   assert.equal((toolbar.match(/icon: 'table'/g) ?? []).length, 1);
   assert.doesNotMatch(toolbar, /toolbarGroups\[3\]\.buttons\.unshift/);
   assert.match(toolbar, /picker: true/);
-  assert.match(toolbar, /ref=\{btn\.picker \? tablePickerButtonRef : undefined\}/);
+  assert.match(toolbar, /setTablePickerAnchor\(event\.currentTarget\)/);
+  assert.match(toolbar, /anchor=\{tablePickerAnchor\}/);
   assert.match(toolbar, /onInsertDefault=\{\(\) => insertTable\(3, 3\)\}/);
 
-  // 弹层位置按锚点实时测量，越界夹取并在下方空间不足时翻转到上方
+  // 弹层挂到 body 并按其锚点元素测量，越界夹取、下方空间不足时翻转到上方
+  assert.match(picker, /createPortal\(/);
+  assert.match(picker, /anchor\.getBoundingClientRect\(\)/);
+  assert.match(picker, /document\.body,/);
   assert.match(picker, /requestAnimationFrame\(updatePosition\)/);
   assert.match(picker, /Math\.min\(rect\.left, window\.innerWidth - width - 8\)/);
   assert.match(picker, /flipsUp = below \+ height > window\.innerHeight - 8/);
