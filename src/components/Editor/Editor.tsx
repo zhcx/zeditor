@@ -1,4 +1,5 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import 'monaco-editor/esm/nls.messages.zh-cn.js';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution';
@@ -85,7 +86,27 @@ interface TableToolbarState {
   columns: number;
 }
 
-type ContextMenuIconName = 'sparkles' | 'translate' | 'copy' | 'copyAs' | 'paste' | 'text' | 'pdf' | 'document' | 'code' | 'image' | 'folder' | 'undo' | 'redo' | 'table' | 'select';
+type ContextMenuIconName =
+  | 'sparkles'
+  | 'translate'
+  | 'copy'
+  | 'copyAs'
+  | 'paste'
+  | 'cut'
+  | 'text'
+  | 'format'
+  | 'heading'
+  | 'insert'
+  | 'selectAll'
+  | 'pdf'
+  | 'document'
+  | 'code'
+  | 'image'
+  | 'folder'
+  | 'undo'
+  | 'redo'
+  | 'table'
+  | 'select';
 
 interface ContextSubmenuProps {
   label: string;
@@ -98,28 +119,104 @@ interface ContextSubmenuProps {
   children: React.ReactNode;
 }
 
-/** 右键菜单里的二级菜单：悬停或点击展开，方向由菜单在窗口中的位置决定。 */
+/**
+ * 右键菜单里的二级菜单：悬停或点击展开。
+ * 弹层挂在 body 上，主菜单带 `overflow-y: auto` 会裁剪内联子菜单（还会挤出横向滚动条），
+ * 因此位置按触发行的矩形实时测量，并按窗口剩余空间决定左右与上下方向。
+ */
 function ContextSubmenu({ label, icon, direction, open, disabled, onToggle, onHover, children }: ContextSubmenuProps) {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
+  // 弹层挂在 body 上，不再是触发行 DOM 的子节点：鼠标移入弹层时会先触发父级的
+  // mouseleave，因此延迟收起来给指针留出跨越间隙的时间。
+  const closeTimerRef = useRef<number | null>(null);
+  const cancelClose = () => {
+    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
+    closeTimerRef.current = null;
+  };
+  const scheduleClose = () => {
+    cancelClose();
+    closeTimerRef.current = window.setTimeout(() => onHover(false), 160);
+  };
+  useEffect(() => cancelClose, []);
+
+  // useLayoutEffect 在浏览器绘制前完成测量，重新展开时不会闪出上一轮的位置。
+  useLayoutEffect(() => {
+    if (!open) return undefined;
+    let frame = 0;
+    const update = () => {
+      const trigger = triggerRef.current;
+      const menu = menuRef.current;
+      if (!trigger || !menu) return;
+      const rect = trigger.getBoundingClientRect();
+      const width = menu.offsetWidth || 178;
+      const height = menu.offsetHeight || 220;
+      const left = direction === 'left'
+        ? Math.max(8, rect.left - width + 2)
+        : Math.max(8, Math.min(rect.right - 2, window.innerWidth - width - 8));
+      const top = Math.max(8, Math.min(rect.top - 6, window.innerHeight - height - 8));
+      setPosition({ top, left });
+    };
+
+    update();
+    frame = window.requestAnimationFrame(update);
+    window.addEventListener('resize', update);
+    window.addEventListener('scroll', update, true);
+    return () => {
+      window.cancelAnimationFrame(frame);
+      window.removeEventListener('resize', update);
+      window.removeEventListener('scroll', update, true);
+    };
+  }, [open, direction]);
+
   return (
     <div
       className="editor-context-menu-group"
       data-submenu-direction={direction}
-      onMouseEnter={() => onHover(true)}
-      onMouseLeave={() => onHover(false)}
+      onMouseEnter={() => {
+        cancelClose();
+        onHover(true);
+      }}
+      onMouseLeave={scheduleClose}
     >
       <button
+        ref={triggerRef}
         type="button"
         role="menuitem"
         aria-haspopup="menu"
         aria-expanded={open}
         disabled={disabled}
+        onMouseDown={(event) => event.preventDefault()}
         onClick={onToggle}
       >
         <span className="editor-context-menu-icon"><ContextMenuIcon name={icon} /></span>
         <span className="editor-context-menu-label">{label}</span>
         <span className="editor-context-menu-chevron">›</span>
       </button>
-      {open && !disabled && <div className="editor-context-submenu" role="menu">{children}</div>}
+      {open && !disabled && createPortal(
+        <div
+          ref={menuRef}
+          className="editor-context-submenu"
+          role="menu"
+          aria-label={label}
+          style={{
+            top: position?.top ?? 0,
+            left: position?.left ?? 0,
+            visibility: position ? 'visible' : 'hidden',
+          }}
+          onMouseDown={(event) => {
+            // 阻止默认行为让编辑器保持焦点，动作执行时选区仍然有效。
+            event.preventDefault();
+            event.stopPropagation();
+          }}
+          onMouseEnter={cancelClose}
+          onMouseLeave={scheduleClose}
+        >
+          {children}
+        </div>,
+        document.body,
+      )}
     </div>
   );
 }
@@ -137,6 +234,11 @@ function ContextMenuIcon({ name }: { name: ContextMenuIconName }) {
   if (name === 'image') return <svg viewBox="0 0 18 18"><rect x="2.4" y="2.8" width="13.2" height="12.4" rx="1.4" /><circle cx="6.2" cy="6.7" r="1.2" /><path d="m3.5 13.5 3.6-3.8 2.5 2.4 2.1-2.2 2.8 3.1" /></svg>;
   if (name === 'folder') return <svg viewBox="0 0 18 18"><path d="M2 5.2h5l1.3 1.5H16v7.8H2zM2 5.2V3.5h5l1.3 1.7" /></svg>;
   if (name === 'table') return <svg viewBox="0 0 18 18"><rect x="2.2" y="3.2" width="13.6" height="11.6" rx="1.2" /><path d="M2.2 7h13.6M2.2 10.9h13.6M9 3.2v11.6" /></svg>;
+  if (name === 'cut') return <svg viewBox="0 0 18 18"><circle cx="5.4" cy="13.4" r="1.9" /><circle cx="12.6" cy="13.4" r="1.9" /><path d="M6.7 12 12.9 3M11.3 12 5.1 3" /></svg>;
+  if (name === 'format') return <svg viewBox="0 0 18 18"><path d="M4 14.6 11.2 7.4l2.4 2.4L6.4 17H4zM12.4 6.2l1.3-1.3a1.7 1.7 0 0 1 2.4 0l.3.3a1.7 1.7 0 0 1 0 2.4l-1.3 1.3" /><path d="M3 17h12" /></svg>;
+  if (name === 'heading') return <svg viewBox="0 0 18 18"><path d="M3.6 4v10M10 4v10M3.6 9h6.4M13.2 7.6h2.6M14.5 7.6V14" /></svg>;
+  if (name === 'insert') return <svg viewBox="0 0 18 18"><rect x="2.6" y="3.4" width="12.8" height="11.2" rx="1.5" /><path d="M9 6.6v5M6.5 9.1h5" /></svg>;
+  if (name === 'selectAll') return <svg viewBox="0 0 18 18"><path d="M3 6V4.4A1.4 1.4 0 0 1 4.4 3H6M12 3h1.6A1.4 1.4 0 0 1 15 4.4V6M15 12v1.6a1.4 1.4 0 0 1-1.4 1.4H12M6 15H4.4A1.4 1.4 0 0 1 3 13.6V12" /><path d="m6.6 9.2 1.7 1.7 3.3-3.5" /></svg>;
   if (name === 'undo') return <svg viewBox="0 0 18 18"><path d="M6.5 5 3 8.5 6.5 12M3.4 8.5h6.2c3 0 4.8 1.6 4.8 4.3" /></svg>;
   if (name === 'redo') return <svg viewBox="0 0 18 18"><path d="m11.5 5 3.5 3.5-3.5 3.5M14.6 8.5H8.4c-3 0-4.8 1.6-4.8 4.3" /></svg>;
   return <svg viewBox="0 0 18 18"><path d="M3 4h12M3 9h12M3 14h12" /></svg>;
@@ -652,6 +754,14 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       event.preventDefault();
       event.stopPropagation();
       setOpenSubmenu(null);
+      // 右键位置可能不在当前选区内：先把光标挪到点击处，
+      // 格式化动作与「表格」菜单才能作用在用户真正指向的位置。
+      const target = editor.getTargetAtClientPoint(event.clientX, event.clientY);
+      const clickedOffset = target?.position ? model.getOffsetAt(target.position) : null;
+      const current = controller.getSelection();
+      if (clickedOffset !== null && (current.empty || clickedOffset < current.from || clickedOffset > current.to)) {
+        controller.setSelection(clickedOffset);
+      }
       const selection = controller.getSelection();
       const menuWidth = 336;
       const submenuWidth = 178;
@@ -1155,7 +1265,11 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           role="menu"
           aria-label={t('编辑器', language)}
           style={{ left: contextMenu.x, top: contextMenu.y }}
-          onMouseDown={(event) => event.stopPropagation()}
+          onMouseDown={(event) => {
+            // preventDefault 阻止焦点从编辑器移走，选中文字不会因为打开菜单而丢失高亮。
+            event.preventDefault();
+            event.stopPropagation();
+          }}
         >
           <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void polishContextSelection()}>
             <span className="editor-context-menu-icon tone-accent"><ContextMenuIcon name="sparkles" /></span><span className="editor-context-menu-label">AI 润色</span>
@@ -1171,7 +1285,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
             <span className="editor-context-menu-icon"><ContextMenuIcon name="redo" /></span><span className="editor-context-menu-label">{t('重做', language)}</span><kbd>Ctrl+Y</kbd>
           </button>
           <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('cut')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="text" /></span><span className="editor-context-menu-label">{t('剪切', language)}</span><kbd>Ctrl+X</kbd>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="cut" /></span><span className="editor-context-menu-label">{t('剪切', language)}</span><kbd>Ctrl+X</kbd>
           </button>
           <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('copy')}>
             <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="copy" /></span><span className="editor-context-menu-label">{t('复制', language)}</span><kbd>Ctrl+C</kbd>
@@ -1187,13 +1301,13 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
             <span className="editor-context-menu-icon"><ContextMenuIcon name="text" /></span><span className="editor-context-menu-label">粘贴为纯文本</span><kbd>Ctrl+Shift+V</kbd>
           </button>
           <button type="button" role="menuitem" onClick={() => void runContextMenuAction('selectAll')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="select" /></span><span className="editor-context-menu-label">{t('全选', language)}</span><kbd>Ctrl+A</kbd>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="selectAll" /></span><span className="editor-context-menu-label">{t('全选', language)}</span><kbd>Ctrl+A</kbd>
           </button>
 
           <div className="editor-context-menu-divider" role="separator" />
 
           {/* 格式与标题：与浮动工具栏同源的动作，右键就能就地处理选中文字 */}
-          <ContextSubmenu label="格式" icon="text" direction={contextMenu.submenuDirection} disabled={!contextMenu.hasSelection} {...submenuHandlers('format')}>
+          <ContextSubmenu label="格式" icon="format" direction={contextMenu.submenuDirection} disabled={!contextMenu.hasSelection} {...submenuHandlers('format')}>
             <button type="button" role="menuitem" onClick={() => runContextWrap('**', '**')}><span>加粗</span></button>
             <button type="button" role="menuitem" onClick={() => runContextWrap('*', '*')}><span>斜体</span></button>
             <button type="button" role="menuitem" onClick={() => runContextWrap('~~', '~~')}><span>删除线</span></button>
@@ -1205,7 +1319,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
             <div className="editor-context-menu-divider" role="separator" />
             <button type="button" role="menuitem" onClick={clearContextInlineFormatting}><span>清除行内格式</span></button>
           </ContextSubmenu>
-          <ContextSubmenu label="标题" icon="select" direction={contextMenu.submenuDirection} {...submenuHandlers('heading')}>
+          <ContextSubmenu label="标题" icon="heading" direction={contextMenu.submenuDirection} {...submenuHandlers('heading')}>
             {[1, 2, 3, 4, 5, 6].map((level) => (
               <button key={level} type="button" role="menuitem" onClick={() => applyContextHeading(level)}>
                 <span>{level} 级标题</span>
@@ -1216,7 +1330,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           <div className="editor-context-menu-divider" role="separator" />
 
           {/* 插入与表格：按当前场景提供常用内容块与表格结构操作 */}
-          <ContextSubmenu label="插入" icon="image" direction={contextMenu.submenuDirection} {...submenuHandlers('insert')}>
+          <ContextSubmenu label="插入" icon="insert" direction={contextMenu.submenuDirection} {...submenuHandlers('insert')}>
             <button type="button" role="menuitem" onClick={() => runContextWrap('[', '](url)')}><span>链接</span></button>
             <button type="button" role="menuitem" onClick={() => { setContextMenu(null); setShowContextImageModal(true); }}><span>插入图片</span></button>
             <button type="button" role="menuitem" onClick={requestContextTable}><span>插入表格</span></button>

@@ -60,9 +60,9 @@ test('toolbar keeps a single table entry merging quick insert and the size picke
   const picker = await read('../src/components/Editor/TablePicker.tsx');
 
   // 工具栏只保留一个表格按钮：点击打开尺寸选择器，内部再提供默认 3 × 3 快捷插入。
-  assert.equal((toolbar.match(/icon: 'table'/g) ?? []).length, 1);
+  assert.equal((toolbar.match(/picker: true/g) ?? []).length, 1);
+  assert.match(toolbar, /label: '表格', picker: true/);
   assert.doesNotMatch(toolbar, /toolbarGroups\[3\]\.buttons\.unshift/);
-  assert.match(toolbar, /picker: true/);
   assert.match(toolbar, /setTablePickerAnchor\(event\.currentTarget\)/);
   assert.match(toolbar, /anchor=\{tablePickerAnchor\}/);
   assert.match(toolbar, /onInsertDefault=\{\(\) => insertTable\(3, 3\)\}/);
@@ -88,13 +88,15 @@ test('toolbar merges similar commands into dropdown menus and keeps only high-fr
   // 直接按钮位于 8 空格缩进，菜单项缩进更深，用它区分两者。
   const countDirectButtons = (block: string) => (block.match(/\r?\n[ ]{8}\{/g) ?? []).length;
 
-  // 直接按钮只保留高频动作：B / I / S + 样式、标题、列表三个菜单
+  // 直接按钮只保留高频动作：加粗 / 斜体 / 删除线 + 样式、标题、列表三个菜单
   const formatGroup = sliceBetween("title: '格式'", "title: '编辑'");
   assert.equal(countDirectButtons(formatGroup), 6);
   assert.equal((formatGroup.match(/menu: \[/g) ?? []).length, 3);
-  for (const label of ["label: 'B'", "label: 'I'", "label: 'S'", "label: '样式'", "label: '标题'", "label: '列表'"]) {
+  for (const label of ["label: '加粗'", "label: '斜体'", "label: '删除线'", "label: '样式'", "label: '标题'", "label: '列表'"]) {
     assert.match(formatGroup, new RegExp(label), label);
   }
+  // 图标、字母、符号混排会让工具栏显得杂乱，统一使用文字标签
+  assert.doesNotMatch(formatGroup, /icon: '/);
   // 标题与列表的层级按钮收进菜单
   assert.match(formatGroup, /menu: \[[\s\S]*?\{ label: '一级标题'/);
   assert.match(formatGroup, /\{ label: '六级标题'/);
@@ -102,12 +104,12 @@ test('toolbar merges similar commands into dropdown menus and keeps only high-fr
 
   const editGroup = sliceBetween("title: '编辑'", "title: '插入'");
   assert.equal(countDirectButtons(editGroup), 3);
-  assert.match(editGroup, /label: '编辑'/);
+  assert.match(editGroup, /label: '整理'/);
   assert.match(editGroup, /menu: \[[\s\S]*?\{ label: '检查并格式化 Markdown'/);
 
   const insertGroup = sliceBetween("title: '插入'", 'const toolbarButtons');
   assert.equal(countDirectButtons(insertGroup), 4);
-  assert.match(insertGroup, /icon: 'table', picker: true/);
+  assert.match(insertGroup, /label: '表格', picker: true/);
   for (const label of ["label: '插入'", "label: '公式'", "label: '图表'"]) {
     assert.match(insertGroup, new RegExp(label), label);
   }

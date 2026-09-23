@@ -74,8 +74,10 @@ test('editor context menu exposes grouped editing, export, image, and file actio
   assert.match(editor, /在文件夹中显示/);
   assert.match(menu, /zeditor-export-request/);
   assert.match(commands, /pub fn reveal_in_file_manager/);
-  assert.match(styles, /\.editor-context-submenu[\s\S]*left: calc\(100% - 2px\)/);
-  assert.match(styles, /data-submenu-direction="left"[\s\S]*right: calc\(100% - 2px\)/);
+  // 二级菜单挂到 body：内联会被主菜单的 overflow 裁剪并挤出横向滚动条
+  assert.match(styles, /\.editor-context-submenu \{[\s\S]*position: fixed/);
+  assert.match(editor, /createPortal\([\s\S]{0,400}?className="editor-context-submenu"/);
+  assert.match(editor, /const left = direction === 'left'[\s\S]*rect\.left - width \+ 2/);
 });
 
 test('editor context menu groups actions by scenario and reuses toolbar formatting', () => {
@@ -93,15 +95,21 @@ test('editor context menu groups actions by scenario and reuses toolbar formatti
   assert.match(editor, /runContextMenuAction\('selectAll'\)/);
 
   // 格式 / 标题子菜单：与浮动工具栏同源，直接作用于选区
-  assert.match(editor, /label="格式" icon="text"/);
+  assert.match(editor, /label="格式" icon="format"/);
   assert.match(editor, /runContextWrap\('\*\*', '\*\*'\)/);
   assert.match(editor, /clearContextInlineFormatting/);
   assert.match(editor, /stripInlineFormatting\(selected\)/);
-  assert.match(editor, /label="标题" icon="select"/);
+  assert.match(editor, /label="标题" icon="heading"/);
   assert.match(editor, /applyContextHeading\(level\)/);
 
   // 插入与表格子菜单：表格操作仅在光标位于表格内时启用
-  assert.match(editor, /label="插入" icon="image"/);
+  assert.match(editor, /label="插入" icon="insert"/);
+  // 每一行都有独立图标，不再出现共用一个「横线」图标的情况
+  assert.match(editor, /name === 'cut'\)/);
+  assert.match(editor, /name === 'format'\)/);
+  assert.match(editor, /name === 'heading'\)/);
+  assert.match(editor, /name === 'insert'\)/);
+  assert.match(editor, /name === 'selectAll'\)/);
   assert.match(editor, /requestContextTable/);
   assert.match(editor, /window\.dispatchEvent\(new CustomEvent\('zeditor-insert-table'\)\)/);
   assert.match(editor, /label="表格" icon="table"/);
@@ -113,6 +121,20 @@ test('editor context menu groups actions by scenario and reuses toolbar formatti
 
   // 菜单过高时按实际高度回夹，避免超出窗口底部
   assert.match(editor, /const maxTop = window\.innerHeight - element\.offsetHeight - 8/);
+
+  // 右键位置不在选区内时先把光标移过去，表格菜单与格式化动作才对得上目标
+  assert.match(editor, /editor\.getTargetAtClientPoint\(event\.clientX, event\.clientY\)/);
+  assert.match(editor, /if \(clickedOffset !== null && \(current\.empty \|\| clickedOffset < current\.from \|\| clickedOffset > current\.to\)\) \{/);
+  assert.match(editor, /controller\.setSelection\(clickedOffset\)/);
+
+  // 打开菜单与点击菜单项都不让焦点离开编辑器，选中的文字不会掉高亮
+  assert.match(editor, /event\.preventDefault\(\);\s*event\.stopPropagation\(\);/);
+  assert.match(editor, /阻止默认行为让编辑器保持焦点，动作执行时选区仍然有效/);
+
+  // 弹层挂在 body 上，指针跨越间隙时延迟收起，避免子菜单刚展开就消失
+  assert.match(editor, /closeTimerRef\.current = window\.setTimeout\(\(\) => onHover\(false\), 160\)/);
+  assert.match(editor, /onMouseEnter=\{cancelClose\}/);
+  assert.match(editor, /onMouseLeave=\{scheduleClose\}/);
 });
 
 test('floating editor toolbar stays compact and Monaco uses the shared scrollbar width', () => {

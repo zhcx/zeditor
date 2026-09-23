@@ -501,18 +501,19 @@ body {
 .editor-pane-toolbar .toolbar-group:hover { border-color: var(--ui-border-default); }
 .editor-pane-toolbar .toolbar-group-title { color: var(--ui-text-muted); }
 
+/* 工具栏统一使用文字标签，按钮按内容自适应宽度。 */
 .editor-pane-toolbar .toolbar-btn {
   box-sizing: border-box;
-  width: 34px;
+  width: auto;
   height: 31px;
   min-height: 31px;
-  min-width: 34px;
-  padding: 0;
+  min-width: 32px;
+  padding: 0 8px;
   border: 0;
   border-radius: var(--ui-radius-sm) !important;
   background: transparent;
   color: var(--ui-text-secondary);
-  font-size: 15px;
+  font-size: 11.5px;
   font-weight: 600;
 }
 
@@ -2405,22 +2406,20 @@ body {
 
 .editor-context-menu-group,
 .editor-context-copy-as { position: relative; }
+
+/* 二级菜单挂在 body 上（内联会被主菜单的 overflow 裁剪）：
+   位置由组件按触发行矩形计算，这里只负责外观。 */
 .editor-context-submenu {
-  position: absolute;
-  z-index: 1;
-  top: -6px;
-  left: calc(100% - 2px);
+  position: fixed;
+  z-index: 10060;
   width: 178px;
+  max-height: min(360px, calc(100vh - 24px));
+  overflow-y: auto;
   padding: 6px;
   border: 1px solid var(--ui-border-strong);
   border-radius: 8px;
   background: var(--ui-bg-overlay);
   box-shadow: var(--ui-shadow-menu);
-}
-.editor-context-menu-group[data-submenu-direction="left"] .editor-context-submenu,
-.editor-context-copy-as[data-submenu-direction="left"] .editor-context-submenu {
-  right: calc(100% - 2px);
-  left: auto;
 }
 /* 子菜单里的分组线：菜单本身收缩在内容宽度内，分隔线跟着收窄。 */
 .editor-context-submenu .editor-context-menu-divider { margin: 5px 4px; }

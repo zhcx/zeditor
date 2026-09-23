@@ -441,9 +441,10 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     {
       title: '格式',
       buttons: [
-        { label: 'B', title: '加粗 (Ctrl+B)', action: () => wrapSelection('**', '**') },
-        { label: 'I', title: '斜体 (Ctrl+I)', action: () => wrapSelection('*', '*') },
-        { label: 'S', title: '删除线', action: () => wrapSelection('~~', '~~') },
+        // 统一使用文字标签：图标、字母、符号混排会让工具栏显得杂乱。
+        { label: '加粗', title: '加粗 (Ctrl+B)', action: () => wrapSelection('**', '**') },
+        { label: '斜体', title: '斜体 (Ctrl+I)', action: () => wrapSelection('*', '*') },
+        { label: '删除线', title: '删除线', action: () => wrapSelection('~~', '~~') },
         {
           label: '样式',
           title: '更多行内样式',
@@ -481,10 +482,10 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     {
       title: '编辑',
       buttons: [
-        { label: '↶', title: '撤销 (Ctrl+Z)', action: () => runEditorCommand('undo') },
-        { label: '↷', title: '重做 (Ctrl+Y)', action: () => runEditorCommand('redo') },
+        { label: '撤销', title: '撤销 (Ctrl+Z)', action: () => runEditorCommand('undo') },
+        { label: '重做', title: '重做 (Ctrl+Y)', action: () => runEditorCommand('redo') },
         {
-          label: '编辑',
+          label: '整理',
           title: '缩进与文本整理',
           menu: [
             { label: '减少缩进', action: outdentSelection },
@@ -498,7 +499,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       title: '插入',
       buttons: [
         // 表格只有一个入口：点击打开尺寸选择器，拖动选行列或直接用默认 3 × 3。
-        { icon: 'table', picker: true, title: '插入表格（拖动选择行列）' },
+        { label: '表格', picker: true, title: '插入表格（拖动选择行列，Ctrl+Shift+T 为 3 × 3）' },
         {
           label: '插入',
           title: '插入内容块',
