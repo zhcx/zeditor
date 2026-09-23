@@ -82,9 +82,6 @@ export type TableAction =
   | 'format'
   | 'table-delete';
 
-/** 新增行、新增列与插入表格时填入的占位文本。 */
-export const TABLE_BODY_PLACEHOLDER = '内容';
-
 const MIN_COLUMN_WIDTH = 3;
 const DELIMITER_PATTERN = /^:?-+:?$/;
 
@@ -363,7 +360,9 @@ export function insertRow(content: string, offset: number, where: 'above' | 'bel
 
   const rows = dataRowsOf(table);
   const target = Math.max(0, Math.min(dataRowIndexAt(table, position) + (where === 'below' ? 1 : 0), rows.length));
-  rows.splice(target, 0, Array.from({ length: table.columns }, () => TABLE_BODY_PLACEHOLDER));
+  // 新增行保持空白：光标会落在新行第一个单元格，直接输入即可，
+  // 也和插入表格时的空正文行保持一致。
+  rows.splice(target, 0, Array.from({ length: table.columns }, () => ''));
   return rebuild(table, rows, table.aligns, { row: target, column: Math.min(position.column, table.columns - 1) });
 }
 
@@ -397,8 +396,9 @@ export function insertColumn(content: string, offset: number, where: 'left' | 'r
 
   const rows = dataRowsOf(table);
   const target = Math.max(0, Math.min(position.column + (where === 'right' ? 1 : 0), table.columns));
-  rows.forEach((row, index) => {
-    row.splice(target, 0, index === 0 ? `列 ${table.columns + 1}` : '');
+  // 新增列同样留空，光标落在新列的表头单元格，避免出现「列 N」这类与空表不一致的占位。
+  rows.forEach((row) => {
+    row.splice(target, 0, '');
   });
   const aligns = [...table.aligns];
   aligns.splice(target, 0, 'none');

@@ -92,22 +92,23 @@ test('escaped pipes and delimiter detection', () => {
   assert.equal(isDelimiterRow('--- | ---'), true);
 });
 
-test('insertRow adds a placeholder row above or below the current row', () => {
+test('insertRow adds an empty row above or below the current row', () => {
   const offset = offsetOf('B');
   const below = insertRow(doc, offset, 'below');
   assert.ok(below);
   const belowTable = parseTableAt(below.text, 0);
   assert.ok(belowTable);
   assert.equal(belowTable.rows.length, 5);
-  assert.deepEqual(belowTable.rows[4].cells.map((cell) => cell.text), ['内容', '内容', '内容']);
-  assert.equal(below.text.slice(below.cursor - below.from, below.cursorEnd - below.from), '内容');
+  // 新增行为空单元格，光标落在第一个单元格内，不写入「内容」占位
+  assert.deepEqual(belowTable.rows[4].cells.map((cell) => cell.text), ['', '', '']);
+  assert.equal(below.text.slice(below.cursor - below.from, below.cursorEnd - below.from), '');
   assert.deepEqual(cellPositionAt(belowTable, below.cursor - below.from), { row: 4, column: 0 });
 
   const above = insertRow(doc, offset, 'above');
   assert.ok(above);
   const aboveTable = parseTableAt(above.text, 0);
   assert.ok(aboveTable);
-  assert.deepEqual(aboveTable.rows[3].cells.map((cell) => cell.text), ['内容', '内容', '内容']);
+  assert.deepEqual(aboveTable.rows[3].cells.map((cell) => cell.text), ['', '', '']);
 
   // 只有表格区间被替换，前后内容保持原样
   assert.equal(doc.slice(0, below.from), '# 标题\n\n');
@@ -143,7 +144,7 @@ test('insertColumn and deleteColumn keep rows and alignments in sync', () => {
   assert.ok(insertedTable);
   assert.equal(insertedTable.columns, 4);
   assert.equal(insertedTable.aligns.length, 4);
-  assert.deepEqual(insertedTable.rows[0].cells.map((cell) => cell.text), ['名称', '列 4', '说明', '状态']);
+  assert.deepEqual(insertedTable.rows[0].cells.map((cell) => cell.text), ['名称', '', '说明', '状态']);
   assert.deepEqual(insertedTable.rows[2].cells.map((cell) => cell.text), ['A', '', '甲', '完成']);
 
   const removed = deleteColumn(doc, offsetOf('说明'));
