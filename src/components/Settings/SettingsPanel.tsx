@@ -514,7 +514,7 @@ export function SettingsPanel() {
               />
               <SettingToggle
                 label="启用自动配对与 Tab 跳出"
-                description="输入括号、引号和 Markdown 格式标记时自动补全；在代码区域中自动停用"
+                description="输入括号、引号和 Markdown 标记时自动补全；Tab 可在括号、引号、行内格式与链接字段之间穿梭，代码区域内自动停用"
                 checked={Boolean(localSettings.editor.smart_pairs)}
                 onChange={(checked) => setLocalSettings({
                   ...localSettings,

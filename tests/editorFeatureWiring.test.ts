@@ -10,7 +10,7 @@ test('smart pair setting is wired through editor settings and the settings panel
   assert.match(storeSource, /smart_pairs:\s*true/);
   assert.match(settingsSource, /smart_pairs/);
   assert.match(settingsSource, /启用自动配对与 Tab 跳出/);
-  assert.match(settingsSource, /输入括号、引号和 Markdown 格式标记时自动补全；在代码区域中自动停用/);
+  assert.match(settingsSource, /输入括号、引号和 Markdown 标记时自动补全；Tab 可在括号、引号、行内格式与链接字段之间穿梭，代码区域内自动停用/);
 });
 
 test('desktop settings preserve smart pair choices and default old configs to enabled', async () => {
@@ -57,4 +57,25 @@ test('editor routes supported empty-selection keys through smart pair decisions'
   const smartPairDecision = editorSource.indexOf('const decision = resolveSmartPair');
   assert.ok(slashMenuGuard >= 0 && slashMenuGuard < browserGuard);
   assert.ok(browserGuard >= 0 && browserGuard < smartPairDecision);
+});
+
+test('editor wires smart Tab navigation with multi-cursor support', async () => {
+  const editorSource = await readFile(new URL('../src/components/Editor/Editor.tsx', import.meta.url), 'utf8');
+  const smartPairsSource = await readFile(new URL('../src/utils/smartPairs.ts', import.meta.url), 'utf8');
+
+  // 多光标：逐光标判定后批量应用，仅当确实发生跳出时才接管 Tab。
+  assert.match(editorSource, /const selections = editor\.getSelections\(\) \?\? \[\]/);
+  assert.match(editorSource, /if \(jumped\) \{/);
+  assert.match(editorSource, /editor\.setSelections\(nextSelections\)/);
+
+  // 规则层：链接字段导航、括号/引号跳出、行内格式区间跳出。
+  assert.match(smartPairsSource, /function resolveLinkTab/);
+  assert.match(smartPairsSource, /function resolveBracketTab/);
+  assert.match(smartPairsSource, /function resolveInlineRangeTab/);
+  assert.match(smartPairsSource, /CLOSING_TO_OPENING/);
+  assert.match(smartPairsSource, /INLINE_MARKERS/);
+  // 表格导航优先于智能 Tab 跳出：表格分支必须先于多光标分支出现。
+  const tableBranch = editorSource.indexOf('navigateTableCell(model.getValue()');
+  const smartTabBranch = editorSource.indexOf('const selections = editor.getSelections() ?? []');
+  assert.ok(tableBranch >= 0 && tableBranch < smartTabBranch);
 });

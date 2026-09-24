@@ -73,13 +73,15 @@
   --ui-control-height-md: 28px;
 
   /* Shape, motion, elevation */
-  --ui-radius-sm: 2px;
-  --ui-radius-md: 4px;
-  --ui-duration-fast: 80ms;
-  --ui-duration-normal: 140ms;
+  --ui-radius-sm: 6px;
+  --ui-radius-md: 8px;
+  --ui-radius-lg: 12px;
+  --ui-duration-fast: 120ms;
+  --ui-duration-normal: 180ms;
   --ui-easing-standard: cubic-bezier(.2, 0, 0, 1);
-  --ui-shadow-menu: 0 4px 16px rgba(0, 0, 0, .28);
-  --ui-shadow-dialog: 0 12px 32px rgba(0, 0, 0, .34);
+  /* 阴影：统一冷调底色、低透明起步，明色下轻、暗色下自然加深 */
+  --ui-shadow-menu: 0 6px 20px rgba(15, 21, 30, .16), 0 1px 3px rgba(15, 21, 30, .1);
+  --ui-shadow-dialog: 0 16px 44px rgba(15, 21, 30, .22), 0 2px 6px rgba(15, 21, 30, .12);
   --ui-z-dropdown: 10000;
   --ui-z-tooltip: 11000;
   --ui-z-modal: 12000;
@@ -112,8 +114,8 @@ body {
 }
 
 .app :is(button, input, select, textarea, [role="tab"]):not(.inputarea):not(.ime-text-area):focus-visible {
-  outline: 1px solid var(--ui-border-focus);
-  outline-offset: -1px;
+  outline: 2px solid color-mix(in srgb, var(--ui-accent) 62%, transparent);
+  outline-offset: 1px;
 }
 
 .app :is(button, input, select, textarea):not(.inputarea):not(.ime-text-area):disabled {
@@ -134,7 +136,7 @@ body {
 
 .app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not(.inputarea):not(.ime-text-area):focus {
   border-color: var(--ui-border-focus);
-  box-shadow: 0 0 0 1px var(--ui-border-focus);
+  box-shadow: 0 0 0 3px var(--ui-accent-muted);
 }
 
 /* 查找等编辑器内控件沿用工作台外观；输入法载体使用 Monaco 原生样式。 */
@@ -169,7 +171,7 @@ body {
 
 .app .monaco-editor .find-widget .monaco-inputbox.synthetic-focus {
   border-color: var(--ui-border-focus) !important;
-  box-shadow: 0 0 0 1px var(--ui-border-focus);
+  box-shadow: 0 0 0 3px var(--ui-accent-muted);
 }
 
 .app .monaco-editor .find-widget .monaco-inputbox :is(.input, .mirror) {

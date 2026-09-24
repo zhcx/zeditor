@@ -47,7 +47,11 @@ test('does not tab through links whose opening bracket is escaped', () => {
   const escapedEmpty = '\\[text]()';
   const escapedUrl = '\\[text](url)';
   assert.deepEqual(decide(escapedEmpty, escapedEmpty.indexOf(']'), 'Tab'), { kind: 'default' });
-  assert.deepEqual(decide(escapedUrl, escapedUrl.length - 1, 'Tab'), { kind: 'default' });
+  // 转义方括号使链接失效，圆括号退化为普通括号：光标在闭合括号前仍按
+  // 括号跳出前移一位，但不做链接字段导航。
+  assert.deepEqual(decide(escapedUrl, escapedUrl.length - 1, 'Tab'), {
+    kind: 'move', cursor: escapedUrl.length,
+  });
 
   const evenEscapes = '\\\\[text]()';
   const labelEnd = evenEscapes.indexOf(']');
@@ -119,7 +123,97 @@ test('matches inline code delimiters by backtick run length', () => {
 
 test('ignores Tab near incomplete link-like text', () => {
   assert.deepEqual(decide(']()', 0, 'Tab'), { kind: 'default' });
-  assert.deepEqual(decide('](x)', 3, 'Tab'), { kind: 'default' });
+  // 不是完整链接，但光标紧邻 `(` 的闭合括号之前，按括号跳出前移一位。
+  assert.deepEqual(decide('](x)', 3, 'Tab'), { kind: 'move', cursor: 4 });
+});
+
+test('tabs out of brackets and quotes at the closing character', () => {
+  assert.deepEqual(decide('()', 1, 'Tab'), { kind: 'move', cursor: 2 });
+  assert.deepEqual(decide('(abc)', 4, 'Tab'), { kind: 'move', cursor: 5 });
+  assert.deepEqual(decide('[item]', 5, 'Tab'), { kind: 'move', cursor: 6 });
+  assert.deepEqual(decide('{key}', 4, 'Tab'), { kind: 'move', cursor: 5 });
+  // 开闭同形的引号
+  assert.deepEqual(decide('"quoted"', 7, 'Tab'), { kind: 'move', cursor: 8 });
+  assert.deepEqual(decide("'quoted'", 7, 'Tab'), { kind: 'move', cursor: 8 });
+  // 中日韩括号与弯引号
+  assert.deepEqual(decide('「字」', 2, 'Tab'), { kind: 'move', cursor: 3 });
+  assert.deepEqual(decide('『字』', 2, 'Tab'), { kind: 'move', cursor: 3 });
+  assert.deepEqual(decide('（文）', 2, 'Tab'), { kind: 'move', cursor: 3 });
+  assert.deepEqual(decide('【项】', 2, 'Tab'), { kind: 'move', cursor: 3 });
+  assert.deepEqual(decide('《书》', 2, 'Tab'), { kind: 'move', cursor: 3 });
+  assert.deepEqual(decide('“引”', 2, 'Tab'), { kind: 'move', cursor: 3 });
+  assert.deepEqual(decide('‘引’', 2, 'Tab'), { kind: 'move', cursor: 3 });
+});
+
+test('tabs out of only the innermost nested bracket', () => {
+  assert.deepEqual(decide('((n))', 3, 'Tab'), { kind: 'move', cursor: 4 });
+  assert.deepEqual(decide('(a(b))', 4, 'Tab'), { kind: 'move', cursor: 5 });
+  // 内层的方括号不干扰外层圆括号的跳出
+  assert.deepEqual(decide('(a[b]c)', 6, 'Tab'), { kind: 'move', cursor: 7 });
+});
+
+test('leaves the cursor untouched when no bracket precedes it', () => {
+  assert.deepEqual(decide('(abc)', 2, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('abc', 3, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('a)bc', 1, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('(a"b', 3, 'Tab'), { kind: 'default' });
+});
+
+test('does not tab out of escaped brackets or quotes', () => {
+  // 开符被转义：不构成可配对的括号
+  assert.deepEqual(decide('\\(a\\)', 4, 'Tab'), { kind: 'default' });
+  // 闭合符被转义：是字面量，不跳出
+  assert.deepEqual(decide('「a\\」', 3, 'Tab'), { kind: 'default' });
+  // 引号同样按转义处理
+  assert.deepEqual(decide('\\"a\\"', 4, 'Tab'), { kind: 'default' });
+});
+
+test('does not tab out across line boundaries', () => {
+  const multiline = '(abc\ndef)';
+  assert.deepEqual(decide(multiline, multiline.indexOf(')'), 'Tab'), { kind: 'default' });
+});
+
+test('tabs out of Markdown inline formatting ranges', () => {
+  assert.deepEqual(decide('**bold**', 6, 'Tab'), { kind: 'move', cursor: 8 });
+  assert.deepEqual(decide('**bold text**', 6, 'Tab'), { kind: 'move', cursor: 13 });
+  assert.deepEqual(decide('*italic*', 7, 'Tab'), { kind: 'move', cursor: 8 });
+  assert.deepEqual(decide('_em_', 3, 'Tab'), { kind: 'move', cursor: 4 });
+  assert.deepEqual(decide('~~gone~~', 6, 'Tab'), { kind: 'move', cursor: 8 });
+  assert.deepEqual(decide('==mark==', 6, 'Tab'), { kind: 'move', cursor: 8 });
+  assert.deepEqual(decide('x^2^', 3, 'Tab'), { kind: 'move', cursor: 4 });
+  // 光标在格式区间内的任意位置都会跳出到闭合标记之后
+  assert.deepEqual(decide('**bold**', 4, 'Tab'), { kind: 'move', cursor: 8 });
+});
+
+test('keeps plain text with spaced markers untouched', () => {
+  // 开标记之后或闭标记之前是空白，不符合 CommonMark 分隔符规则，不视为区间。
+  assert.deepEqual(decide('2 * 3 * 4', 6, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('a * b * c', 6, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('a ~~ b ~~ c', 8, 'Tab'), { kind: 'default' });
+});
+
+test('prefers bracket escape over formatting escape', () => {
+  // 由内而外：先跳过最内层的括号，再退出加粗标记。
+  const boldBracket = '**bold (text)**';
+  assert.deepEqual(decide(boldBracket, boldBracket.indexOf(')'), 'Tab'), {
+    kind: 'move', cursor: boldBracket.indexOf(')') + 1,
+  });
+});
+
+test('tabs through link fields in source mode', () => {
+  const link = '[text](url)';
+  const labelEnd = link.indexOf(']');
+  const urlStart = link.indexOf('(') + 1;
+  const urlEnd = link.lastIndexOf(')');
+  assert.deepEqual(decide(link, labelEnd, 'Tab'), { kind: 'move', cursor: urlStart });
+  assert.deepEqual(decide(link, urlStart + 1, 'Tab'), { kind: 'move', cursor: urlEnd + 1 });
+  assert.deepEqual(decide(link, urlEnd, 'Tab'), { kind: 'move', cursor: urlEnd + 1 });
+});
+
+test('disables Tab escape inside fenced and inline code', () => {
+  assert.deepEqual(decide('```\n(a)\n```', 6, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('`(a)`', 3, 'Tab'), { kind: 'default' });
+  assert.deepEqual(decide('**(`x`)**', 4, 'Tab'), { kind: 'default' });
 });
 
 test('rejects invalid offsets and ignores unrelated keys', () => {

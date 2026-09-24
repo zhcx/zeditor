@@ -27,6 +27,8 @@ interface MenuItem {
   shortcut?: string;
   divider?: boolean;
   children?: MenuItem[];
+  /** 单选型菜单项的当前选中态，渲染为前置 ✓ 标记。 */
+  checked?: boolean;
 }
 
 interface MenuGroup {
@@ -115,6 +117,12 @@ function HelpModal({ type, updateInfo, updateError, downloadProgress, downloadDo
 - 表格内方向键 - 在单元格之间移动
 - 表格内 Enter - 在当前行下方新增一行
 
+**智能 Tab 导航**
+- 括号、引号内按 Tab - 跳到闭合符号之后（嵌套时每次只跳出一层）
+- 行内格式内按 Tab - 跳到格式标记之后
+- 链接内按 Tab - 在链接文字与地址之间移动，最后跳出链接
+- 支持中日韩括号与弯引号；代码块内自动停用，避免误跳出
+
 **视图**
 - F11 - 全屏切换
       `
@@ -165,7 +173,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.5.0**
+**Zeditor v0.5.1**
 
 一款现代化的 Markdown 编辑器
 
@@ -174,7 +182,7 @@ graph TD
 - 沉浸阅读 / 沉浸写作 / AI Chatbox
 - 多标签页编辑，可调节布局
 - 数学公式（KaTeX）、Mermaid 图表、代码高亮
-- 多主题：浅色 / 深色 / Solarized
+- 多主题：浅色 / 深色（简约现代配色）
 - 文件夹浏览、最近文档、拖拽打开
 - 多图床支持：Cloudinary、PicGo、S3、本地存储
 - AI 智能助手：对话面板、校对、重写、翻译、摘要、大纲
@@ -184,9 +192,9 @@ graph TD
 - GitHub Release 自动检查更新
 
 **本版本更新**
-- **文本清理**：通过「格式 → 文本清理」删除行尾空白，并将连续空白行合并为一个；支持选区或全文处理，操作可撤销
-- **自动配对与 Tab 跳出**：支持括号、引号、中日韩括号、弯引号和 Markdown 粗体/斜体/代码/删除线/链接标记；代码块与行内代码中自动停用
-- **编辑器设置**：可在「设置 → 编辑器」关闭自动配对与 Tab 跳出
+- **界面焕新**：明暗双主题重新设计，统一圆角、阴影、焦点样式与滚动条；编辑器配色与工作区完全一致
+- **菜单当前项标识**：主题与模式菜单显示当前选中项（✓），点击任意菜单项后菜单统一收起
+- **智能 Tab 导航**：Tab 可在括号、引号、行内格式与链接字段之间穿梭，支持中日韩括号与多光标
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it
@@ -390,6 +398,19 @@ export function MenuBar() {
     saveTab,
     getActiveTab
   } = useAppStore();
+  const mode = useAppStore((state) => state.mode);
+  // 主题偏好解析与 App.tsx 的 resolveThemePreference 同规则：system 跟随
+  // 系统，旧值/别名归一到 vscode-light / vscode-dark，用于菜单当前态勾选。
+  const resolvedTheme = (() => {
+    const preference = settings.appearance.theme;
+    if (preference === 'system') {
+      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'vscode-dark' : 'vscode-light';
+    }
+    if (preference === 'dark') return 'vscode-dark';
+    if (preference === 'light') return 'vscode-light';
+    return preference;
+  })();
+  const isDarkThemeActive = resolvedTheme.endsWith('dark');
 
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -710,23 +731,19 @@ export function MenuBar() {
         { divider: true, label: '' },
         { label: '全选', action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A' },
         { divider: true, label: '' },
-        { label: '分屏模式', action: () => useAppStore.getState().setMode('split') },
-        { label: '沉浸阅读', action: () => useAppStore.getState().setMode('immersive') },
-        { label: '沉浸写作', action: () => useAppStore.getState().setMode('zen') },
-        { label: '演示模式', action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); setActiveMenu(null); } },
+        { label: '分屏模式', checked: mode === 'split', action: () => useAppStore.getState().setMode('split') },
+        { label: '沉浸阅读', checked: mode === 'immersive', action: () => useAppStore.getState().setMode('immersive') },
+        { label: '沉浸写作', checked: mode === 'zen', action: () => useAppStore.getState().setMode('zen') },
+        { label: '演示模式', action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); } },
         { divider: true, label: '' },
         {
           label: '主题',
           children: [
-            { label: '深色主题', action: () => {
+            { label: '深色主题', checked: isDarkThemeActive, action: () => {
               setSettings({ ...settings, appearance: { ...settings.appearance, theme: 'vscode-dark' } });
-              setActiveMenu(null);
-              setMenuOpen(false);
             }},
-            { label: '浅色主题', action: () => {
+            { label: '浅色主题', checked: !isDarkThemeActive, action: () => {
               setSettings({ ...settings, appearance: { ...settings.appearance, theme: 'vscode-light' } });
-              setActiveMenu(null);
-              setMenuOpen(false);
             }},
           ],
         },
@@ -776,6 +793,21 @@ export function MenuBar() {
         {menus.map((menu) => {
           const isAppMenu = menu.variant === 'app';
 
+          // 所有菜单项点击后统一收起菜单：历史实现里各 action 自行关闭，
+          // 模式切换等项遗漏了关闭步骤，导致点击后菜单悬浮不消失。
+          const runMenuItem = (item: MenuItem) => {
+            item.action?.();
+            setActiveMenu(null);
+            setMenuOpen(false);
+          };
+
+          const renderOptionLabel = (item: MenuItem) => (
+            <span className="menu-option-label">
+              <span className="menu-check" aria-hidden="true">{item.checked ? '✓' : ''}</span>
+              <span>{item.label}</span>
+            </span>
+          );
+
           return (
             <div key={menu.label} className="menu-item"
               onMouseEnter={() => { if (menuOpen) setActiveMenu(menu.label); }}
@@ -815,7 +847,7 @@ export function MenuBar() {
                     ) : item.children ? (
                       <div key={index} className="menu-option-wrapper">
                         <button className="menu-option submenu-trigger" type="button">
-                          <span>{item.label}</span>
+                          {renderOptionLabel(item)}
                           <span className="submenu-arrow">›</span>
                         </button>
                         <div className="submenu-dropdown">
@@ -823,8 +855,13 @@ export function MenuBar() {
                             child.divider ? (
                               <div key={childIndex} className="menu-divider" />
                             ) : (
-                              <button key={childIndex} className="menu-option" onClick={child.action}>
-                                <span>{child.label}</span>
+                              <button
+                                key={childIndex}
+                                className={'menu-option' + (child.checked ? ' is-checked' : '')}
+                                onClick={() => runMenuItem(child)}
+                                aria-checked={child.checked ?? undefined}
+                              >
+                                {renderOptionLabel(child)}
                                 {child.shortcut && <span className="shortcut">{child.shortcut}</span>}
                               </button>
                             )
@@ -832,8 +869,13 @@ export function MenuBar() {
                         </div>
                       </div>
                     ) : (
-                      <button key={index} className="menu-option" onClick={item.action}>
-                        <span>{item.label}</span>
+                      <button
+                        key={index}
+                        className={'menu-option' + (item.checked ? ' is-checked' : '')}
+                        onClick={() => runMenuItem(item)}
+                        aria-checked={item.checked ?? undefined}
+                      >
+                        {renderOptionLabel(item)}
                         {item.shortcut && <span className="shortcut">{item.shortcut}</span>}
                       </button>
                     )

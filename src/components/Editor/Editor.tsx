@@ -628,6 +628,9 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     if (!tab) return;
     const model = documentModels.get(activeTabId, () => monaco.editor.createModel(tab.content, 'markdown'));
     if (model.getValue() !== tab.content) model.setValue(tab.content);
+    // 使用内置 vs / vs-dark：文字与行号颜色历经充分验证，保证任何主题下
+    // 可读。编辑区背景、当前行、光标由 main.css 的 .monaco-host 规则按
+    // CSS 变量精确控制，与外围工作区零色差，无需自定义 Monaco 主题。
     const editor = monaco.editor.create(root, {
       model,
       theme: isDark ? 'vs-dark' : 'vs',
@@ -997,6 +1000,37 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
             }
             return;
           }
+        }
+      }
+
+      // 智能 Tab 导航：在括号/引号、Markdown 行内格式与链接字段之间穿梭。
+      // 每个光标独立判定——可跳出的光标前移，普通位置保持不动并回落到默认
+      // 缩进行为；代码块保护由 resolveSmartPair 内部统一完成。
+      if (
+        key === 'Tab'
+        && !browserEvent.shiftKey
+        && !primaryModifier
+        && !browserEvent.altKey
+        && !browserEvent.isComposing
+      ) {
+        const selections = editor.getSelections() ?? [];
+        const smartPairsEnabled = Boolean(useAppStore.getState().settings.editor.smart_pairs ?? true);
+        const navigationValue = model.getValue();
+        let jumped = false;
+        const nextSelections = selections.map((selection) => {
+          if (!selection.isEmpty()) return selection;
+          const offset = model.getOffsetAt(selection.getStartPosition());
+          const decision = resolveSmartPair({ value: navigationValue, offset, key: 'Tab', enabled: smartPairsEnabled });
+          if (decision.kind !== 'move') return selection;
+          jumped = true;
+          const position = offsetToPosition(model, decision.cursor);
+          return new monaco.Selection(position.lineNumber, position.column, position.lineNumber, position.column);
+        });
+        if (jumped) {
+          event.preventDefault();
+          event.stopPropagation();
+          editor.setSelections(nextSelections);
+          return;
         }
       }
 

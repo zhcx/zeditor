@@ -12,7 +12,7 @@ test('application and converter version sources stay synchronized', () => {
   const converterResourceVersion = read('src-tauri/resources/converter_version.txt').trim()
 
   assert.equal(packageJson.name, 'zeditor')
-  assert.equal(packageJson.version, '0.5.0')
+  assert.equal(packageJson.version, '0.5.1')
   assert.equal(tauriConfig.version, packageJson.version)
   assert.equal(tauriConfig.productName, 'Zeditor')
   assert.equal(tauriConfig.identifier, 'com.zeditor.desktop')
