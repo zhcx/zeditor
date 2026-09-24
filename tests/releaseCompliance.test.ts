@@ -17,7 +17,7 @@ test('application and converter version sources stay synchronized', () => {
   assert.equal(tauriConfig.productName, 'Zeditor')
   assert.equal(tauriConfig.identifier, 'com.zeditor.desktop')
   assert.equal(cargoVersion, packageJson.version)
-  assert.equal(converterProjectVersion, '1.2.0')
+  assert.equal(converterProjectVersion, '1.3.0')
   assert.equal(converterResourceVersion, converterProjectVersion)
 })
 

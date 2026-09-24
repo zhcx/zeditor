@@ -942,7 +942,7 @@ mod tests {
             schema_version: 1,
             module_id: "document-converter".into(),
             engine: Some("anydoc".into()),
-            version: "1.2.0".into(),
+            version: "1.3.0".into(),
             protocol_version: SUPPORTED_PROTOCOL,
             target: target.into(),
             executable: if cfg!(windows) {

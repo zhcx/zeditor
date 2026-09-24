@@ -9,7 +9,7 @@ Zeditor keeps document conversion separate from the desktop installer. The appli
 - `aarch64-apple-darwin`
 - `x86_64-unknown-linux-gnu`
 
-The `converter-v1.2.0` tag matches `src-tauri/resources/converter_version.txt`. GitHub Actions builds the Rust `anydoc 0.1.9` executable on all four runners, verifies protocol 1 and `engine: anydoc`, then publishes four ZIP archives.
+The `converter-v1.3.0` tag matches `src-tauri/resources/converter_version.txt`. GitHub Actions builds the Rust `anydoc 0.2.4` executable on all four runners, verifies protocol 1 and `engine: anydoc`, then publishes four ZIP archives.
 
 Supported input extensions are DOC, DOCX, DOCM, PPT, PPS, POT, PPTX, PPTM, PPSX, PPSM, XLS, XLSX, XLSM, XLSB, ODT, ODS, ODP, RTF, EPUB, CSV, and text-based PDF.
 

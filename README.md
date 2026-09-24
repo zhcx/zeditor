@@ -51,7 +51,7 @@
 | 转换性能 | 进程启动慢、跨语言调用开销 | 原生执行、启动与转换更快 |
 | 数据安全 | 本机处理 | 本机处理（不变） |
 
-> ⚠️ 由于转换引擎已更换，**旧的 markitdown 内置转换器不再可用**。升级到 v0.3.7 后，首次打开 DOC/DOCX/PPT/PDF 等文档时，Zeditor 会自动引导从 GitHub Release 下载对应平台的 AnyDoc 模块（亦可离线导入 `.zip` 包）。模块版本与软件版本独立演进，当前转换模块版本为 **v1.2.0**。
+> ⚠️ 由于转换引擎已更换，**旧的 markitdown 内置转换器不再可用**。升级到 v0.3.7 后，首次打开 DOC/DOCX/PPT/PDF 等文档时，Zeditor 会自动引导从 GitHub Release 下载对应平台的 AnyDoc 模块（亦可离线导入 `.zip` 包）。模块版本与软件版本独立演进，当前转换模块版本为 **v1.3.0**（AnyDoc v0.2.4）。
 
 ---
 
@@ -179,7 +179,7 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 - **编辑器配色统一**：编辑区背景、行号、当前行、光标与选区与工作区同源，切换主题零色差；修复浅色主题下编辑区文字偏淡难以辨认的问题。
 - **菜单当前项标识**：主题（深色 / 浅色）与模式（分屏 / 沉浸阅读 / 沉浸写作）菜单显示当前选中项 ✓；菜单项点击后统一收起。
 - **智能 Tab 导航**：Tab 可在括号 / 引号（含中日韩括号与弯引号）、Markdown 行内格式与链接字段之间穿梭，嵌套每次只跳出一层，支持多光标；代码块内自动停用。
-- **转换模块**：继续沿用 AnyDoc v1.2.0，本版本未变更转换引擎。
+- **转换模块**：AnyDoc 引擎升级至 v0.2.4，转换模块同步更新为 v1.3.0；模块与软件版本独立演进，应用会在检测到新模块后按需下载。
 
 ### v0.5.1 平台安装包对照
 
@@ -277,12 +277,12 @@ Zeditor 使用 AnyDoc 将 **DOC、DOCX、PPT、PPTX、XLS、XLSX、ODF、RTF、E
 
 | 平台 | 模块包 |
 | --- | --- |
-| Windows x86_64 | `zeditor-converter-v1.2.0-x86_64-pc-windows-msvc.zip` |
-| macOS Apple Silicon | `zeditor-converter-v1.2.0-aarch64-apple-darwin.zip` |
-| macOS Intel | `zeditor-converter-v1.2.0-x86_64-apple-darwin.zip` |
-| Linux x86_64 | `zeditor-converter-v1.2.0-x86_64-unknown-linux-gnu.zip` |
+| Windows x86_64 | `zeditor-converter-v1.3.0-x86_64-pc-windows-msvc.zip` |
+| macOS Apple Silicon | `zeditor-converter-v1.3.0-aarch64-apple-darwin.zip` |
+| macOS Intel | `zeditor-converter-v1.3.0-x86_64-apple-darwin.zip` |
+| Linux x86_64 | `zeditor-converter-v1.3.0-x86_64-unknown-linux-gnu.zip` |
 
-模块可从 [converter-v1.2.0 Release](https://github.com/zhcx/zeditor/releases/tag/converter-v1.2.0) 页面下载。
+模块可从 [converter-v1.3.0 Release](https://github.com/zhcx/zeditor/releases/tag/converter-v1.3.0) 页面下载。
 
 #### 方式三：开发调试
 
