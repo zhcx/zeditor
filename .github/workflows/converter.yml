@@ -94,7 +94,7 @@ jobs:
           zip -9 -r "../zeditor-converter-v${CONVERTER_VERSION}-${{ matrix.target }}.zip" .
 
       - name: Upload converter archive
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: converter-${{ matrix.target }}
           path: zeditor-converter-v${{ env.CONVERTER_VERSION }}-${{ matrix.target }}.zip
@@ -125,7 +125,7 @@ jobs:
           echo "CONVERTER_VERSION=$version" >> "$GITHUB_ENV"
 
       - name: Download native module archives
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: converter-*
           path: converter-assets

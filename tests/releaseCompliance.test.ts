@@ -73,6 +73,22 @@ test('document converter is an optional cross-platform module with a frozen depe
   assert.ok(!existsSync('src-tauri/resources/document_converter.py'))
 })
 
+test('release workflows pin artifact actions to Node 24 runtimes', () => {
+  const buildWorkflow = read('.github/workflows/build.yml')
+  const converterWorkflow = read('.github/workflows/converter.yml')
+
+  // actions/upload-artifact v4 与 actions/download-artifact v4 仍基于 Node 20
+  // 运行时，GitHub Actions 会输出弃用告警并强制在 Node 24 上运行。这里固定到
+  // 已迁移 Node 24 的版本，避免构建日志再次出现弃用提示。
+  for (const workflow of [buildWorkflow, converterWorkflow]) {
+    assert.doesNotMatch(workflow, /actions\/upload-artifact@v[1-6]\b/)
+    assert.doesNotMatch(workflow, /actions\/download-artifact@v[1-7]\b/)
+  }
+  assert.match(buildWorkflow, /actions\/upload-artifact@v7/)
+  assert.match(converterWorkflow, /actions\/upload-artifact@v7/)
+  assert.match(converterWorkflow, /actions\/download-artifact@v8/)
+});
+
 test('Windows release workflow reserves both SignPath signing stages', () => {
   const workflow = read('.github/workflows/build.yml')
 
