@@ -1,4 +1,5 @@
-import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
+import { createRoot, type Root } from 'react-dom/client';
 import MarkdownIt from 'markdown-it';
 import taskLists from 'markdown-it-task-lists';
 import hljs from '../../utils/highlight';
@@ -8,6 +9,7 @@ import { useAppStore } from '../../stores/appStore';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { findActiveSourceElement } from '../../utils/activeSourceLine';
 import { addHeadingAnchors, findLocalHeadingTarget } from '../../utils/headingAnchors';
+import { hasWorkflowShape, isWorkflowLikeFile } from '../../utils/workflowShape';
 import {
   findMediaEmbeds,
   isPlatformPageUrl,
@@ -28,6 +30,12 @@ import { ImagePropertiesModal } from '../Editor/ImagePropertiesModal';
 import { resolveMediaSources } from '../../services/mediaAssets';
 import { open } from '@tauri-apps/plugin-shell';
 import { toggleTaskLine } from '../../utils/taskList';
+
+// 工作流查看器（含 YAML 解析器）只在真的遇到工作流时加载，不进入首帧关键路径。
+const WorkflowViewer = lazy(() => import('../WorkflowViewer/WorkflowViewer').then(m => ({ default: m.WorkflowViewer })));
+
+/** Markdown 代码围栏里可被识别为工作流的语言标记。 */
+const WORKFLOW_FENCE_SELECTOR = 'code.language-yaml, code.language-yml, code.language-github-actions-workflow';
 
 interface PreviewProps {
   className?: string;
@@ -402,6 +410,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     openMenu: (event: MouseEvent, index: number) => void;
   }>({ openEditor: () => {}, openMenu: () => {} });
   const { content, settings, currentFile } = useAppStore();
+  const workflowViewerEnabled = settings.workflow?.render_in_preview !== false;
   // Markdown parsing, sanitization and DOM replacement are comparatively
   // expensive. Deferring them keeps Monaco's keystroke updates responsive.
   const deferredContent = useDeferredValue(content);
@@ -415,6 +424,12 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
   useEffect(() => {
     contentRef.current = content;
   }, [content]);
+
+  // 内联工作流图里的「跳转」需要最新的回调，用 ref 取用避免重建整个预览。
+  const workflowJumpRef = useRef(onSourceLineClick);
+  useEffect(() => {
+    workflowJumpRef.current = onSourceLineClick;
+  }, [onSourceLineClick]);
 
   useEffect(() => {
     const handleThemeChange = (event: Event) => {
@@ -529,6 +544,62 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       else void renderMermaid(block);
     });
 
+    // GitHub Actions 工作流：`yaml` 围栏里若是可识别的工作流，就替换为只读
+    // 依赖图（与 Mermaid 一样只读、可折叠）。识别需要 YAML 解析器，因此先做
+    // 正则预判，命中后再动态导入；非工作流的 YAML 代码块保持原样。
+    const workflowRoots: Root[] = [];
+    const renderWorkflowBlock = async (block: HTMLElement) => {
+      const source = block.textContent || '';
+      const { looksLikeWorkflowYaml } = await import('../../utils/githubWorkflow');
+      if (disposed) return;
+      if (!looksLikeWorkflowYaml(source)) return;
+      const pre = block.parentElement;
+      if (!pre) return;
+
+      // 代码块输出没有 data-source-line（highlight 返回 pre 时属性会丢失），
+      // 这里按块内文本在文档中的偏移换算行号，供诊断跳转使用。
+      const offsetInDocument = deferredContent.indexOf(source);
+      const lineOffset = offsetInDocument < 0
+        ? 0
+        : deferredContent.slice(0, offsetInDocument).split('\n').length - 1;
+
+      const mount = document.createElement('div');
+      mount.className = 'workflow-embed-mount';
+      const root = createRoot(mount);
+      root.render(
+        <Suspense fallback={null}>
+          <WorkflowViewer
+            source={source}
+            embedded
+            lineOffset={lineOffset}
+            onJumpToLine={(line) => workflowJumpRef.current?.(line)}
+          />
+        </Suspense>,
+      );
+      pre.replaceWith(mount);
+      workflowRoots.push(root);
+      onContentRendered?.();
+    };
+
+    const workflowBlocks = workflowViewerEnabled
+      ? Array.from(container.querySelectorAll<HTMLElement>(WORKFLOW_FENCE_SELECTOR))
+        .filter(block => hasWorkflowShape(block.textContent || ''))
+      : [];
+    const workflowObserver = typeof IntersectionObserver === 'undefined' || workflowBlocks.length === 0
+      ? null
+      : new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          workflowObserver?.unobserve(entry.target);
+          void renderWorkflowBlock(entry.target as HTMLElement);
+        });
+      }, { root: cardRef.current, rootMargin: '480px 0px' });
+
+    workflowBlocks.forEach((block) => {
+      if (workflowObserver) workflowObserver.observe(block);
+      else void renderWorkflowBlock(block);
+    });
+
     // 图片：本地相对路径先解析成 asset 协议地址，缺失时给出可读提示，
     // 并挂上双击编辑属性与右键尺寸菜单。
     const imageSpecs = findImages(deferredContent);
@@ -587,8 +658,11 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     return () => {
       disposed = true;
       observer?.disconnect();
+      workflowObserver?.disconnect();
+      // 内联工作流图挂在被替换的 DOM 上，清理时必须同时卸载 React 根。
+      workflowRoots.forEach((root) => root.unmount());
     };
-  }, [deferredContent, mermaidThemeVersion, onContentRendered, currentFile]);
+  }, [deferredContent, mermaidThemeVersion, onContentRendered, currentFile, workflowViewerEnabled]);
 
   useEffect(() => {
     const container = containerRef.current;
@@ -727,6 +801,45 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     fontSize: 'var(--font-content-size)',
     lineHeight: settings.appearance.line_height,
   };
+
+  // 独立的工作流文件（`.github/workflows/*.yml` 或内容可识别为工作流的 YAML）：
+  // 右侧预览区直接给依赖图与结构化编辑器，左侧编辑器仍然是源码本身，
+  // 形成与参考实现一致的分屏工作流视图。
+  if (workflowViewerEnabled && isWorkflowLikeFile(currentFile, content)) {
+    return (
+      <div
+        className={`preview-container preview-container-workflow ${className || ''}`}
+        style={{ ...containerStyle, ...style }}
+      >
+        <div ref={cardRef} className="preview-card preview-card-workflow">
+          <Suspense fallback={<div className="workflow-viewer-loading">正在加载工作流查看器…</div>}>
+            <WorkflowViewer
+              source={content}
+              editable
+              title={currentFile ?? undefined}
+              preserveFormat={settings.workflow?.preserve_format !== false}
+              onApply={(nextSource) => {
+                const editor = useAppStore.getState().editorView;
+                if (!editor) return;
+                // 结构化编辑的结果写回编辑器，形成一次可撤销的编辑，
+                // 由用户按 Ctrl+S 决定何时落盘。
+                editor.replaceRange(0, editor.getValue().length, nextSource);
+              }}
+              onJumpToLine={(line) => {
+                const editor = useAppStore.getState().editorView;
+                if (!editor) return;
+                const target = Math.max(1, Math.min(line, editor.state.doc.lines));
+                const info = editor.line(target);
+                editor.setSelection(info.from);
+                editor.revealOffset(info.from);
+                editor.focus();
+              }}
+            />
+          </Suspense>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div

@@ -45,6 +45,8 @@ export interface Settings {
     spell_check: boolean;
     auto_complete: boolean;
     smart_pairs?: boolean;
+    /** 内联弹窗：点击链接 / 图片 / 公式 / 脚注 / Wiki 链接时就地弹出编辑窗。 */
+    inline_popups?: boolean;
     /** Keep the command bar visible above the editor instead of selection-only. */
     pin_toolbar?: boolean;
     favorite_emojis: string[];
@@ -121,6 +123,14 @@ export interface Settings {
   };
   agent: AgentSettings;
   explorer: ExplorerSettings;
+  workflow?: WorkflowSettings;
+}
+
+export interface WorkflowSettings {
+  /** 在预览中把 GitHub Actions 工作流渲染为依赖图（关闭后按普通文本显示）。 */
+  render_in_preview: boolean;
+  /** 结构化编辑保存时保留注释与原有格式；关闭则输出规范化 YAML。 */
+  preserve_format: boolean;
 }
 
 export interface ExplorerSettings {
@@ -205,7 +215,7 @@ export interface TimelineEntry {
 
 export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 export type ConversionStatus = 'idle' | 'converting' | 'success' | 'error';
-export type SettingsTab = 'appearance' | 'editor' | 'image' | 'export' | 'ai' | 'web_search' | 'explorer' | 'converter' | 'cloud';
+export type SettingsTab = 'appearance' | 'editor' | 'image' | 'export' | 'ai' | 'web_search' | 'explorer' | 'workflow' | 'converter' | 'cloud';
 
 export interface ConverterModuleStatus {
   state: 'missing' | 'installing' | 'ready' | 'update_available' | 'incompatible' | 'corrupt' | 'error';
@@ -304,6 +314,7 @@ const defaultSettings: Settings = {
     auto_complete: true,
     smart_pairs: true,
     pin_toolbar: false,
+    inline_popups: true,
     favorite_emojis: ['😀', '👍', '❤️', '🎉', '✅', '⚠️', '💡', '🚀'],
     input_engine: 'editContext',
   },
@@ -398,6 +409,10 @@ const defaultSettings: Settings = {
     auto_refresh: true,
     refresh_interval_seconds: 5,
   },
+  workflow: {
+    render_in_preview: true,
+    preserve_format: true,
+  },
 };
 
 const normalizeSettings = (saved: Settings): Settings => ({
@@ -426,6 +441,7 @@ const normalizeSettings = (saved: Settings): Settings => ({
     },
   },
   explorer: { ...defaultSettings.explorer, ...saved.explorer },
+  workflow: { ...defaultSettings.workflow, ...saved.workflow },
 });
 
 const initialSettings = (() => {

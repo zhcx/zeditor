@@ -111,6 +111,9 @@ function SettingsNavIcon({ type }: { type: SettingsTab }) {
   if (type === 'explorer') {
     return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M1.8 4.5h5.3l1.5 1.5h8.6v9.5H1.8z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" /><path d="M4.5 13.5h7M4.5 10.5h5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
   }
+  if (type === 'workflow') {
+    return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="6" height="5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" /><rect x="11.5" y="12" width="6" height="5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M5.5 8v2.5h9V12M5.5 10.5h6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  }
   if (type === 'converter') {
     return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3h7l3 3v11H5zM12 3v3h3M7.5 10h5M10 8v4M7.5 14h5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   }
@@ -267,6 +270,7 @@ export function SettingsPanel() {
     { id: 'export', label: '导出', description: '文档导出与版式设置' },
     { id: 'ai', label: 'AI 助手', description: '模型、提示与伴写设置' },
     { id: 'explorer', label: '资源管理器', description: '文件浏览与工作区管理' },
+    { id: 'workflow', label: '工作流', description: 'GitHub Actions 工作流查看器与结构化编辑' },
     { id: 'web_search', label: '网络搜索', description: '搜索服务与结果偏好' },
     { id: 'cloud', label: '云同步', description: 'WebDAV 与 S3 自动备份' },
   ] as const;
@@ -528,6 +532,15 @@ export function SettingsPanel() {
                 onChange={(checked) => setLocalSettings({
                   ...localSettings,
                   editor: { ...localSettings.editor, pin_toolbar: checked },
+                })}
+              />
+              <SettingToggle
+                label="启用内联弹窗"
+                description="点击链接、图片、公式、脚注或 Wiki 链接时，在原位弹出编辑窗：Ctrl+K 编辑链接，Ctrl+点击直接打开，公式带实时预览"
+                checked={Boolean(localSettings.editor.inline_popups ?? true)}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  editor: { ...localSettings.editor, inline_popups: checked },
                 })}
               />
               <div className="setting-item emoji-favorites-setting">
@@ -1204,6 +1217,44 @@ export function SettingsPanel() {
                   </button>
                 </div>
               )}
+            </div>
+          )}
+
+          {activeTab === 'workflow' && (
+            <div className="settings-section">
+              <SettingToggle
+                label="在预览中渲染工作流图"
+                description="Markdown 代码块与 .github/workflows 下的 YAML 会渲染为 job 依赖图；关闭后按普通 YAML 文本显示"
+                checked={localSettings.workflow?.render_in_preview !== false}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  workflow: {
+                    render_in_preview: checked,
+                    preserve_format: localSettings.workflow?.preserve_format !== false,
+                  },
+                })}
+              />
+              <SettingToggle
+                label="保存时保留 YAML 格式"
+                description="结构化编辑写回时保留注释、锚点与原有缩进；关闭后输出规范化 YAML（会丢失注释）"
+                checked={localSettings.workflow?.preserve_format !== false}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  workflow: {
+                    render_in_preview: localSettings.workflow?.render_in_preview !== false,
+                    preserve_format: checked,
+                  },
+                })}
+              />
+              <div className="setting-item">
+                <label>
+                  诊断与导出
+                  <small>
+                    查看器在本地解析工作流并给出 GHA-* 诊断，不执行工作流、不联网；依赖图可导出为 Mermaid、SVG，
+                    也支持在右侧面板中修改 job / step 字段后写回编辑器。
+                  </small>
+                </label>
+              </div>
             </div>
           )}
 

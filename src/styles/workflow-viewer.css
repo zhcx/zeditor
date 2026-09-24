@@ -1,0 +1,722 @@
+/* GitHub Actions 工作流查看器：依赖图画布 + 结构化检查器。
+   配色全部走主题变量，明暗主题与预览文档保持一致。 */
+
+.workflow-viewer {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  margin: 0;
+  padding: var(--space-3);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface-raised);
+  color: var(--text-color);
+  font-family: var(--font-sans);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.workflow-viewer * {
+  box-sizing: border-box;
+}
+
+/* 内联在 Markdown 预览中时更紧凑，且不继承正文的标题/列表排版 */
+.workflow-viewer.is-embedded {
+  margin: var(--space-3) 0;
+  padding: var(--space-2);
+  gap: var(--space-2);
+}
+
+.workflow-viewer.is-embedded .workflow-viewer-actions button,
+.workflow-viewer.is-embedded .workflow-canvas-toolbar button {
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.workflow-embed-mount {
+  display: block;
+  margin: var(--space-4) 0;
+}
+
+/* 独立工作流文件：预览卡片交给查看器接管内边距与滚动。 */
+.preview-container-workflow,
+.preview-container-workflow .preview-card {
+  height: 100%;
+}
+
+.preview-card-workflow {
+  padding: 0;
+  background: transparent;
+  border: none;
+  box-shadow: none;
+}
+
+.preview-card-workflow .workflow-viewer {
+  height: 100%;
+  max-height: 100%;
+  overflow: auto;
+}
+
+.workflow-viewer-loading {
+  padding: var(--space-5);
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.workflow-viewer-header {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  flex-wrap: wrap;
+  padding-bottom: var(--space-2);
+  border-bottom: 1px solid var(--border-soft);
+}
+
+.workflow-viewer-heading {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
+.workflow-viewer-heading strong {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.workflow-viewer-subtitle {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workflow-viewer-stats {
+  display: flex;
+  gap: var(--space-2);
+  margin-left: auto;
+}
+
+.workflow-stat {
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+}
+
+.workflow-stat.is-error {
+  background: color-mix(in srgb, var(--danger-color) 16%, transparent);
+  color: var(--danger-color);
+}
+
+.workflow-stat.is-warning {
+  background: color-mix(in srgb, var(--warning-color) 18%, transparent);
+  color: var(--warning-color);
+}
+
+.workflow-stat.is-ok {
+  background: color-mix(in srgb, var(--success-color) 16%, transparent);
+  color: var(--success-color);
+}
+
+.workflow-viewer-actions {
+  display: flex;
+  gap: var(--space-2);
+  flex-wrap: wrap;
+}
+
+.workflow-viewer-actions button,
+.workflow-canvas-toolbar button,
+.workflow-link-button,
+.workflow-with-action {
+  padding: 4px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  color: var(--text-color);
+  font-family: inherit;
+  font-size: 12px;
+  cursor: pointer;
+  transition: background var(--transition), border-color var(--transition);
+}
+
+.workflow-viewer-actions button:hover:not(:disabled),
+.workflow-canvas-toolbar button:hover:not(:disabled),
+.workflow-link-button:hover,
+.workflow-with-action:hover:not(:disabled) {
+  background: var(--hover);
+  border-color: var(--border-strong);
+}
+
+.workflow-viewer-actions button:disabled,
+.workflow-with-action:disabled {
+  opacity: .5;
+  cursor: default;
+}
+
+.workflow-viewer-actions button.is-primary {
+  background: var(--accent-soft);
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+  font-weight: 600;
+}
+
+.workflow-with-action.is-danger {
+  color: var(--danger-color);
+}
+
+.workflow-viewer-status {
+  margin: 0;
+  padding: var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  background: var(--surface-subtle);
+}
+
+.workflow-viewer-status.is-error {
+  background: color-mix(in srgb, var(--danger-color) 14%, transparent);
+  color: var(--danger-color);
+}
+
+.workflow-viewer-status.is-success {
+  background: color-mix(in srgb, var(--success-color) 14%, transparent);
+  color: var(--success-color);
+}
+
+.workflow-patch-queue {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  max-height: 116px;
+  overflow: auto;
+}
+
+.workflow-patch-queue li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+  color: var(--text-secondary);
+  font-size: 12px;
+}
+
+.workflow-patch-queue li button {
+  border: none;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  line-height: 1;
+}
+
+/* ---------- 画布 ---------- */
+
+.workflow-canvas {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.workflow-canvas-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+}
+
+.workflow-canvas-hint {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.workflow-canvas-zoom {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.workflow-canvas-zoom span {
+  min-width: 42px;
+  text-align: center;
+  color: var(--text-secondary);
+  font-size: 11.5px;
+  font-variant-numeric: tabular-nums;
+}
+
+.workflow-canvas-viewport {
+  overflow: auto;
+  max-height: 420px;
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  background: var(--surface-subtle);
+}
+
+.workflow-viewer.is-embedded .workflow-canvas-viewport {
+  max-height: 300px;
+}
+
+.workflow-canvas-root {
+  display: block;
+}
+
+.workflow-canvas-root .workflow-node {
+  outline: none;
+}
+
+.workflow-node {
+  cursor: pointer;
+}
+
+.workflow-node.is-dimmed {
+  opacity: .45;
+}
+
+.workflow-canvas-legend {
+  display: flex;
+  gap: var(--space-3);
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.workflow-canvas-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.workflow-legend-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  display: inline-block;
+}
+
+.workflow-legend-dot.is-error {
+  background: var(--danger-color);
+}
+
+.workflow-legend-dot.is-warning {
+  background: var(--warning-color);
+}
+
+.workflow-legend-line {
+  width: 16px;
+  height: 0;
+  border-top: 2px dashed var(--border-strong);
+  display: inline-block;
+}
+
+/* ---------- 检查器 ---------- */
+
+.workflow-inspector {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  min-width: 0;
+}
+
+.workflow-panel {
+  border: 1px solid var(--border-soft);
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  background: var(--surface-subtle);
+}
+
+.workflow-panel-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-2);
+  margin-bottom: var(--space-2);
+}
+
+.workflow-panel-header h4 {
+  margin: 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--text-primary);
+  border: none;
+  padding: 0;
+}
+
+.workflow-panel-note {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.workflow-panel-empty {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.workflow-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.workflow-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-color);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.workflow-chip.is-strong {
+  background: var(--surface-muted);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.workflow-trigger-detail {
+  display: grid;
+  grid-template-columns: 88px 1fr;
+  gap: 2px var(--space-2);
+  margin: var(--space-2) 0 0;
+  font-size: 12px;
+}
+
+.workflow-trigger-detail dt {
+  color: var(--text-muted);
+  font-family: var(--font-mono);
+}
+
+.workflow-trigger-detail dd {
+  margin: 0;
+  color: var(--text-secondary);
+  word-break: break-all;
+}
+
+.workflow-diagnostic-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 220px;
+  overflow: auto;
+}
+
+.workflow-diagnostic-list li {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 4px 6px;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  border-left: 3px solid var(--border);
+  font-size: 12px;
+}
+
+.workflow-diagnostic-list li.is-error {
+  border-left-color: var(--danger-color);
+}
+
+.workflow-diagnostic-list li.is-warning {
+  border-left-color: var(--warning-color);
+}
+
+.workflow-diagnostic-list li.is-info {
+  border-left-color: var(--accent-color);
+}
+
+.workflow-diagnostic-list.is-standalone {
+  max-height: none;
+}
+
+.workflow-diagnostic-body {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  width: 100%;
+  padding: 0;
+  border: none;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workflow-diagnostic-code {
+  flex: none;
+  padding: 0 5px;
+  border-radius: 4px;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 10.5px;
+  line-height: 1.7;
+}
+
+.workflow-diagnostic-severity {
+  flex: none;
+  color: var(--text-muted);
+  font-size: 11px;
+}
+
+.workflow-diagnostic-message {
+  color: var(--text-color);
+  word-break: break-word;
+}
+
+.workflow-field {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin-bottom: var(--space-2);
+}
+
+.workflow-field-label {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.workflow-field-queued {
+  padding: 0 6px;
+  border-radius: 999px;
+  background: var(--accent-soft);
+  color: var(--accent-color);
+  font-family: var(--font-sans);
+  font-size: 10.5px;
+  font-style: normal;
+}
+
+.workflow-field input,
+.workflow-field textarea,
+.workflow-field select,
+.workflow-with-row input {
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-document);
+  color: var(--text-color);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.workflow-field input:focus,
+.workflow-field textarea:focus,
+.workflow-field select:focus,
+.workflow-with-row input:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.workflow-field-static {
+  padding: 3px 8px;
+  border-radius: var(--radius-sm);
+  background: var(--bg-document);
+  border: 1px dashed var(--border);
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  word-break: break-all;
+}
+
+.workflow-job-detail {
+  margin-top: var(--space-2);
+}
+
+.workflow-job-meta {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: var(--space-2);
+}
+
+.workflow-meta-text {
+  color: var(--text-muted);
+  font-size: 11.5px;
+}
+
+.workflow-meta-text.is-warning {
+  color: var(--warning-color);
+}
+
+.workflow-link-button {
+  padding: 2px 8px;
+  font-size: 11.5px;
+}
+
+.workflow-step-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.workflow-step-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 4px 8px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  color: var(--text-color);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.workflow-step-item:hover {
+  border-color: var(--border);
+}
+
+.workflow-step-item.is-active {
+  border-color: var(--accent-color);
+  background: var(--accent-soft);
+}
+
+.workflow-step-index {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: var(--surface-muted);
+  color: var(--text-secondary);
+  font-size: 11px;
+}
+
+.workflow-step-title {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-family: var(--font-mono);
+}
+
+.workflow-step-dot {
+  flex: none;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+}
+
+.workflow-step-dot.is-error {
+  background: var(--danger-color);
+}
+
+.workflow-step-detail {
+  margin-top: var(--space-3);
+  padding-top: var(--space-2);
+  border-top: 1px dashed var(--border);
+}
+
+.workflow-step-detail h5 {
+  margin: 0 0 var(--space-2);
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+}
+
+.workflow-with-block {
+  margin-top: var(--space-2);
+}
+
+.workflow-with-header {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  margin-bottom: 4px;
+  color: var(--text-secondary);
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+}
+
+.workflow-with-header small {
+  color: var(--text-muted);
+  font-family: var(--font-sans);
+  font-size: 11px;
+}
+
+.workflow-with-row {
+  display: grid;
+  grid-template-columns: minmax(88px, 1fr) minmax(0, 2fr) auto;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 0;
+}
+
+.workflow-with-row.is-removed {
+  opacity: .55;
+}
+
+.workflow-with-row.is-removed .workflow-with-key,
+.workflow-with-row.is-removed input {
+  text-decoration: line-through;
+}
+
+.workflow-with-key {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-color);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.workflow-with-row.is-new {
+  margin-top: 4px;
+}
+
+/* Markdown 预览正文中的 h4/li 等排版不应影响查看器内部结构 */
+.workflow-viewer h4,
+.workflow-viewer h5 {
+  margin: 0;
+  border: none;
+  padding: 0;
+}
+
+.workflow-viewer ul,
+.workflow-viewer ol {
+  margin: 0;
+  padding-left: 0;
+}
+
+.workflow-viewer ul li,
+.workflow-viewer ol li {
+  margin: 0;
+  padding-left: 0;
+}
+
+.workflow-viewer ul li::marker,
+.workflow-viewer ol li::marker {
+  content: '';
+}
+
+.workflow-viewer input[type='text'],
+.workflow-viewer input:not([type]) {
+  margin: 0;
+}

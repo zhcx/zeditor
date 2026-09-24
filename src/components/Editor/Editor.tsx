@@ -20,6 +20,18 @@ import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste';
 import { resolveSmartPair } from '../../utils/smartPairs';
+import {
+  findInlineTargetAt,
+  formatFootnoteReference,
+  formatLinkMarkdown,
+  formatWikiLinkMarkdown,
+  isOpenableUrl,
+  type InlineTarget,
+} from '../../utils/inlineTargets';
+import { imageDialogFilters } from '../../utils/imageSyntax';
+import { open as openExternal } from '@tauri-apps/plugin-shell';
+import { open as showOpenDialog } from '@tauri-apps/plugin-dialog';
+import { InlinePopup, type InlinePopupFields } from './InlinePopup';
 import { TableToolbar } from './TableToolbar';
 import {
   alignmentAt,
@@ -84,6 +96,13 @@ interface TableToolbarState {
   placement: 'above' | 'below';
   alignment: ColumnAlignment;
   columns: number;
+}
+
+interface InlinePopupState {
+  target: InlineTarget;
+  anchor: { left: number; top: number };
+  /** 打开时是否聚焦弹窗第一个输入框（Ctrl+K 为 true，点击为 false）。 */
+  autoFocus: boolean;
 }
 
 type ContextMenuIconName =
@@ -391,6 +410,10 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const [showContextImageModal, setShowContextImageModal] = useState(false);
   const [selectionToolbar, setSelectionToolbar] = useState<SelectionToolbarState | null>(null);
   const [tableToolbar, setTableToolbar] = useState<TableToolbarState | null>(null);
+  // 内联弹窗：state 渲染 + ref 供 Monaco 事件闭包读取当前弹窗。
+  const [inlinePopup, setInlinePopup] = useState<InlinePopupState | null>(null);
+  const inlinePopupRef = useRef<InlinePopupState | null>(null);
+  const inlinePopupClosedAtRef = useRef(0);
   // 表格动作需要访问 Monaco 控制器，用 ref 把闭包里的实现暴露给渲染层与菜单事件。
   const tableActionRef = useRef<(action: TableAction) => void>(() => {});
   // 斜杠命令的实际插入同样在编辑器实例里执行：表格命令复用统一的 3 × 3 模板。
@@ -399,6 +422,117 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const { proofreadResults, rewriteSelection, translateText, setTranslationVisible, setStatus } = useAIStore();
   const slashCommands = useMemo(() => filterSlashCommands(slashMenu?.query || ''), [slashMenu?.query]);
   const language = normalizeLanguage(settings.appearance.language);
+
+  /** 在目标下方打开内联弹窗；坐标取视口位置，滚动 / 内容变化时刷新。 */
+  const openInlinePopupAt = useCallback((target: InlineTarget, autoFocus: boolean) => {
+    const coords = controllerRef.current?.coordsAtPos(target.from);
+    const state: InlinePopupState = {
+      target,
+      autoFocus,
+      anchor: coords ? { left: coords.left, top: coords.bottom } : { left: 120, top: 120 },
+    };
+    inlinePopupRef.current = state;
+    setInlinePopup(state);
+  }, []);
+
+  const closeInlinePopup = useCallback(() => {
+    if (!inlinePopupRef.current) return;
+    inlinePopupRef.current = null;
+    // 记录关闭时间：弹窗因「点击外部」关闭时，同一次点击的 mouseup 不能重新打开。
+    inlinePopupClosedAtRef.current = Date.now();
+    setInlinePopup(null);
+  }, []);
+
+  /** 应用弹窗字段：重建对应的 Markdown 结构并写回源码。 */
+  const applyInlinePopup = useCallback((fields: InlinePopupFields) => {
+    const controller = controllerRef.current;
+    const state = inlinePopupRef.current;
+    if (!controller || !state) return;
+    const { target } = state;
+
+    if (target.kind === 'footnote') {
+      const name = (fields.name ?? '').trim() || target.name || '1';
+      const content = fields.content ?? '';
+      const tasks: Array<{ from: number; run: () => void }> = [];
+      // 引用与定义都要改时，先改偏移更大的一侧，避免另一侧区间失效。
+      if (target.definition && content !== target.definition.text) {
+        tasks.push({ from: target.definition.from, run: () => controller.replaceRange(target.definition!.from, target.definition!.to, `[^${name}]: ${content}`) });
+      }
+      tasks.push({ from: target.from, run: () => controller.replaceRange(target.from, target.to, formatFootnoteReference(name)) });
+      if (!target.definition && content.trim()) {
+        const value = controller.getValue();
+        const padding = /\n{2}\s*$/.test(value) || !value.trim() ? '' : '\n\n';
+        tasks.push({ from: Number.MAX_SAFE_INTEGER, run: () => controller.replaceRange(value.length, value.length, `${padding}[^${name}]: ${content}\n`) });
+      }
+      tasks.sort((a, b) => b.from - a.from);
+      tasks.forEach((task) => task.run());
+      closeInlinePopup();
+      controller.focus();
+      return;
+    }
+
+    let replacement = '';
+    if (target.kind === 'link') {
+      replacement = formatLinkMarkdown(fields.label ?? '', (fields.url ?? '').trim());
+    } else if (target.kind === 'image') {
+      const title = (fields.title ?? '').trim();
+      replacement = `![${fields.alt ?? ''}](${(fields.src ?? '').trim()}${title ? ` "${title.replace(/"/g, '\\"')}"` : ''})${target.attrs ? ` ${target.attrs}` : ''}`;
+    } else if (target.kind === 'math') {
+      const latex = fields.latex ?? '';
+      replacement = target.display
+        ? (target.raw.includes('\n') ? `$$\n${latex}\n$$` : `$$${latex}$$`)
+        : `$${latex}$`;
+    } else if (target.kind === 'wikilink') {
+      const display = (fields.label ?? '').trim();
+      replacement = formatWikiLinkMarkdown((fields.target ?? '').trim(), display || undefined);
+    }
+    controller.replaceRange(target.from, target.to, replacement);
+    closeInlinePopup();
+    controller.focus();
+  }, [closeInlinePopup]);
+
+  /** 删除目标：链接只移除语法保留文字，其余整体移除。 */
+  const deleteInlinePopup = useCallback(() => {
+    const controller = controllerRef.current;
+    const state = inlinePopupRef.current;
+    if (!controller || !state) return;
+    const { target } = state;
+    controller.replaceRange(target.from, target.to, target.kind === 'link' ? target.label?.text ?? '' : '');
+    closeInlinePopup();
+    controller.focus();
+  }, [closeInlinePopup]);
+
+  const openTargetUrl = useCallback((url: string) => {
+    const trimmed = url.trim();
+    if (!isOpenableUrl(trimmed)) return;
+    if (isTauriRuntime()) void openExternal(trimmed).catch(() => window.open(trimmed, '_blank', 'noopener,noreferrer'));
+    else window.open(trimmed, '_blank', 'noopener,noreferrer');
+  }, []);
+
+  const copyInlineText = useCallback((text: string) => {
+    void navigator.clipboard.writeText(text).catch(() => {});
+  }, []);
+
+  /** 选择本地图片文件：返回路径给弹窗填入来源字段。 */
+  const browseImageSource = useCallback(async () => {
+    try {
+      const selected = await showOpenDialog({ multiple: false, filters: imageDialogFilters() });
+      const path = Array.isArray(selected) ? selected[0] : selected;
+      return path ?? null;
+    } catch {
+      return null;
+    }
+  }, []);
+
+  const jumpToFootnoteDefinition = useCallback(() => {
+    const controller = controllerRef.current;
+    const definition = inlinePopupRef.current?.target.definition;
+    if (!controller || !definition) return;
+    controller.setSelection(definition.from, definition.to);
+    controller.revealOffset(definition.from);
+    closeInlinePopup();
+    controller.focus();
+  }, [closeInlinePopup]);
 
   useEffect(() => {
     const handleFindRequest = (event: Event) => {
@@ -753,6 +887,83 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       });
     };
 
+    // ── 内联弹窗：链接 / 图片 / 公式 / 脚注 / Wiki 链接的就地编辑入口 ──
+    const inlinePopupsEnabled = () => Boolean(useAppStore.getState().settings.editor.inline_popups ?? true);
+    /** 文档或滚动变化后：目标仍在则重新定位，结构被编辑掉则收起弹窗。 */
+    const refreshInlinePopup = () => {
+      const popup = inlinePopupRef.current;
+      if (!popup) return;
+      const value = model.getValue();
+      const next = findInlineTargetAt(value, Math.min(popup.target.from, value.length));
+      if (!next || next.kind !== popup.target.kind || next.raw !== popup.target.raw) {
+        closeInlinePopup();
+        return;
+      }
+      openInlinePopupAt(next, false);
+    };
+    /** 光标进入公式自动弹出；光标离开公式自动收起（公式弹窗随光标走）。 */
+    const maybeAutoOpenMath = () => {
+      const popup = inlinePopupRef.current;
+      const selection = controller.getSelection();
+      if (popup) {
+        if (popup.target.kind !== 'math' || !selection.empty) return;
+        const inside = selection.to > popup.target.from && selection.to <= popup.target.to;
+        if (!inside) closeInlinePopup();
+        return;
+      }
+      if (!inlinePopupsEnabled() || !selection.empty) return;
+      const target = findInlineTargetAt(model.getValue(), selection.to);
+      if (target?.kind === 'math') openInlinePopupAt(target, false);
+    };
+    interface MonacoClickLike {
+      target: { position?: { lineNumber: number; column: number } | null };
+      event: { ctrlKey: boolean; metaKey: boolean };
+    }
+    const handleEditorClickForPopup = (event: MonacoClickLike) => {
+      if (!inlinePopupsEnabled()) return;
+      const position = event.target.position;
+      if (!position) return;
+      const selection = editor.getSelection();
+      if (selection && !selection.isEmpty()) return;
+      const target = findInlineTargetAt(model.getValue(), model.getOffsetAt(position));
+      if (!target) return;
+      if (event.event.ctrlKey || event.event.metaKey) {
+        // Ctrl+点击 直达：网络链接在浏览器打开，脚注跳到定义。
+        if (target.kind === 'link' && isOpenableUrl(target.url?.text ?? '')) {
+          const url = (target.url?.text ?? '').trim();
+          if (isTauriRuntime()) void openExternal(url).catch(() => window.open(url, '_blank', 'noopener,noreferrer'));
+          else window.open(url, '_blank', 'noopener,noreferrer');
+        } else if (target.kind === 'footnote' && target.definition) {
+          controller.setSelection(target.definition.from, target.definition.to);
+          controller.revealOffset(target.definition.from);
+        }
+        return;
+      }
+      // 弹窗因本次点击的 mousedown 刚被关闭时，mouseup 不再重新打开。
+      if (Date.now() - inlinePopupClosedAtRef.current < 250) return;
+      openInlinePopupAt(target, false);
+    };
+    /** Ctrl+K：光标在链接内时聚焦 URL 字段；否则把选区包成链接（剪贴板是 URL 时自动填入）再弹窗。 */
+    const openLinkPopup = async () => {
+      const selection = controller.getSelection();
+      const existing = findInlineTargetAt(model.getValue(), selection.to);
+      if (existing?.kind === 'link') {
+        openInlinePopupAt(existing, true);
+        return;
+      }
+      let clipboardUrl = '';
+      try {
+        const text = await navigator.clipboard.readText();
+        if (/^https?:\/\/\S+$/i.test(text.trim())) clipboardUrl = text.trim();
+      } catch { /* 剪贴板不可用时退回占位符 */ }
+      const labelText = selection.empty ? '链接' : controller.getText(selection.from, selection.to);
+      const markdown = formatLinkMarkdown(labelText, clipboardUrl || 'url');
+      controller.replaceRange(selection.from, selection.to, markdown, { from: selection.from + 1, to: selection.from + 1 + labelText.length });
+      const next = findInlineTargetAt(model.getValue(), selection.from + 1);
+      if (next?.kind === 'link') openInlinePopupAt(next, true);
+      else controller.focus();
+    };
+
     const handleContextMenu = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
@@ -907,6 +1118,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       scheduleCompanion();
       refreshSlashMenu();
       refreshTableToolbar();
+      refreshInlinePopup();
     });
     const cursorDisposable = editor.onDidChangeCursorSelection(() => {
       onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
@@ -914,15 +1126,19 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       refreshSlashMenu();
       refreshSelectionToolbar();
       refreshTableToolbar();
+      refreshInlinePopup();
+      maybeAutoOpenMath();
     });
     const mouseDisposable = editor.onMouseUp((event) => {
       const lineNumber = event.target.position?.lineNumber;
       if (lineNumber) onActiveLineReveal?.(lineNumber);
+      handleEditorClickForPopup(event);
     });
     const scrollDisposable = editor.onDidScrollChange(() => {
       refreshSlashMenu();
       refreshSelectionToolbar();
       refreshTableToolbar();
+      refreshInlinePopup();
     });
     const slashKeyDisposable = editor.onKeyDown((event) => {
       const menu = slashMenuRef.current;
@@ -971,6 +1187,14 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           setShowContextImageModal(true);
           return;
         }
+      }
+
+      // Ctrl/Cmd+K：创建或编辑链接（VMark 内联弹窗交互）。
+      if (primaryModifier && !browserEvent.shiftKey && !browserEvent.altKey && key.toLowerCase() === 'k') {
+        event.preventDefault();
+        event.stopPropagation();
+        void openLinkPopup();
+        return;
       }
 
       // 表格键盘导航：Tab / Shift+Tab 跳到相邻单元格，方向键移动，Enter 新增一行。
@@ -1173,6 +1397,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       window.removeEventListener('zeditor-insert-image', handleInsertImageRequest);
       tableActionRef.current = () => {};
       slashCommandRunRef.current = () => {};
+      inlinePopupRef.current = null;
+      setInlinePopup(null);
       contentDisposable.dispose();
       cursorDisposable.dispose();
       mouseDisposable.dispose();
@@ -1187,7 +1413,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       slashMenuRef.current = null;
       setEditorView(null);
     };
-  }, [activeTabId, onActiveLineChange, onActiveLineReveal, updateTabContent, setEditorView]);
+  }, [activeTabId, onActiveLineChange, onActiveLineReveal, updateTabContent, setEditorView, closeInlinePopup, openInlinePopupAt]);
 
   useEffect(() => { documentModels.retain(tabs.map(t => t.id)); }, [tabs]);
 
@@ -1290,6 +1516,21 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           onSelect={applySlashCommand}
           onSelectedIndexChange={selectSlashIndex}
           onClose={closeSlashMenu}
+        />
+      )}
+      {inlinePopup && (
+        <InlinePopup
+          target={inlinePopup.target}
+          anchor={inlinePopup.anchor}
+          autoFocus={inlinePopup.autoFocus}
+          language={language}
+          onApply={applyInlinePopup}
+          onOpen={openTargetUrl}
+          onCopy={copyInlineText}
+          onDelete={deleteInlinePopup}
+          onBrowse={isTauriRuntime() ? browseImageSource : undefined}
+          onJumpToDefinition={jumpToFootnoteDefinition}
+          onClose={closeInlinePopup}
         />
       )}
       {contextMenu && (

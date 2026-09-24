@@ -9878,6 +9878,183 @@ html[data-theme] .preview-container,
 
 .selection-toolbar[data-placement="below"] { transform: none; }
 
+/* ── 内联弹窗：链接 / 图片 / 公式 / 脚注 / Wiki 链接的就地编辑窗 ── */
+.inline-popup {
+  position: fixed;
+  z-index: 10040;
+  box-sizing: border-box;
+  width: min(360px, calc(100vw - 24px));
+  max-height: min(520px, calc(100vh - 24px));
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px 12px;
+  border: 1px solid color-mix(in srgb, var(--border-color) 82%, transparent);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 97%, transparent);
+  color: var(--text-primary);
+  box-shadow: 0 16px 44px rgba(22, 24, 27, .18), 0 2px 8px rgba(22, 24, 27, .08);
+  backdrop-filter: blur(16px);
+  font: 13px/1.4 var(--font-sans);
+  animation: inline-popup-enter 120ms ease-out;
+}
+
+@keyframes inline-popup-enter {
+  from { opacity: 0; transform: translateY(-3px) scale(.99); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+.inline-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.inline-popup-kind {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  letter-spacing: .02em;
+}
+
+.inline-popup-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: var(--text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.inline-popup-close:hover { background: var(--bg-hover); color: var(--text-primary); }
+
+.inline-popup-fields {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.inline-popup-field {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.inline-popup-field > span {
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.inline-popup-field input,
+.inline-popup-field textarea {
+  box-sizing: border-box;
+  width: 100%;
+  padding: 6px 8px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-document);
+  color: var(--text-primary);
+  font: 13px/1.45 var(--font-sans);
+  resize: vertical;
+}
+
+.inline-popup-field textarea {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 12px;
+}
+
+.inline-popup-field input:focus,
+.inline-popup-field textarea:focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 2px var(--accent-soft);
+}
+
+.inline-popup-hint {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  color: var(--text-muted);
+}
+
+.inline-popup-hint code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: var(--bg-panel);
+  font-size: 11px;
+}
+
+.inline-popup-preview {
+  max-height: 140px;
+  overflow: auto;
+  padding: 10px 12px;
+  border: 1px dashed var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-document);
+  font-size: 14px;
+}
+
+.inline-popup-preview-body .katex-display {
+  margin: 0;
+}
+
+.inline-popup-preview-error {
+  color: var(--danger-color);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.inline-popup-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 10px;
+}
+
+.inline-popup-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--radius-sm);
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font: 12px/1.2 var(--font-sans);
+  cursor: pointer;
+}
+
+.inline-popup-button:hover:not(:disabled) { border-color: var(--accent-color); color: var(--accent-color); }
+.inline-popup-button:disabled { opacity: .45; cursor: default; }
+
+.inline-popup-button.primary {
+  border-color: transparent;
+  background: var(--accent-color);
+  color: #fff;
+}
+
+.inline-popup-button.primary:hover:not(:disabled) { background: var(--accent-hover); color: #fff; }
+
+.inline-popup-button.danger:hover:not(:disabled) { border-color: var(--danger-color); color: var(--danger-color); }
+
+.inline-popup-button kbd {
+  padding: 0 4px;
+  border-radius: 3px;
+  background: rgba(255, 255, 255, .18);
+  font-size: 10px;
+  opacity: .85;
+}
+
 .toolbar-floating {
   width: 100%;
   min-height: 34px;
