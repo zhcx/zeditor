@@ -109,4 +109,4 @@ test('editor defaults to native EditContext and keeps textarea as an explicit fa
 });
 
 // 输入法可见性回归必须在打包后的 CSP 下检查真实行几何，不能用 CSS 字符串
-// 匹配代替。运行方法见 HANDOFF-editor-top-blink.md 和 scripts/verify-editor-ime.mjs。
+// 匹配代替。运行方法见 scripts/verify-editor-ime.mjs。
