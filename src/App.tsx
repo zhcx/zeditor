@@ -955,22 +955,34 @@ function App() {
                                  result.type === 'layout' ? '排版' : '风格'}
                               </div>
                               <div className="proofread-content">
-                                <div className="original-text">
-                                  <span className="label">原文:</span>
-                                  <span className="text strikethrough">{result.original}</span>
-                                </div>
-                                <div className="suggestion-text">
-                                  <span className="label">建议:</span>
-                                  <span className="text highlight">{result.suggestion}</span>
-                                </div>
+                                {result.suggestion !== result.original ? (
+                                  <>
+                                    <div className="original-text">
+                                      <span className="label">原文:</span>
+                                      <span className="text strikethrough">{result.original}</span>
+                                    </div>
+                                    <div className="suggestion-text">
+                                      <span className="label">建议:</span>
+                                      <span className="text highlight">{result.suggestion}</span>
+                                    </div>
+                                  </>
+                                ) : (
+                                  // 静态校对的 report-only 项没有自动修复：只展示问题位置与说明。
+                                  <div className="original-text">
+                                    <span className="label">问题:</span>
+                                    <span className="text">{result.original}</span>
+                                  </div>
+                                )}
                                 <div className="explanation-text">{result.explanation}</div>
                               </div>
-                              <button
-                                className="apply-fix-btn"
-                                onClick={() => useAIStore.getState().applyProofreadFix(result)}
-                              >
-                                应用
-                              </button>
+                              {result.suggestion !== result.original && (
+                                <button
+                                  className="apply-fix-btn"
+                                  onClick={() => useAIStore.getState().applyProofreadFix(result)}
+                                >
+                                  应用
+                                </button>
+                              )}
                               <button
                                 className="proofread-ignore-btn"
                                 onClick={() => useAIStore.getState().ignoreProofreadResult(result)}

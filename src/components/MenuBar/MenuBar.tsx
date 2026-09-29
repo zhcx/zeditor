@@ -173,7 +173,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.5.2**
+**Zeditor v0.5.3**
 
 一款现代化的 Markdown 编辑器
 
@@ -661,8 +661,8 @@ export function MenuBar() {
     window.dispatchEvent(new CustomEvent('zeditor-table-action', { detail: { action } }));
     closeMenus();
   };
-  const requestInsert = (kind: 'table' | 'image') => {
-    window.dispatchEvent(new CustomEvent(kind === 'table' ? 'zeditor-insert-table' : 'zeditor-insert-image'));
+  const requestInsert = (kind: 'table' | 'image' | 'markmap') => {
+    window.dispatchEvent(new CustomEvent(`zeditor-insert-${kind}`));
     closeMenus();
   };
 
@@ -712,6 +712,7 @@ export function MenuBar() {
         { divider: true, label: '' },
         { label: '插入图片…', action: () => requestInsert('image'), shortcut: 'Ctrl+Shift+I' },
         { label: '插入表格', action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
+        { label: '插入思维导图', action: () => requestInsert('markmap') },
         {
           label: '表格操作',
           children: [

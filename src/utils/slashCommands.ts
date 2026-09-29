@@ -1,3 +1,6 @@
+// 显式 .ts 后缀：该模块被 Node 原生测试直接加载，需要可解析的完整说明符。
+import { MARKMAP_TEMPLATE, MARKMAP_TEMPLATE_SELECTION } from './markmapSource.ts';
+
 export interface SlashCommandInsertion {
   text: string;
   selectionStart?: number;
@@ -76,6 +79,7 @@ export const SLASH_COMMANDS: SlashCommand[] = [
   { id: 'sequence', title: '时序图', description: '插入 Mermaid 时序图', shortcut: '/sequence', icon: '⇄', keywords: 'sequence diagram mermaid 时序图 顺序图 交互', insertion: insertion('```mermaid\nsequenceDiagram\n  participant A as 用户\n  participant B as 系统\n  A->>B: 请求\n  B-->>A: 响应\n```', 46, 48) },
   { id: 'state', title: '状态图', description: '插入 Mermaid 状态图', shortcut: '/state', icon: '◉', keywords: 'state diagram mermaid 状态图 状态机', insertion: insertion('```mermaid\nstateDiagram-v2\n  [*] --> 待处理\n  待处理 --> 进行中 : 开始\n  进行中 --> 已完成 : 完成\n  已完成 --> [*]\n```', 37, 40) },
   { id: 'class-diagram', title: '类图', description: '插入 Mermaid 类图', shortcut: '/class', icon: '⊞', keywords: 'class diagram mermaid 类图 UML', insertion: insertion('```mermaid\nclassDiagram\n  class 类名 {\n    +属性1 string\n    +方法1() void\n  }\n```', 32, 34) },
+  { id: 'markmap', title: '思维导图', description: '插入 Markmap 思维导图', shortcut: '/markmap', icon: '❋', keywords: 'markmap mindmap 思维导图 脑图 导图 树 大纲', insertion: insertion(MARKMAP_TEMPLATE, MARKMAP_TEMPLATE_SELECTION.start, MARKMAP_TEMPLATE_SELECTION.end) },
   { id: 'slide', title: '幻灯片分隔', description: '插入幻灯片分隔符', shortcut: '/slide', icon: '▢', keywords: 'slide ppt presentation 幻灯片 分隔 演示', insertion: insertion('\n---\n\n') },
   // —— 底部分组：其余 AI 动作 ——
   { id: 'ai-continue', title: 'AI 续写', description: '根据上文继续写作', shortcut: '/ai', icon: '续', keywords: 'ai continue write 写作 续写 接着写 智能', insertion: insertion(''), ai: 'continue', dividerBefore: true },

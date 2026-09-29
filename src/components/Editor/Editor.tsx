@@ -13,6 +13,7 @@ import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../..
 import { contentFontStack } from '../../utils/appearanceSettings';
 import { DocumentSessions, sameDocument } from '../../utils/documentSafety';
 import { filterSlashCommands, findSlashCommandTrigger, type SlashCommand } from '../../utils/slashCommands';
+import { MARKMAP_TEMPLATE, MARKMAP_TEMPLATE_SELECTION } from '../../utils/markmapSource';
 import { SlashCommandMenu, type SlashMenuAnchor } from './SlashCommandMenu';
 import { ImageOptionsModal, Toolbar } from '../Toolbar/Toolbar';
 import { normalizeLanguage, t } from '../../i18n';
@@ -841,6 +842,18 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       controller.focus();
     };
 
+    const insertMarkmapAtCursor = () => {
+      const selection = controller.getSelection();
+      const line = controller.lineAt(selection.from);
+      // 光标所在行有内容时先换行；插入后选中中心主题，方便直接改写根节点。
+      const prefix = line.text.trim().length === 0 ? '' : '\n';
+      controller.replaceRange(selection.from, selection.to, `${prefix}${MARKMAP_TEMPLATE}\n`, {
+        from: selection.from + prefix.length + MARKMAP_TEMPLATE_SELECTION.start,
+        to: selection.from + prefix.length + MARKMAP_TEMPLATE_SELECTION.end,
+      });
+      controller.focus();
+    };
+
     const runSlashCommand = (command: SlashCommand) => {
       const menu = slashMenuRef.current;
       if (!menu) return;
@@ -1309,9 +1322,11 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     };
     const handleInsertTableRequest = () => insertTableAtCursor(3, 3);
     const handleInsertImageRequest = () => setShowContextImageModal(true);
+    const handleInsertMarkmapRequest = () => insertMarkmapAtCursor();
     window.addEventListener('zeditor-table-action', handleTableActionRequest);
     window.addEventListener('zeditor-insert-table', handleInsertTableRequest);
     window.addEventListener('zeditor-insert-image', handleInsertImageRequest);
+    window.addEventListener('zeditor-insert-markmap', handleInsertMarkmapRequest);
 
     const handlePaste = async (event: ClipboardEvent) => {
       if (!(event.target instanceof Node) || !root.contains(event.target)) return;
@@ -1395,6 +1410,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       window.removeEventListener('zeditor-table-action', handleTableActionRequest);
       window.removeEventListener('zeditor-insert-table', handleInsertTableRequest);
       window.removeEventListener('zeditor-insert-image', handleInsertImageRequest);
+      window.removeEventListener('zeditor-insert-markmap', handleInsertMarkmapRequest);
       tableActionRef.current = () => {};
       slashCommandRunRef.current = () => {};
       inlinePopupRef.current = null;

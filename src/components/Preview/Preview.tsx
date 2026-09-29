@@ -10,6 +10,7 @@ import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { findActiveSourceElement } from '../../utils/activeSourceLine';
 import { addHeadingAnchors, findLocalHeadingTarget } from '../../utils/headingAnchors';
 import { hasWorkflowShape, isWorkflowLikeFile } from '../../utils/workflowShape';
+import { MARKMAP_FENCE_SELECTOR } from '../../utils/markmapSource';
 import {
   findMediaEmbeds,
   isPlatformPageUrl,
@@ -34,6 +35,9 @@ import { toggleTaskLine } from '../../utils/taskList';
 // 工作流查看器（含 YAML 解析器）只在真的遇到工作流时加载，不进入首帧关键路径。
 const WorkflowViewer = lazy(() => import('../WorkflowViewer/WorkflowViewer').then(m => ({ default: m.WorkflowViewer })));
 
+// Markmap 思维导图同理：markmap 解析与渲染库只在出现 ```markmap 时才下载。
+const MarkmapViewer = lazy(() => import('../MarkmapViewer/MarkmapViewer').then(m => ({ default: m.MarkmapViewer })));
+
 /** Markdown 代码围栏里可被识别为工作流的语言标记。 */
 const WORKFLOW_FENCE_SELECTOR = 'code.language-yaml, code.language-yml, code.language-github-actions-workflow';
 
@@ -52,8 +56,12 @@ const md = new MarkdownIt({
   typographer: true,
   breaks: true,
   highlight: (str, lang) => {
+    // 特殊围栏保留语言 class，交给预览的二次渲染接管（顺带避免 hljs 报未知语言）。
     if (lang === 'mermaid') {
       return `<pre class="hljs"><code class="language-mermaid">${md.utils.escapeHtml(str)}</code></pre>`;
+    }
+    if (lang === 'markmap') {
+      return `<pre class="hljs"><code class="language-markmap">${md.utils.escapeHtml(str)}</code></pre>`;
     }
     if (lang && hljs.getLanguage(lang)) {
       try {
@@ -600,6 +608,45 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       else void renderWorkflowBlock(block);
     });
 
+    // Markmap 思维导图：```markmap 围栏里的 Markdown 标题层级渲染成可交互 SVG 树
+    // （拖动平移、Ctrl + 滚轮缩放、点击圆圈折叠）。与内联工作流图一样先靠近视口
+    // 才挂载 React 根，重渲染前必须卸载，否则会随输入不断累积实例。
+    const markmapRoots: Root[] = [];
+    const renderMarkmapBlock = (block: HTMLElement) => {
+      const source = block.textContent || '';
+      if (!source.trim()) return;
+      const pre = block.parentElement;
+      if (!pre) return;
+
+      const mount = document.createElement('div');
+      mount.className = 'markmap-embed-mount';
+      const root = createRoot(mount);
+      root.render(
+        <Suspense fallback={null}>
+          <MarkmapViewer source={source} embedded title={currentFile ?? undefined} />
+        </Suspense>,
+      );
+      pre.replaceWith(mount);
+      markmapRoots.push(root);
+      onContentRendered?.();
+    };
+
+    const markmapBlocks = Array.from(container.querySelectorAll<HTMLElement>(MARKMAP_FENCE_SELECTOR));
+    const markmapObserver = typeof IntersectionObserver === 'undefined' || markmapBlocks.length === 0
+      ? null
+      : new IntersectionObserver((entries) => {
+        entries.forEach((entry) => {
+          if (!entry.isIntersecting) return;
+          markmapObserver?.unobserve(entry.target);
+          renderMarkmapBlock(entry.target as HTMLElement);
+        });
+      }, { root: cardRef.current, rootMargin: '480px 0px' });
+
+    markmapBlocks.forEach((block) => {
+      if (markmapObserver) markmapObserver.observe(block);
+      else renderMarkmapBlock(block);
+    });
+
     // 图片：本地相对路径先解析成 asset 协议地址，缺失时给出可读提示，
     // 并挂上双击编辑属性与右键尺寸菜单。
     const imageSpecs = findImages(deferredContent);
@@ -659,8 +706,10 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       disposed = true;
       observer?.disconnect();
       workflowObserver?.disconnect();
-      // 内联工作流图挂在被替换的 DOM 上，清理时必须同时卸载 React 根。
+      markmapObserver?.disconnect();
+      // 内联工作流图与思维导图挂在被替换的 DOM 上，清理时必须同时卸载 React 根。
       workflowRoots.forEach((root) => root.unmount());
+      markmapRoots.forEach((root) => root.unmount());
     };
   }, [deferredContent, mermaidThemeVersion, onContentRendered, currentFile, workflowViewerEnabled]);
 

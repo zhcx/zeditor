@@ -114,6 +114,8 @@ export interface Settings {
     api_endpoint: string;
     model: string;
     temperature: number;
+    /** 校对模式开关：开启用 AI 校对，关闭用内置 Markdown 静态校对。 */
+    proofread_with_ai: boolean;
     auto_suggest: boolean;
     suggest_delay: number;
     writing_style: 'formal' | 'casual' | 'academic' | 'creative' | 'custom';
@@ -388,6 +390,7 @@ const defaultSettings: Settings = {
     api_endpoint: 'https://api.openai.com/v1',
     model: 'gpt-4o-mini',
     temperature: 0.7,
+    proofread_with_ai: true,
     auto_suggest: false,
     suggest_delay: 2000,
     writing_style: 'formal',

@@ -1,0 +1,131 @@
+/* Markmap 思维导图：代码围栏里的 Markdown 层级渲染为可平移 / 缩放 / 折叠的 SVG 树。
+   配色与容器全部走主题变量，明暗主题与预览文档保持一致；
+   节点内部的 `--markmap-*` 变量由组件按主题写成内联样式，导出时随 SVG 一起带走。 */
+
+.markmap-container {
+  margin: 1.5em 0;
+  padding: 1em;
+  border: 1px solid var(--border-soft);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+}
+
+.markmap-container figcaption {
+  margin-bottom: .7em;
+  color: var(--text-muted);
+  font-size: .78em;
+  text-align: left;
+}
+
+.markmap-canvas {
+  position: relative;
+}
+
+.markmap-svg {
+  display: block;
+  width: 100%;
+  height: clamp(300px, 46vh, 560px);
+  /* 画布自己处理拖动与滚轮缩放，浏览器不要抢走手势。 */
+  touch-action: none;
+  cursor: grab;
+}
+
+.markmap-svg:active {
+  cursor: grabbing;
+}
+
+.markmap-svg:focus-visible {
+  outline: 2px solid var(--accent-color);
+  outline-offset: 2px;
+}
+
+/* 悬浮工具条：默认淡出，悬停或键盘聚焦时显现，避免遮挡节点。 */
+.markmap-actions {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  display: flex;
+  gap: 6px;
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+
+.markmap-container:hover .markmap-actions,
+.markmap-actions:focus-within {
+  opacity: 1;
+}
+
+.markmap-actions button {
+  padding: 3px 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface-raised);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  line-height: 1.6;
+  cursor: pointer;
+}
+
+.markmap-actions button:hover:not(:disabled) {
+  border-color: var(--accent-color);
+  color: var(--accent-color);
+}
+
+.markmap-actions button:disabled {
+  opacity: .55;
+  cursor: default;
+}
+
+.markmap-loading {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-muted);
+  font-size: 13px;
+  pointer-events: none;
+}
+
+.markmap-notice {
+  display: block;
+  margin-top: .5em;
+  color: var(--text-muted);
+  font-size: .78em;
+}
+
+.markmap-error {
+  margin: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, #d9534f 42%, var(--border-soft));
+  border-radius: 8px;
+  background: color-mix(in srgb, #d9534f 8%, var(--bg-elevated));
+  color: #b43d3d;
+  font-size: 13px;
+}
+
+.markmap-error span {
+  display: block;
+  margin-top: 6px;
+}
+
+.markmap-error pre {
+  margin: 8px 0 0;
+  padding: 8px;
+  overflow-x: auto;
+  border-radius: 5px;
+  background: var(--bg-secondary);
+  color: var(--text-primary);
+  text-align: left;
+}
+
+/* 内联在 Markdown 预览中：更紧凑，且不继承正文的段落排版 */
+.markmap-container.is-embedded {
+  margin: var(--space-3) 0;
+  padding: var(--space-2);
+}
+
+.markmap-embed-mount {
+  display: block;
+}

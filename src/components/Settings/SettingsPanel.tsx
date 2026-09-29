@@ -902,6 +902,15 @@ export function SettingsPanel() {
               />
               {localSettings.ai.enabled && (
                 <>
+                  <SettingToggle
+                    label="使用 AI 校对"
+                    description="开启后「校对」调用 AI 模型检查文字；关闭后改用内置 Markdown 校对（未闭合围栏、反向链接、跳级标题、断开的锚点等正确性问题）"
+                    checked={localSettings.ai.proofread_with_ai !== false}
+                    onChange={(checked) => setLocalSettings({
+                      ...localSettings,
+                      ai: { ...localSettings.ai, proofread_with_ai: checked },
+                    })}
+                  />
                   <div className="setting-item">
                     <label>AI服务商</label>
                     <select

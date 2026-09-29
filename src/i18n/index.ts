@@ -142,6 +142,27 @@ const entries: Record<string, Translation> = {
   'Access Key Secret': { 'zh-CN': '访问密钥', 'zh-TW': '存取密鑰', en: 'Access Key Secret' },
   'Dark Theme': { 'zh-CN': '深色主题', 'zh-TW': '深色主題', en: 'Dark Theme' },
   'Light Theme': { 'zh-CN': '浅色主题', 'zh-TW': '淺色主題', en: 'Light Theme' },
+  '思维导图': { 'zh-CN': '思维导图', 'zh-TW': '思維導圖', en: 'Mind map' },
+  'Markmap 思维导图': { 'zh-CN': 'Markmap 思维导图', 'zh-TW': 'Markmap 思維導圖', en: 'Markmap mind map' },
+  '插入思维导图': { 'zh-CN': '插入思维导图', 'zh-TW': '插入思維導圖', en: 'Insert mind map' },
+  '适应视图': { 'zh-CN': '适应视图', 'zh-TW': '適應視圖', en: 'Fit view' },
+  '导出 PNG': { 'zh-CN': '导出 PNG', 'zh-TW': '匯出 PNG', en: 'Export PNG' },
+  '正在渲染思维导图…': { 'zh-CN': '正在渲染思维导图…', 'zh-TW': '正在渲染思維導圖…', en: 'Rendering mind map…' },
+  '思维导图渲染失败': { 'zh-CN': '思维导图渲染失败', 'zh-TW': '思維導圖渲染失敗', en: 'Mind map failed to render' },
+  '导出 PNG 失败': { 'zh-CN': '导出 PNG 失败', 'zh-TW': '匯出 PNG 失敗', en: 'Failed to export PNG' },
+  '已取消导出': { 'zh-CN': '已取消导出', 'zh-TW': '已取消匯出', en: 'Export cancelled' },
+  '思维导图内容为空：请用 Markdown 标题（# / ## / ###）组织层级。': {
+    'zh-CN': '思维导图内容为空：请用 Markdown 标题（# / ## / ###）组织层级。',
+    'zh-TW': '思維導圖內容為空：請用 Markdown 標題（# / ## / ###）組織層級。',
+    en: 'The mind map is empty: organize the hierarchy with Markdown headings (# / ## / ###).',
+  },
+  '使用 AI 校对': { 'zh-CN': '使用 AI 校对', 'zh-TW': '使用 AI 校對', en: 'Use AI proofreading' },
+  '开启后「校对」调用 AI 模型检查文字；关闭后改用内置 Markdown 校对（未闭合围栏、反向链接、跳级标题、断开的锚点等正确性问题）': {
+    'zh-CN': '开启后「校对」调用 AI 模型检查文字；关闭后改用内置 Markdown 校对（未闭合围栏、反向链接、跳级标题、断开的锚点等正确性问题）',
+    'zh-TW': '開啟後「校對」呼叫 AI 模型檢查文字；關閉後改用內建 Markdown 校對（未閉合圍欄、反向連結、跳級標題、中斷的錨點等正確性問題）',
+    en: 'When on, proofreading uses the AI model; when off, it uses the built-in Markdown lint (unclosed fences, reversed links, skipped heading levels, broken anchors, etc.)',
+  },
+  '问题:': { 'zh-CN': '问题:', 'zh-TW': '問題:', en: 'Issue:' },
 };
 
 const englishEntries: Record<string, string> = {
@@ -184,6 +205,9 @@ const englishEntries: Record<string, string> = {
   '未保存的文件': 'Unsaved files', '未保存': 'Unsaved', '不保存的内容将无法恢复。': 'Changes you do not save cannot be recovered.', '不保存': "Don't save",
   '工作流': 'Workflows', 'GitHub Actions 工作流查看器与结构化编辑': 'GitHub Actions workflow viewer and structured editing', '在预览中渲染工作流图': 'Render workflow diagrams in preview', '保存时保留 YAML 格式': 'Preserve YAML formatting on save',
   '触发器': 'Triggers', '只读': 'Read-only', '复制 Mermaid': 'Copy Mermaid', '复制 SVG': 'Copy SVG', '导出 SVG': 'Export SVG', '放弃修改': 'Discard changes', '选择 job': 'Select job', '跳到源码': 'Jump to source',
+  '思维导图': 'Mind map', 'Markmap 思维导图': 'Markmap mind map', '插入思维导图': 'Insert mind map', '适应视图': 'Fit view', '导出 PNG': 'Export PNG',
+  '正在渲染思维导图…': 'Rendering mind map…', '思维导图渲染失败': 'Mind map failed to render', '导出 PNG 失败': 'Failed to export PNG', '已取消导出': 'Export cancelled',
+  '思维导图内容为空：请用 Markdown 标题（# / ## / ###）组织层级。': 'The mind map is empty: organize the hierarchy with Markdown headings (# / ## / ###).',
 };
 
 // Phrase-level conversion is used for remaining Simplified Chinese labels so

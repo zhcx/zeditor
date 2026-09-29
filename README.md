@@ -73,6 +73,7 @@
 ### 🎨 渲染能力
 - **数学公式** - KaTeX 渲染，支持行内与块级公式
 - **Mermaid 图表** - 流程图、时序图、甘特图、状态图、类图等
+- **Markmap 思维导图** - 用标准 Markdown 标题层级（`#` / `##` / `###`）描述导图，渲染为可交互 SVG 树：拖动平移、`Ctrl` + 滚轮缩放、点击分支圆圈折叠，支持适应视图与 2 倍分辨率 PNG 导出；`/markmap` 命令、工具栏「图表」或「功能 → 插入思维导图」可快速插入
 - **GitHub Actions 工作流查看器** - 把 `.github/workflows` 下的 YAML 渲染成可交互的 job 依赖图（DAG），支持点击查看 job / step 详情、`GHA-*` 诊断（重复 job、循环依赖、未知引用、`pull_request_target` 安全提示等）、Mermaid / SVG 导出；Markdown 代码围栏中的工作流同样内联渲染（只读）；结构化编辑 job / step / `with` 字段后写回编辑器，保留注释与缩进
 - **代码高亮** - highlight.js 支持
 - **任务列表** - 待办事项管理
@@ -109,7 +110,7 @@ Zeditor 支持将 **DOC、DOCX、PPT、PPTX、XLS、XLSX、ODF、RTF、EPUB、CS
 
 ### 🤖 AI 智能助手
 - **AI 对话面板** — 侧边栏自由对话，支持流式输出与思维链展示
-- **智能校对** - 自动检测错别字、语法错误、标点问题
+- **智能校对** - 自动检测错别字、语法错误、标点问题；可在「设置 → AI 助手」关闭「使用 AI 校对」，改用内置 Markdown 校对（未闭合围栏、反向链接、跳级标题、断开的锚点、表格列数不匹配等正确性检查）
 - **伴写建议** - 根据上下文提供写作建议
 - **文本重写** - 一键改写选中内容
 - **智能翻译** - 支持多语言翻译
@@ -170,61 +171,31 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.5.2 更新
+## v0.5.3 更新
 
 ### 更新日志
 
-- **内联弹窗（Inline Popups）**：链接 / 图片 / 数学公式 / 脚注 / Wiki 链接点击即在原位弹出编辑窗；`Ctrl+K` 编辑链接、`Ctrl+点击` 直接打开，公式带 KaTeX 实时预览；可在「设置 → 编辑器」中关闭。
-- **GitHub Actions 工作流查看器**：`.github/workflows` 下的 YAML 渲染为可交互 job 依赖图（DAG），支持点击查看 job / step 详情、`GHA-*` 诊断（重复 job、循环依赖、未知引用、`pull_request_target` 安全提示等）与 Mermaid / SVG 导出；Markdown 代码围栏中的工作流内联只读渲染；结构化编辑后写回编辑器并保留注释与缩进。
-- **发布质量**：版本源统一为 0.5.2；新增内联目标检测与工作流解析单元测试，覆盖区间精确性、转义、代码块忽略与编辑回写。
+- **校对功能：AI / Markdown 双模式**：「设置 → AI 助手」新增「使用 AI 校对」开关——开启时走原有 AI 校对，关闭或 AI 未配置时改用内置 Markdown 静态校对（未闭合围栏、反向链接、跳级标题、断开锚点、表格列数不匹配、空链接等正确性检查，规则对齐 VMark lint 设计）；静态校对结果与 AI 校对同构，共用侧栏面板、波浪线装饰与「应用修复」交互，report-only 问题只提示不显示应用按钮。
+- **Markmap 思维导图**：`markmap` 围栏里的标准 Markdown 标题层级（`#` / `##` / `###`）渲染为可交互 SVG 树，支持拖动平移、`Ctrl` + 滚轮缩放、点击分支圆圈折叠、适应视图与 2 倍分辨率 PNG 导出；配色跟随明暗主题，解析与渲染库首次遇到围栏时才按需加载；`/markmap` 命令、工具栏「图表 → Markmap 思维导图」或「功能 → 插入思维导图」均可快速插入。
+- **发布质量**：版本源统一为 0.5.3；新增 AI / Markdown 双模式校对与 Markmap 相关单元测试。
 
-### v0.5.2 平台安装包对照
+### v0.5.3 平台安装包对照
 
-> 以下链接指向 v0.5.2 Release 资产；安装包由 GitHub Actions 根据 v0.5.2 标签源码构建。
-
-| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
-| --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_0.5.2_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_0.5.2_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_0.5.2_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_0.5.2_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_0.5.2_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor-0.5.2-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.2/Zeditor_0.5.2_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
-
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.2.md`](docs/releases/v0.5.2.md)。
-
-## v0.5.1 更新
-
-### 更新日志
-
-- **界面焕新（明暗双主题重设计）**：浅色主题为纯净中性灰底 + 现代钴蓝强调，深色主题为深炭灰基调 + 鲜明天蓝强调；文本对比度、边框透明度与语义色双主题统一。
-- **形状与交互统一**：控件圆角 3px → 6px、容器 8px、浮层 12px；阴影分层柔和化；按钮与输入框使用 2px 强调色焦点环，输入框聚焦带淡色光环；滚动条改为悬浮细条。
-- **语法高亮更新**：浅色采用 One Light 风格，深色采用 GitHub Dark 风格；预览代码块随主题切换。
-- **编辑器配色统一**：编辑区背景、行号、当前行、光标与选区与工作区同源，切换主题零色差；修复浅色主题下编辑区文字偏淡难以辨认的问题。
-- **菜单当前项标识**：主题（深色 / 浅色）与模式（分屏 / 沉浸阅读 / 沉浸写作）菜单显示当前选中项 ✓；菜单项点击后统一收起。
-- **智能 Tab 导航**：Tab 可在括号 / 引号（含中日韩括号与弯引号）、Markdown 行内格式与链接字段之间穿梭，嵌套每次只跳出一层，支持多光标；代码块内自动停用。
-- **转换模块**：AnyDoc 引擎升级至 v0.2.4，转换模块同步更新为 v1.3.0；模块与软件版本独立演进，应用会在检测到新模块后按需下载。
-
-### v0.5.1 平台安装包对照
-
-> 以下链接指向 v0.5.1 Release 资产；安装包由 GitHub Actions 根据 v0.5.1 标签源码构建。
+> 以下链接指向 v0.5.3 Release 资产；安装包由 GitHub Actions 根据 v0.5.3 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_0.5.1_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_0.5.1_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_0.5.1_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_0.5.1_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_0.5.1_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor-0.5.1-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.1/Zeditor_0.5.1_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor-0.5.3-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.1.md`](docs/releases/v0.5.1.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.3.md`](docs/releases/v0.5.3.md)。
 
 ## Contributors
 
@@ -427,10 +398,10 @@ SignPath Foundation 申请目前处于准备/审核阶段；在正式启用前�
 
 ## 🚀 版本更新日志
 
+ - **v0.5.3**（2026-09-29）：新增 **AI / Markdown 双模式校对**——「设置 → AI 助手」新增「使用 AI 校对」开关，开启时走 AI 校对，关闭或 AI 未配置时改用内置 Markdown 静态校对（未闭合围栏、跳级标题、断开锚点、表格列数不匹配等正确性检查，结果与 AI 校对同构）；新增 **Markmap 思维导图**，`markmap` 围栏渲染为可交互 SVG 树，支持平移、缩放、折叠与 2 倍分辨率 PNG 导出。详见 [v0.5.3 发布说明](docs/releases/v0.5.3.md)。
+   - 平台安装包（由 `v0.5.3` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.3_x64-setup.exe` / `Zeditor_0.5.3_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
  - **v0.5.2**（2026-09-24）：新增**内联弹窗**——链接 / 图片 / 公式 / 脚注 / Wiki 链接点击即在原位弹出编辑窗，`Ctrl+K` 编辑链接、`Ctrl+点击` 直接打开、公式带 KaTeX 实时预览；新增 **GitHub Actions 工作流查看器**，将 `.github/workflows` 的 YAML 渲染为可交互 job 依赖图并支持诊断与结构化编辑。详见 [v0.5.2 发布说明](docs/releases/v0.5.2.md)。
    - 平台安装包（由 `v0.5.2` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.2_x64-setup.exe` / `Zeditor_0.5.2_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.5.1**（2026-09-24）：明暗双主题按简约现代理念全面重设计，统一圆角、阴影、焦点与滚动条；菜单显示当前主题 / 模式选中项；新增智能 Tab 导航（括号 / 引号 / 行内格式 / 链接穿梭，支持多光标）；修复浅色主题编辑区文字偏淡问题。详见 [v0.5.1 发布说明](docs/releases/v0.5.1.md)。
-   - 平台安装包（由 `v0.5.1` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.1_x64-setup.exe` / `Zeditor_0.5.1_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
  - **v0.5.0**（2026-09-23）：右键菜单按场景重组、浮动工具栏精简为文字标签，修复表格新增行列占位、选择器与滚动条、预览指示条位置等问题。详见 [v0.5.0 发布说明](docs/releases/v0.5.0.md)。
    - 平台安装包（由 `v0.5.0` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.0_x64-setup.exe` / `Zeditor_0.5.0_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
  - **v0.4.9**（2026-09-22）：完善表格编辑与图片支持——表格增删行列、对齐、键盘导航与列宽拖动，图片统一复制到 `.assets` 并支持尺寸与双击编辑。详见 [v0.4.9 发布说明](docs/releases/v0.4.9.md)。

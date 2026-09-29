@@ -57,6 +57,17 @@ test('diagram commands preselect their placeholder text', () => {
   }
 });
 
+test('markmap command inserts a mind map template with the root node selected', () => {
+  const command = SLASH_COMMANDS.find((item) => item.id === 'markmap');
+  assert.ok(command);
+  assert.equal(command.shortcut, '/markmap');
+
+  const { text, selectionStart, selectionEnd } = command.insertion;
+  assert.ok(text.startsWith('```markmap'), '思维导图使用 markmap 围栏');
+  assert.equal(text.slice(selectionStart, selectionEnd), '中心主题');
+  assert.deepEqual(filterSlashCommands('思维导图').map((item) => item.id), ['markmap']);
+});
+
 test('table command defaults to a 3 × 3 table with the header cell selected', () => {
   const command = SLASH_COMMANDS.find((item) => item.id === 'table');
   assert.ok(command);

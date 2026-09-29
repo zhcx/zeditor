@@ -1,7 +1,7 @@
 {
   "name": "zeditor",
   "private": true,
-  "version": "0.5.2",
+  "version": "0.5.3",
   "type": "module",
   "engines": {
     "node": ">=22.6.0"
@@ -26,6 +26,8 @@
     "katex": "^0.16.9",
     "markdown-it": "14.3.0",
     "markdown-it-task-lists": "^2.1.1",
+    "markmap-lib": "^0.18.12",
+    "markmap-view": "^0.18.12",
     "mermaid": "^11.17.2",
     "monaco-editor": "^0.55.1",
     "react": "^18.3.1",

@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore, type AIProviderId } from './appStore';
 import { parseAIProviderProfiles } from '../utils/aiProviderProfiles';
+import { lintMarkdown } from '../utils/markdownLint';
 
 export interface ProofreadResult {
   from: number;
@@ -415,13 +416,15 @@ export const useAIStore = create<AIState>((set, get) => ({
 
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled) {
-      set({ status: 'error', statusMessage: 'AI功能未启用' });
-      return;
-    }
-
-    if (!settings.ai.api_key) {
-      set({ status: 'error', statusMessage: '请先配置API密钥' });
+    // 校对模式：开启「使用 AI 校对」且 AI 可用时走 AI；其余情况退化为内置
+    // Markdown 静态校对（断链、未闭合围栏、跳级标题等正确性检查）。
+    const aiRequested = settings.ai.proofread_with_ai !== false;
+    const aiReady = settings.ai.enabled && Boolean(settings.ai.api_key);
+    if (aiRequested && !aiReady) {
+      set({
+        status: 'error',
+        statusMessage: 'AI 校对未就绪：请在「设置 → AI 助手」中启用 AI 并配置 API 密钥；或关闭「使用 AI 校对」，改用内置 Markdown 校对。',
+      });
       return;
     }
 
@@ -433,6 +436,36 @@ export const useAIStore = create<AIState>((set, get) => ({
 
     const trimStartOffset = content.indexOf(trimmedContent);
     const resultOffset = baseOffset + Math.max(0, trimStartOffset);
+
+    if (!aiReady) {
+      set({
+        status: 'proofreading',
+        statusMessage: baseOffset > 0 ? '正在检查选中文本...' : '正在检查 Markdown 语法...',
+      });
+      // 选区校对（哪怕从文档开头开始选）只运行不依赖全文上下文的规则，
+      // 避免把片段误当全文产生跳级标题 / 断链等假阳性。
+      const wholeTrimmed = useAppStore.getState().content.trim();
+      const isPartial = baseOffset > 0 || trimmedContent !== wholeTrimmed;
+      const issues = lintMarkdown(trimmedContent, { partial: isPartial });
+      // 静态校对的结果与 AI 校对同构：带偏移的 ProofreadResult 列表，
+      // 可直接进入校对面板、编辑器装饰与「应用修复」链路。
+      const results: ProofreadResult[] = issues.map((issue) => ({
+        from: issue.from + resultOffset,
+        to: issue.to + resultOffset,
+        original: trimmedContent.slice(issue.from, issue.to),
+        suggestion: issue.suggestion,
+        type: 'markdown',
+        explanation: `[${issue.ruleId}] ${issue.message}`,
+      }));
+      set({
+        status: 'success',
+        statusMessage: results.length > 0 ? `发现 ${results.length} 处问题` : '校对完成，未发现问题',
+        proofreadResults: results,
+        errorCount: results.length,
+        proofreadPanelVisible: results.length > 0,
+      });
+      return;
+    }
 
     set({
       status: 'proofreading',

@@ -115,9 +115,8 @@ export function StatusBar() {
       : '';
     setAiMenuOpen(false);
     setCompanionMenuOpen(false);
-    if (!useAppStore.getState().settings.ai.enabled) {
-      await updateAISettings({ ...useAppStore.getState().settings.ai, enabled: true });
-    }
+    // 校对模式（AI / Markdown 静态检查）由 aiStore.checkProofread 依据设置决定，
+    // 这里不再自动启用 AI。
     await checkProofread(selectedText || content, selectedText && currentSelection ? currentSelection.from : 0);
   };
 
@@ -232,7 +231,7 @@ export function StatusBar() {
         <button
           type="button"
           className={`status-item status-button status-proofread-trigger${aiStatus === 'proofreading' ? ' is-running' : ''}`}
-          title={hasSelection ? '校对选中文字' : '校对全文'}
+          title={`${hasSelection ? '校对选中文字' : '校对全文'}${settings.ai.enabled && settings.ai.proofread_with_ai !== false ? '' : '（Markdown 检查）'}`}
           onClick={() => void handleProofread()}
         >
           <StatusGlyph name="proofread" />

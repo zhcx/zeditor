@@ -14,6 +14,7 @@ import {
   videoPlatformEmbed,
 } from '../../utils/media';
 import { insertMediaFromPath } from '../../services/mediaAssets';
+import { MARKMAP_TEMPLATE, MARKMAP_TEMPLATE_SELECTION } from '../../utils/markmapSource';
 import { insertImageFromPath } from '../../services/imageAssets';
 import { imageDialogFilters } from '../../utils/imageSyntax';
 import { insertTable as buildTableInsert } from '../../utils/markdownTable';
@@ -528,11 +529,13 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
         },
         {
           label: '图表',
-          title: 'Mermaid 图表',
+          title: '图表（Mermaid / Markmap）',
           menu: [
             { label: 'Mermaid 流程图', action: () => insertAtCursor('\n```mermaid\nflowchart LR\n  A[开始] --> B{判断}\n  B -->|是| C[执行]\n  B -->|否| D[结束]\n```\n', 24) },
             { label: 'Mermaid 时序图', action: () => insertAtCursor('\n```mermaid\nsequenceDiagram\n  participant 用户\n  participant 服务\n  用户->>服务: 请求\n  服务-->>用户: 响应\n```\n', 28) },
             { label: 'Mermaid 甘特图', action: () => insertAtCursor('\n```mermaid\ngantt\n  title 项目计划\n  dateFormat YYYY-MM-DD\n  section 开发\n  功能开发 :a1, 2026-01-01, 7d\n  测试 :a2, after a1, 3d\n```\n', 22) },
+            // 与斜杠命令 / 功能菜单共用同一份思维导图模板，插入后选中中心主题。
+            { label: 'Markmap 思维导图', action: () => insertAtCursor(`\n${MARKMAP_TEMPLATE}\n`, MARKMAP_TEMPLATE_SELECTION.start + 1) },
           ],
         },
       ],

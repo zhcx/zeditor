@@ -43,7 +43,8 @@ test('menu bar publishes table and image requests instead of touching the editor
   assert.match(menuBar, /Ctrl\+Shift\+T/);
   assert.match(menuBar, /label: '表格操作'/);
   assert.match(menuBar, /new CustomEvent\('zeditor-table-action', \{ detail: \{ action \} \}\)/);
-  assert.match(menuBar, /new CustomEvent\(kind === 'table' \? 'zeditor-insert-table' : 'zeditor-insert-image'\)/);
+  // 插入类入口统一按 kind 派发事件（table / image / markmap）。
+  assert.match(menuBar, /window\.dispatchEvent\(new CustomEvent\(`zeditor-insert-\$\{kind\}`\)\)/);
 });
 
 test('toolbar inserts tables through the shared template and offers local image import', async () => {
