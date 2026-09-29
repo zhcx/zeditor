@@ -55,3 +55,8 @@ docs/superpowers/
 converter/.venv/
 __pycache__/
 *.py[cod]
+
+# Local build / verification logs
+build-log.txt
+install-log.txt
+src-tauri/lockerr.txt

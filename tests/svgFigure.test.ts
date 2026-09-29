@@ -47,7 +47,7 @@ test('rejects empty sources and sources not starting with svg or xml declaration
 
 test('strips a UTF-8 BOM before validation', () => {
   const source = '<svg xmlns="http://www.w3.org/2000/svg"></svg>';
-  const result = validateSvgSource(`﻿${source}`, okParser);
+  const result = validateSvgSource(`\uFEFF${source}`, okParser);
   assert.deepEqual(result, { ok: true, source, message: '' });
 });
 

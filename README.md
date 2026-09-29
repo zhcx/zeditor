@@ -122,6 +122,7 @@ Zeditor 支持将 **DOC、DOCX、PPT、PPTX、XLS、XLSX、ODF、RTF、EPUB、CS
 - **附件上传** — 图片和文本文件上传，与对话一起发送
 - **本地 Agent（Beta）** — 在同一面板调用 Claude Code、Codex 或 OpenCode，支持流式任务、命令审批和会话恢复
 - **隔离变更审阅** — Git 仓库任务在临时 worktree 中工作，完成后可按文件应用，不覆盖当前未提交修改
+- **MCP 集成** — 让 Claude Desktop / Claude Code / Codex CLI / Gemini CLI 等 AI 助手通过 MCP 协议直接读写你正在编辑的文档，详见 [MCP 集成使用指南](docs/mcp-support.md)
 
 ### 🤖 AI 服务商支持
 
@@ -171,31 +172,32 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.5.4 更新
+## v0.5.5 更新
 
 ### 更新日志
 
-- **校对功能：AI / Markdown 双模式**：「设置 → AI 助手」新增「使用 AI 校对」开关——开启时走原有 AI 校对，关闭或 AI 未配置时改用内置 Markdown 静态校对（未闭合围栏、反向链接、跳级标题、断开锚点、表格列数不匹配、空链接等正确性检查，规则对齐 VMark lint 设计）；静态校对结果与 AI 校对同构，共用侧栏面板、波浪线装饰与「应用修复」交互，report-only 问题只提示不显示应用按钮。
-- **Markmap 思维导图**：`markmap` 围栏里的标准 Markdown 标题层级（`#` / `##` / `###`）渲染为可交互 SVG 树，支持拖动平移、`Ctrl` + 滚轮缩放、点击分支圆圈折叠、适应视图与 2 倍分辨率 PNG 导出；配色跟随明暗主题，解析与渲染库首次遇到围栏时才按需加载；`/markmap` 命令、工具栏「图表 → Markmap 思维导图」或「功能 → 插入思维导图」均可快速插入。
-- **发布质量**：版本源统一为 0.5.4；新增 AI / Markdown 双模式校对与 Markmap 相关单元测试。
+- **MCP 集成**：内置 MCP 服务器，Claude Desktop、Claude Code、Codex CLI、Gemini CLI 可直接读写你正在编辑的文档——读取内容、改写选区、新建 / 保存 / 切换标签页。**设置 → 集成** 可一键配置各助手并查看安装状态；桥接仅监听本机并带随机令牌认证，文件操作限定在已打开的工作区范围内，默认以「AI 修改建议」内联审阅 AI 的修改。详见 [MCP 集成使用指南](docs/mcp-support.md)。
+- **设置界面统一与美化**：设置面板中 14 个原生下拉全部替换为统一的自绘下拉（主题化浮层、品牌色徽标与说明、搜索框、键盘导航）；按钮统一为主 / 次 / 幽灵图标三级体系；输入框与下拉触发器统一为 42px 高、8px 圆角与一致的聚焦光环，全部随明暗主题自动适配。
+- **资源管理器工作区分组标题**：文件夹区域新增「工作区」分类标题（折叠箭头 + 数量），可整体折叠 / 展开；根文件夹标题缩进一级，层级更清晰。
+- **发布质量**：版本源统一为 0.5.5；新增 MCP 工具接线与设置控件相关测试。
 
-### v0.5.4 平台安装包对照
+### v0.5.5 平台安装包对照
 
-> 以下链接指向 v0.5.4 Release 资产；安装包由 GitHub Actions 根据 v0.5.4 标签源码构建。
+> 以下链接指向 v0.5.5 Release 资产；安装包由 GitHub Actions 根据 v0.5.5 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor-0.5.4-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor-0.5.5-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.4.md`](docs/releases/v0.5.4.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.5.md`](docs/releases/v0.5.5.md)。
 
 ## Contributors
 
@@ -234,6 +236,31 @@ npm run tauri build
 - Node.js >= 22.6
 - Rust >= 1.85
 - Python >= 3.10（仅从源码运行或开发文档转换功能时需要）
+
+### MCP 集成使用指南（v0.5.5 新增）
+
+Zeditor 内置 MCP 服务器，让 **Claude Desktop、Claude Code、Codex CLI、Gemini CLI** 等 AI 助手直接读写你正在编辑的文档。
+
+**三步启用：**
+
+1. 打开 **设置 → 集成**，开启「启用 MCP 服务器」（可同时开启「启动时自动运行」）。
+2. 在「AI 助手配置」中，对你使用的客户端点击一键安装，状态显示 **✓ 已安装** 即成功。
+3. **完全退出并重启该 AI 助手**，之后即可让助手读取 / 修改 Zeditor 中的文档。
+
+**可选开关：**
+
+- **启动时自动运行** — Zeditor 打开即自动启动桥接（仅监听本机，随机令牌认证）。
+- **自动批准编辑** — AI 修改直接落盘，不再弹出「AI 修改建议」审阅；仅在完全信任该助手时开启。
+
+**协作示例：**
+
+- 「读取我当前在 Zeditor 里打开的文档，总结要点」
+- 「把选中的段落改得更简洁，然后保存」
+- 「列出我打开的标签页」/「切换到 *xxx* 文档」
+
+**安全边界：** 桥接仅监听 `127.0.0.1` 并需随机令牌；文件操作限定在已打开的工作区根与文档目录内（越界返回 `INVALID_PATH`）；默认不自动落盘，AI 修改以差异审阅提交给你确认。
+
+> 完整的客户端配置路径、手动配置 JSON / TOML 示例、11 个工具清单与故障排查，见 [MCP 集成使用指南](docs/mcp-support.md)。
 
 ### 文档转换模块使用指南
 

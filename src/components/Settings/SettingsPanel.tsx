@@ -3,6 +3,7 @@ import { AI_PROVIDER_DEFINITIONS, providerNeedsKey, useAppStore, type AIProvider
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { FontFamilyPicker } from './FontFamilyPicker';
+import { SettingsSelect } from './SettingsSelect';
 import {
   DEFAULT_FONT_SIZE,
   FONT_SIZE_MAX,
@@ -17,9 +18,118 @@ import { parseAIProviderProfiles } from '../../utils/aiProviderProfiles';
 import { WebDavSettings } from '../WebDav/WebDavSettings';
 import { S3Settings } from '../WebDav/S3Settings';
 import { WebDavHistoryDialog } from '../WebDav/WebDavHistoryDialog';
+import '../../styles/settings-ui.css';
 
 const isTauriRuntime = () => '__TAURI_INTERNALS__' in window;
 const formatModuleSize = (bytes: number) => bytes > 0 ? `${(bytes / 1024 / 1024).toFixed(1)} MB` : '—';
+
+/** AI 服务商下拉左侧徽标的缩写与品牌色。 */
+const AI_PROVIDER_BADGE: Record<string, { badge: string; color: string }> = {
+  openai: { badge: 'O', color: '#10a37f' },
+  anthropic: { badge: 'A', color: '#d97757' },
+  gemini: { badge: 'G', color: '#4285f4' },
+  deepseek: { badge: 'D', color: '#4d6bfe' },
+  siliconflow: { badge: 'S', color: '#7c5cff' },
+  mimo: { badge: 'Mi', color: '#ff6900' },
+  volcengine: { badge: 'V', color: '#1664ff' },
+  longcat: { badge: 'L', color: '#4b5563' },
+  zhipu: { badge: 'Z', color: '#3b5bdb' },
+  minimax: { badge: 'M', color: '#e0343f' },
+  kimi: { badge: 'K', color: '#6d28d9' },
+  ollama: { badge: 'Ol', color: '#475569' },
+  custom: { badge: '⚙', color: '#64748b' },
+};
+
+const AI_PROVIDER_OPTIONS = AI_PROVIDER_DEFINITIONS.map((provider) => {
+  const meta = AI_PROVIDER_BADGE[provider.id];
+  return {
+    value: provider.id,
+    label: provider.label,
+    description: provider.keyless ? `${provider.model} · 本地免密钥` : provider.model,
+    badge: meta?.badge,
+    color: meta?.color,
+  };
+});
+
+// 设置面板内各下拉的统一选项定义，供 SettingsSelect 复用。
+const LANGUAGE_SELECT_OPTIONS = LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.nativeLabel }));
+
+const THEME_OPTIONS = [
+  { value: 'vscode-dark', label: '深色主题' },
+  { value: 'vscode-light', label: '浅色主题' },
+  { value: 'system', label: '跟随系统' },
+];
+
+const INPUT_ENGINE_OPTIONS = [
+  { value: 'editContext', label: '原生 EditContext', description: '默认' },
+  { value: 'textarea', label: '传统输入层', description: '旧版 WebView 兼容' },
+];
+
+const IMAGE_SERVICE_OPTIONS = [
+  { value: 'local', label: '本地' },
+  { value: 'cloudinary', label: 'Cloudinary' },
+  { value: 'picgo', label: 'PicGo' },
+  { value: 's3', label: 'S3 / OSS' },
+];
+
+const IMAGE_NAMING_RULE_OPTIONS = [
+  { value: 'timestamp', label: '时间戳' },
+  { value: 'uuid', label: 'UUID' },
+  { value: 'original', label: '原始名称' },
+];
+
+const HTML_TEMPLATE_OPTIONS = [
+  { value: 'default', label: '默认' },
+  { value: 'minimal', label: '极简' },
+  { value: 'academic', label: '学术' },
+];
+
+const WRITING_STYLE_OPTIONS = [
+  { value: 'formal', label: '正式' },
+  { value: 'casual', label: '活泼' },
+  { value: 'academic', label: '学术' },
+  { value: 'creative', label: '创意' },
+  { value: 'custom', label: '自定义' },
+];
+
+const AGENT_BACKEND_OPTIONS = [
+  { value: 'claude_code', label: 'Claude Code' },
+  { value: 'codex', label: 'Codex' },
+  { value: 'opencode', label: 'OpenCode' },
+];
+
+const REASONING_EFFORT_OPTIONS = [
+  { value: '', label: '自动' },
+  { value: 'low', label: '低' },
+  { value: 'medium', label: '中' },
+  { value: 'high', label: '高' },
+  { value: 'xhigh', label: '超高' },
+];
+
+const SEARCH_PROVIDER_OPTIONS = [
+  { value: 'tavily', label: 'Tavily' },
+  { value: 'searxng', label: 'SearXNG' },
+];
+
+const TAVILY_DEPTH_OPTIONS = [
+  { value: 'basic', label: '基础' },
+  { value: 'fast', label: '快速' },
+  { value: 'advanced', label: '高级' },
+  { value: 'ultra-fast', label: '极速' },
+];
+
+const SAFE_SEARCH_OPTIONS = [
+  { value: '0', label: '关闭' },
+  { value: '1', label: '中等' },
+  { value: '2', label: '严格' },
+];
+
+const SEARCH_TIME_RANGE_OPTIONS = [
+  { value: '', label: '不限' },
+  { value: 'day', label: '一天' },
+  { value: 'month', label: '一个月' },
+  { value: 'year', label: '一年' },
+];
 
 const parseEmojiList = (value: string) => {
   const segmenter = typeof Intl.Segmenter === 'function' ? new Intl.Segmenter(undefined, { granularity: 'grapheme' }) : null;
@@ -418,39 +528,35 @@ export function SettingsPanel() {
                   界面显示语言
                   <small>根据系统语言自动选择，也可手动更改</small>
                 </label>
-                <select
-                  aria-label="语言"
+                <SettingsSelect
+                  ariaLabel="界面显示语言"
                   value={normalizeLanguage(localSettings.appearance.language)}
-                  onChange={(event) => {
-                    const language = normalizeLanguage(event.target.value);
+                  options={LANGUAGE_SELECT_OPTIONS}
+                  searchPlaceholder="搜索语言…"
+                  onChange={(language) => {
+                    const normalized = normalizeLanguage(language);
                     const nextSettings = {
                       ...localSettings,
-                      appearance: { ...localSettings.appearance, language },
+                      appearance: { ...localSettings.appearance, language: normalized },
                     };
                     setLocalSettings(nextSettings);
                     void saveSettings(nextSettings);
                   }}
-                >
-                  {LANGUAGE_OPTIONS.map(option => (
-                    <option key={option.value} value={option.value}>{option.nativeLabel}</option>
-                  ))}
-                </select>
+                />
               </div>
               <div className="setting-item">
                 <label>主题</label>
-                <select
+                <SettingsSelect
+                  ariaLabel="主题"
                   value={localSettings.appearance.theme}
-                  onChange={(e) =>
+                  options={THEME_OPTIONS}
+                  onChange={(theme) =>
                     setLocalSettings({
                       ...localSettings,
-                      appearance: { ...localSettings.appearance, theme: e.target.value },
+                      appearance: { ...localSettings.appearance, theme },
                     })
                   }
-                >
-                  <option value="vscode-dark">深色主题</option>
-                  <option value="vscode-light">浅色主题</option>
-                  <option value="system">跟随系统</option>
-                </select>
+                />
               </div>
               <div className="setting-item font-setting-item">
                 <label>
@@ -578,18 +684,17 @@ export function SettingsPanel() {
                   输入法引擎
                   <small>默认使用原生 EditContext；旧版 WebView 输入异常时可回退到传统输入层</small>
                 </label>
-                <select
+                <SettingsSelect
+                  ariaLabel="输入法引擎"
                   value={localSettings.editor.input_engine || 'editContext'}
-                  onChange={(e) =>
+                  options={INPUT_ENGINE_OPTIONS}
+                  onChange={(inputEngine) =>
                     setLocalSettings({
                       ...localSettings,
-                      editor: { ...localSettings.editor, input_engine: e.target.value as 'textarea' | 'editContext' },
+                      editor: { ...localSettings.editor, input_engine: inputEngine as 'textarea' | 'editContext' },
                     })
                   }
-                >
-                  <option value="editContext">原生 EditContext（默认）</option>
-                  <option value="textarea">传统输入层（兼容）</option>
-                </select>
+                />
               </div>
               <SettingToggle
                 label="启用拼写检查"
@@ -664,20 +769,17 @@ export function SettingsPanel() {
             <div className="settings-section">
               <div className="setting-item">
                 <label>图床服务</label>
-                <select
+                <SettingsSelect
+                  ariaLabel="图床服务"
                   value={localSettings.image_hosting.active_service}
-                  onChange={(e) =>
+                  options={IMAGE_SERVICE_OPTIONS}
+                  onChange={(service) =>
                     setLocalSettings({
                       ...localSettings,
-                      image_hosting: { ...localSettings.image_hosting, active_service: e.target.value },
+                      image_hosting: { ...localSettings.image_hosting, active_service: service },
                     })
                   }
-                >
-                  <option value="local">本地</option>
-                  <option value="cloudinary">Cloudinary</option>
-                  <option value="picgo">PicGo</option>
-                  <option value="s3">S3/OSS</option>
-                </select>
+                />
               </div>
 
               {localSettings.image_hosting.active_service === 'cloudinary' && (
@@ -773,22 +875,20 @@ export function SettingsPanel() {
                 <>
                   <div className="setting-item">
                     <label>服务商</label>
-                    <select
+                    <SettingsSelect
+                      ariaLabel="S3 服务商"
                       value={localSettings.image_hosting.s3.provider}
-                      onChange={(e) =>
+                      options={s3Providers}
+                      onChange={(provider) =>
                         setLocalSettings({
                           ...localSettings,
                           image_hosting: {
                             ...localSettings.image_hosting,
-                            s3: { ...localSettings.image_hosting.s3, provider: e.target.value },
+                            s3: { ...localSettings.image_hosting.s3, provider },
                           },
                         })
                       }
-                    >
-                      {s3Providers.map((p) => (
-                        <option key={p.value} value={p.value}>{p.label}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
                   <div className="setting-item">
                     <label>服务端点</label>
@@ -924,22 +1024,20 @@ export function SettingsPanel() {
                   </div>
                   <div className="setting-item">
                     <label>命名规则</label>
-                    <select
+                    <SettingsSelect
+                      ariaLabel="命名规则"
                       value={localSettings.image_hosting.local.naming_rule}
-                      onChange={(e) =>
+                      options={IMAGE_NAMING_RULE_OPTIONS}
+                      onChange={(rule) =>
                         setLocalSettings({
                           ...localSettings,
                           image_hosting: {
                             ...localSettings.image_hosting,
-                            local: { ...localSettings.image_hosting.local, naming_rule: e.target.value },
+                            local: { ...localSettings.image_hosting.local, naming_rule: rule },
                           },
                         })
                       }
-                    >
-                      <option value="timestamp">时间戳</option>
-                      <option value="uuid">UUID</option>
-                      <option value="original">原始名称</option>
-                    </select>
+                    />
                   </div>
                 </>
               )}
@@ -965,19 +1063,17 @@ export function SettingsPanel() {
               </div>
               <div className="setting-item">
                 <label>HTML模板</label>
-                <select
+                <SettingsSelect
+                  ariaLabel="HTML 模板"
                   value={localSettings.export.html_template}
-                  onChange={(e) =>
+                  options={HTML_TEMPLATE_OPTIONS}
+                  onChange={(template) =>
                     setLocalSettings({
                       ...localSettings,
-                      export: { ...localSettings.export, html_template: e.target.value },
+                      export: { ...localSettings.export, html_template: template },
                     })
                   }
-                >
-                  <option value="default">默认</option>
-                  <option value="minimal">极简</option>
-                  <option value="academic">学术</option>
-                </select>
+                />
               </div>
             </div>
           )}
@@ -1006,11 +1102,13 @@ export function SettingsPanel() {
                   />
                   <div className="setting-item">
                     <label>AI服务商</label>
-                    <select
+                    <SettingsSelect
                       value={localSettings.ai.provider}
-                      onChange={(e) => {
+                      options={AI_PROVIDER_OPTIONS}
+                      ariaLabel="AI 服务商"
+                      searchPlaceholder="搜索服务商…"
+                      onChange={(newProvider) => {
                         const oldProvider = localSettings.ai.provider;
-                        const newProvider = e.target.value;
 
                         // 先保存当前服务商的 API KEY
                         const keys = { ...parseProviderKeys(), [oldProvider]: localSettings.ai.api_key };
@@ -1045,11 +1143,7 @@ export function SettingsPanel() {
                         setModels([]);
                         setFetchError('');
                       }}
-                    >
-                      {AI_PROVIDER_DEFINITIONS.map((provider) => (
-                        <option key={provider.id} value={provider.id}>{provider.label}</option>
-                      ))}
-                    </select>
+                    />
                   </div>
 
                   <div className="setting-item">
@@ -1130,24 +1224,20 @@ export function SettingsPanel() {
                   <div className="setting-item">
                     <label>模型</label>
                     <div className="model-select-row">
-                      <select
+                      <SettingsSelect
                         className="model-select"
+                        ariaLabel="模型"
+                        searchPlaceholder="搜索模型…"
+                        placeholder="请输入模型名称"
                         value={localSettings.ai.model}
-                        onChange={(e) =>
+                        options={(models.length > 0 ? models : [localSettings.ai.model]).filter(Boolean).map((m) => ({ value: m, label: m }))}
+                        onChange={(model) =>
                           setLocalSettings({
                             ...localSettings,
-                            ai: { ...localSettings.ai, model: e.target.value },
+                            ai: { ...localSettings.ai, model },
                           })
                         }
-                      >
-                        {models.length > 0 ? (
-                          models.map((m) => (
-                            <option key={m} value={m}>{m}</option>
-                          ))
-                        ) : (
-                          <option value={localSettings.ai.model}>{localSettings.ai.model || '请输入模型名称'}</option>
-                        )}
-                      </select>
+                      />
                       <button
                         className="fetch-models-btn"
                         onClick={async () => {
@@ -1229,21 +1319,17 @@ export function SettingsPanel() {
                   )}
                   <div className="setting-item">
                     <label>写作风格</label>
-                    <select
+                    <SettingsSelect
+                      ariaLabel="写作风格"
                       value={localSettings.ai.writing_style}
-                      onChange={(e) =>
+                      options={WRITING_STYLE_OPTIONS}
+                      onChange={(style) =>
                         setLocalSettings({
                           ...localSettings,
-                          ai: { ...localSettings.ai, writing_style: e.target.value as 'formal' | 'casual' | 'academic' | 'creative' | 'custom' },
+                          ai: { ...localSettings.ai, writing_style: style as 'formal' | 'casual' | 'academic' | 'creative' | 'custom' },
                         })
                       }
-                    >
-                      <option value="formal">正式</option>
-                      <option value="casual">活泼</option>
-                      <option value="academic">学术</option>
-                      <option value="creative">创意</option>
-                      <option value="custom">自定义</option>
-                    </select>
+                    />
                   </div>
                   {localSettings.ai.writing_style === 'custom' && (
                     <div className="setting-item">
@@ -1277,17 +1363,15 @@ export function SettingsPanel() {
                 <div className="agent-settings-block">
                   <div className="setting-item">
                     <label>默认 Agent</label>
-                    <select
+                    <SettingsSelect
+                      ariaLabel="默认 Agent"
                       value={localSettings.agent.backend}
-                      onChange={(event) => setLocalSettings({
+                      options={AGENT_BACKEND_OPTIONS}
+                      onChange={(backend) => setLocalSettings({
                         ...localSettings,
-                        agent: { ...localSettings.agent, backend: event.target.value as AgentBackendId },
+                        agent: { ...localSettings.agent, backend: backend as AgentBackendId },
                       })}
-                    >
-                      <option value="claude_code">Claude Code</option>
-                      <option value="codex">Codex</option>
-                      <option value="opencode">OpenCode</option>
-                    </select>
+                    />
                   </div>
                   {(Object.keys(localSettings.agent.backends) as AgentBackendId[]).map((backendId) => {
                     const config = localSettings.agent.backends[backendId];
@@ -1317,14 +1401,12 @@ export function SettingsPanel() {
                           {backendId !== 'opencode' && (
                             <div className="setting-item">
                               <label>推理强度</label>
-                              <select value={config.reasoning_effort} onChange={(event) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, reasoning_effort: event.target.value } } } })}>
-                                <option value="">自动</option>
-                                <option value="low">低</option>
-                                <option value="medium">中</option>
-                                <option value="high">高</option>
-                                <option value="xhigh">超高</option>
-                                {backendId === 'claude_code' && <option value="max">最大</option>}
-                              </select>
+                              <SettingsSelect
+                                ariaLabel="推理强度"
+                                value={config.reasoning_effort}
+                                options={backendId === 'claude_code' ? [...REASONING_EFFORT_OPTIONS, { value: 'max', label: '最大' }] : REASONING_EFFORT_OPTIONS}
+                                onChange={(effort) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, reasoning_effort: effort } } } })}
+                              />
                             </div>
                           )}
                         </div>
@@ -1629,17 +1711,15 @@ export function SettingsPanel() {
                 <>
                   <div className="setting-item">
                     <label>首选搜索服务</label>
-                    <select
+                    <SettingsSelect
+                      ariaLabel="首选搜索服务"
                       value={localSettings.web_search.provider}
-                      onChange={(e) => setLocalSettings({
+                      options={SEARCH_PROVIDER_OPTIONS}
+                      onChange={(provider) => setLocalSettings({
                         ...localSettings,
-                        web_search: { ...localSettings.web_search, provider: e.target.value as 'tavily' | 'searxng' },
+                        web_search: { ...localSettings.web_search, provider: provider as 'tavily' | 'searxng' },
                       })}
-                      title="同时配置多个搜索服务时，优先使用此服务"
-                    >
-                      <option value="tavily">Tavily（优先）</option>
-                      <option value="searxng">SearXNG（优先）</option>
-                    </select>
+                    />
                   </div>
 
                   {localSettings.web_search.provider === 'tavily' ? (
@@ -1650,12 +1730,12 @@ export function SettingsPanel() {
                       </div>
                       <div className="setting-item">
                         <label>搜索深度</label>
-                        <select value={localSettings.web_search.tavily_search_depth} onChange={(e) => setLocalSettings({ ...localSettings, web_search: { ...localSettings.web_search, tavily_search_depth: e.target.value as 'basic' | 'advanced' | 'fast' | 'ultra-fast' } })}>
-                          <option value="basic">基础</option>
-                          <option value="fast">快速</option>
-                          <option value="advanced">高级</option>
-                          <option value="ultra-fast">极速</option>
-                        </select>
+                        <SettingsSelect
+                          ariaLabel="搜索深度"
+                          value={localSettings.web_search.tavily_search_depth}
+                          options={TAVILY_DEPTH_OPTIONS}
+                          onChange={(depth) => setLocalSettings({ ...localSettings, web_search: { ...localSettings.web_search, tavily_search_depth: depth as 'basic' | 'advanced' | 'fast' | 'ultra-fast' } })}
+                        />
                       </div>
                       <div className="setting-item">
                         <label>最大结果数</label>
@@ -1691,15 +1771,21 @@ export function SettingsPanel() {
                       </div>
                       <div className="setting-item">
                         <label>安全搜索</label>
-                        <select value={localSettings.web_search.searxng_safesearch} onChange={(e) => setLocalSettings({ ...localSettings, web_search: { ...localSettings.web_search, searxng_safesearch: Number(e.target.value) } })}>
-                          <option value={0}>关闭</option><option value={1}>中等</option><option value={2}>严格</option>
-                        </select>
+                        <SettingsSelect
+                          ariaLabel="安全搜索"
+                          value={String(localSettings.web_search.searxng_safesearch)}
+                          options={SAFE_SEARCH_OPTIONS}
+                          onChange={(value) => setLocalSettings({ ...localSettings, web_search: { ...localSettings.web_search, searxng_safesearch: Number(value) } })}
+                        />
                       </div>
                       <div className="setting-item">
                         <label>时间范围</label>
-                        <select value={localSettings.web_search.searxng_time_range} onChange={(e) => setLocalSettings({ ...localSettings, web_search: { ...localSettings.web_search, searxng_time_range: e.target.value } })}>
-                          <option value="">不限</option><option value="day">一天</option><option value="month">一个月</option><option value="year">一年</option>
-                        </select>
+                        <SettingsSelect
+                          ariaLabel="时间范围"
+                          value={localSettings.web_search.searxng_time_range}
+                          options={SEARCH_TIME_RANGE_OPTIONS}
+                          onChange={(range) => setLocalSettings({ ...localSettings, web_search: { ...localSettings.web_search, searxng_time_range: range } })}
+                        />
                       </div>
                       <div className="setting-item">
                         <label>最大结果数</label>

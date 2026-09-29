@@ -1,0 +1,191 @@
+/* ── 设置面板控件统一：简约现代 · 随明暗主题自适应 ─────────────── */
+
+/* 文本 / 数字 / 密码 / URL 输入框 */
+.settings-panel .settings-main .setting-item :is(
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  input[type="url"]
+) {
+  height: 42px;
+  min-height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-color);
+  font-size: 13.5px;
+  box-shadow: none;
+  transition: border-color var(--transition), box-shadow var(--transition), background var(--transition);
+}
+
+.settings-panel .settings-main .setting-item :is(
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  input[type="url"]
+):hover { border-color: var(--border-strong); }
+
+.settings-panel .settings-main .setting-item :is(
+  input[type="text"],
+  input[type="number"],
+  input[type="password"],
+  input[type="url"]
+):focus {
+  outline: none;
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 自绘下拉触发器与输入框保持一致 */
+.settings-panel .settings-main .settings-select-trigger {
+  height: 42px;
+  padding: 0 14px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  font-size: 13.5px;
+  box-shadow: none;
+}
+
+.settings-panel .settings-main .settings-select-trigger:hover { border-color: var(--border-strong); }
+
+.settings-panel .settings-main .settings-select.is-open .settings-select-trigger,
+.settings-panel .settings-main .settings-select-trigger:focus-visible {
+  border-color: var(--accent-color);
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+/* 模型选择行：下拉占满剩余宽度，按钮保持自然宽度 */
+.settings-panel .model-select-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: min(100%, 520px);
+  justify-self: end;
+}
+.settings-panel .model-select-row .settings-select { flex: 1; min-width: 0; }
+.settings-panel .model-select-row .fetch-models-btn { flex: 0 0 auto; }
+
+/* ── 按钮：主 / 次 / 幽灵 ─────────────────────────────────────── */
+
+/* 主按钮 */
+.settings-panel :is(.save-btn, .fetch-models-btn) {
+  min-height: 36px;
+  padding: 0 18px;
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--accent-color);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent-color) 20%, transparent);
+  transition: background var(--transition), box-shadow var(--transition), transform var(--transition);
+}
+
+.settings-panel :is(.save-btn, .fetch-models-btn):hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent-color) 28%, transparent);
+}
+
+.settings-panel :is(.save-btn, .fetch-models-btn):active:not(:disabled) { transform: translateY(1px); }
+
+/* 次按钮 */
+.settings-panel :is(.cancel-btn, .secondary-btn, .font-load-btn) {
+  min-height: 36px;
+  padding: 0 16px;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-color);
+  font-size: 13px;
+  font-weight: 550;
+  box-shadow: none;
+  transition: background var(--transition), border-color var(--transition), color var(--transition);
+}
+
+.settings-panel :is(.cancel-btn, .secondary-btn, .font-load-btn):hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--hover);
+}
+
+.settings-panel :is(.save-btn, .fetch-models-btn, .cancel-btn, .secondary-btn, .font-load-btn):disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+
+/* 危险操作按钮保留警示色 */
+.settings-panel .secondary-btn.converter-remove-button,
+.settings-panel .secondary-btn.converter-remove-button:hover:not(:disabled) { color: var(--danger-color); }
+
+/* 幽灵图标按钮（如密钥显示切换） */
+.settings-panel .settings-main .toggle-visibility-btn {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-secondary);
+  box-shadow: none;
+  transition: background var(--transition), color var(--transition);
+}
+
+.settings-panel .settings-main .toggle-visibility-btn:hover {
+  background: var(--hover);
+  border-color: transparent;
+  color: var(--text-color);
+}
+
+/* ── 云同步（WebDAV / S3）按钮与主/次按钮对齐 ───────────────────── */
+.settings-panel .webdav-action-primary {
+  border: 1px solid transparent;
+  border-radius: 8px;
+  background: var(--accent-color);
+  color: #fff;
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent-color) 20%, transparent);
+}
+
+.settings-panel .webdav-action-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  box-shadow: 0 8px 20px color-mix(in srgb, var(--accent-color) 28%, transparent);
+}
+
+.settings-panel .webdav-action-secondary {
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+  background: var(--bg-elevated);
+  color: var(--text-color);
+  box-shadow: none;
+}
+
+.settings-panel .webdav-action-secondary:hover:not(:disabled) {
+  border-color: var(--border-strong);
+  background: var(--hover);
+  color: var(--text-color);
+}
+
+/* ── 字体选择器：与统一下拉保持一致 ──────────────────────────── */
+/* 保留右侧箭头区域的内边距，避免被统一规则覆盖 */
+.settings-panel .settings-main .setting-item .font-picker input[type="text"] {
+  padding-right: 38px;
+}
+
+/* 字体下拉浮层通过 portal 渲染到 body，故用 body 直接子选择器提升优先级 */
+body > .font-picker-dropdown {
+  padding: 6px;
+  border-radius: 10px;
+  border-color: var(--border-strong);
+  background: var(--bg-elevated);
+}
+
+body > .font-picker-dropdown .font-picker-item {
+  border-radius: 7px;
+}
+
+body > .font-picker-dropdown .font-picker-item:hover,
+body > .font-picker-dropdown .font-picker-item.active {
+  background: var(--surface-muted);
+}
+
+body > .font-picker-dropdown .font-picker-item.selected {
+  background: var(--accent-soft);
+}

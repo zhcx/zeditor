@@ -294,6 +294,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
   const [timelineHover, setTimelineHover] = useState<TimelineHoverState>(null);
   const [timelineDialog, setTimelineDialog] = useState<TimelineDialogState>(null);
   const [historyExpanded, setHistoryExpanded] = useState(false);
+  const [workspaceExpanded, setWorkspaceExpanded] = useState(true);
   const [recentHistory, setRecentHistory] = useState<RecentHistoryEntry[]>([]);
   const [renaming, setRenaming] = useState<RenameState>(null);
   const [creating, setCreating] = useState<CreateState>(null);
@@ -1008,51 +1009,54 @@ function ExplorerSidebar({ style }: SidebarProps) {
           </section>
 
           <section className="explorer-section workspace-section">
-            {workspaceFolders.length ? workspaceFolders.map((folder) => {
-              const expanded = expandedNodes.has(folder.path);
-              return (
-                <div key={folder.path} className="workspace-folder-root" role="treeitem" aria-expanded={expanded}>
-                  <button
-                    className="explorer-section-heading workspace-heading"
-                    onClick={() => toggleExpanded(folder.path)}
-                    onContextMenu={event => {
-                      event.preventDefault();
-                      setContextMenu({
-                        x: event.clientX,
-                        y: event.clientY,
-                        node: { name: folder.name, path: folder.path, isDirectory: true },
-                        targetType: 'root',
-                      });
-                    }}
-                    title={folder.path}
-                  >
-                    <Chevron expanded={expanded} />
-                    <FolderIcon open={expanded} />
-                    <span className="explorer-name">{folder.name}</span>
-                    <span
-                      className="explorer-close workspace-close"
-                      role="button"
-                      aria-label="关闭文件夹"
-                      title="关闭文件夹"
-                      onClick={event => { event.stopPropagation(); removeWorkspaceFolder(folder.path); }}
-                    >×</span>
-                  </button>
-                  {expanded && <div role="group" className="explorer-list">{renderNodes(folder.tree)}</div>}
-                </div>
-              );
-            }) : (
-              <>
-                <div className="explorer-section-heading workspace-heading" role="heading" aria-level={2}>
-                  <Chevron expanded />
-                  <span>无打开的文件夹</span>
-                </div>
-                <div className="workspace-empty-state">
-                  <p>尚未打开文件夹。</p>
-                  <button className="open-workspace-button" onClick={() => void handleOpenFolder()}>打开文件夹</button>
-                  <p className="workspace-hint">可一次选择多个文件夹，也可再次点击文件夹按钮继续添加。</p>
-                </div>
-              </>
-            )}
+            <button className="explorer-section-heading workspace-group-heading" onClick={() => setWorkspaceExpanded(expanded => !expanded)}>
+              <Chevron expanded={workspaceExpanded} />
+              <span>工作区</span>
+              {workspaceFolders.length > 0 && <span className="explorer-count">{workspaceFolders.length}</span>}
+            </button>
+            {workspaceExpanded && (workspaceFolders.length ? (
+              <div role="group">
+                {workspaceFolders.map((folder) => {
+                  const expanded = expandedNodes.has(folder.path);
+                  return (
+                    <div key={folder.path} className="workspace-folder-root" role="treeitem" aria-expanded={expanded}>
+                      <button
+                        className="explorer-section-heading workspace-heading"
+                        onClick={() => toggleExpanded(folder.path)}
+                        onContextMenu={event => {
+                          event.preventDefault();
+                          setContextMenu({
+                            x: event.clientX,
+                            y: event.clientY,
+                            node: { name: folder.name, path: folder.path, isDirectory: true },
+                            targetType: 'root',
+                          });
+                        }}
+                        title={folder.path}
+                      >
+                        <Chevron expanded={expanded} />
+                        <FolderIcon open={expanded} />
+                        <span className="explorer-name">{folder.name}</span>
+                        <span
+                          className="explorer-close workspace-close"
+                          role="button"
+                          aria-label="关闭文件夹"
+                          title="关闭文件夹"
+                          onClick={event => { event.stopPropagation(); removeWorkspaceFolder(folder.path); }}
+                        >×</span>
+                      </button>
+                      {expanded && <div role="group" className="explorer-list">{renderNodes(folder.tree)}</div>}
+                    </div>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="workspace-empty-state">
+                <p>尚未打开文件夹。</p>
+                <button className="open-workspace-button" onClick={() => void handleOpenFolder()}>打开文件夹</button>
+                <p className="workspace-hint">可一次选择多个文件夹，也可再次点击文件夹按钮继续添加。</p>
+              </div>
+            ))}
           </section>
 
           <section className="explorer-section outline-section">
