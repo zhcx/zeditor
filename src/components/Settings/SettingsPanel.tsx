@@ -123,6 +123,97 @@ function SettingsNavIcon({ type }: { type: SettingsTab }) {
   return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.6 11.5 7l4.4 1.5-4.4 1.5-1.5 4.4L8.5 10 4.1 8.5 8.5 7zM15.5 13l.7 2 .8.3-.8.3-.7 2-.7-2-.8-.3.8-.3z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg>;
 }
 
+interface McpClientStatus {
+  client: string;
+  configured: boolean;
+  path_mismatch: boolean;
+  path: string;
+}
+
+const MCP_CLIENT_LABELS: Record<string, string> = {
+  claude_desktop: 'Claude Desktop',
+  claude_code: 'Claude Code',
+  codex: 'Codex CLI',
+  gemini: 'Gemini CLI',
+};
+
+/** MCP 集成状态：桥接运行状态 + 各 AI 助手配置安装入口（对齐 VMark 的设置 → 集成）。 */
+function McpIntegrationStatus() {
+  const [status, setStatus] = useState<Record<string, unknown> | null>(null);
+  const [clients, setClients] = useState<McpClientStatus[]>([]);
+
+  const refresh = useCallback(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    invoke<Record<string, unknown>>('mcp_bridge_status').then(setStatus).catch(() => undefined);
+    invoke<McpClientStatus[]>('mcp_client_config_status').then(setClients).catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refresh();
+    const handler = () => refresh();
+    window.addEventListener('zeditor-mcp-status', handler);
+    return () => window.removeEventListener('zeditor-mcp-status', handler);
+  }, [refresh]);
+
+  const running = Boolean(status?.running);
+  const connected = Number(status?.connected || 0);
+
+  return (
+    <>
+      <div className="setting-item">
+        <label>桥接状态</label>
+        <small>
+          {running
+            ? `运行中 · 端口 ${String(status?.port ?? '')} · ${connected > 0 ? `已连接 ${connected} 个 AI 助手` : '等待 AI 助手连接'} · ${String(status?.tools ?? 0)} 个工具`
+            : '未运行'}
+        </small>
+      </div>
+      <div className="settings-actions">
+        <button
+          type="button"
+          className="secondary-btn"
+          onClick={() => {
+            invoke<Record<string, unknown>>('mcp_bridge_set_enabled', { enabled: !running })
+              .then(setStatus)
+              .catch((error) => window.alert(String(error)));
+          }}
+        >
+          {running ? '停止桥接' : '启动桥接'}
+        </button>
+      </div>
+      <div className="setting-item mcp-clients-item">
+        <div className="setting-copy">
+          <span>AI 助手配置</span>
+          <small>一键写入 MCP 配置；安装后需完全重启对应的 AI 助手</small>
+        </div>
+        <div className="mcp-client-list">
+          {Object.entries(MCP_CLIENT_LABELS).map(([client, label]) => {
+            const entry = clients.find((item) => item.client === client);
+            return (
+              <div key={client} className="mcp-client-row">
+                <span className="mcp-client-name">{label}</span>
+                {entry?.configured && !entry.path_mismatch && <span className="mcp-client-status ok">✓ 已安装</span>}
+                {entry?.path_mismatch && <span className="mcp-client-status warn">⚠ 路径不匹配</span>}
+                <button
+                  type="button"
+                  className="secondary-btn"
+                  onClick={() => {
+                    invoke<McpClientStatus>('mcp_install_client_config', { client })
+                      .then(() => refresh())
+                      .catch((error) => window.alert(String(error)));
+                  }}
+                >
+                  {entry?.configured ? '修复' : '安装'}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+    </>
+  );
+}
+
 export function SettingsPanel() {
   const { settings, settingsTab, saveSettings, setSettingsOpen } = useAppStore();
   const [localSettings, setLocalSettings] = useState(settings);
@@ -272,6 +363,7 @@ export function SettingsPanel() {
     { id: 'ai', label: 'AI 助手', description: '模型、提示与伴写设置' },
     { id: 'explorer', label: '资源管理器', description: '文件浏览与工作区管理' },
     { id: 'workflow', label: '工作流', description: 'GitHub Actions 工作流查看器与结构化编辑' },
+    { id: 'mcp', label: '集成', description: 'MCP 服务器与 AI 助手接入' },
     { id: 'web_search', label: '网络搜索', description: '搜索服务与结果偏好' },
     { id: 'cloud', label: '云同步', description: 'WebDAV 与 S3 自动备份' },
   ] as const;
@@ -1480,6 +1572,43 @@ export function SettingsPanel() {
                     }
                   />
                 </div>
+              )}
+            </div>
+          )}
+
+          {activeTab === 'mcp' && (
+            <div className="settings-section">
+              <SettingToggle
+                label="启用 MCP 服务器"
+                description="允许 Claude、Codex 等 AI 助手通过 MCP 协议读写文档；配置安装后需重启 AI 助手"
+                checked={localSettings.mcp.enabled}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  mcp: { ...localSettings.mcp, enabled: checked },
+                })}
+              />
+              {localSettings.mcp.enabled && (
+                <>
+                  <SettingToggle
+                    label="启动时自动运行"
+                    description="Zeditor 打开时自动启动 MCP 桥接（仅监听本机，带随机令牌认证）"
+                    checked={localSettings.mcp.auto_start}
+                    onChange={(checked) => setLocalSettings({
+                      ...localSettings,
+                      mcp: { ...localSettings.mcp, auto_start: checked },
+                    })}
+                  />
+                  <SettingToggle
+                    label="自动批准编辑"
+                    description="AI 助手的修改直接应用，不经「AI 修改建议」审阅。仅在信任助手时开启"
+                    checked={localSettings.mcp.auto_approve}
+                    onChange={(checked) => setLocalSettings({
+                      ...localSettings,
+                      mcp: { ...localSettings.mcp, auto_approve: checked },
+                    })}
+                  />
+                  <McpIntegrationStatus />
+                </>
               )}
             </div>
           )}

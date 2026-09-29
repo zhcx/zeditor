@@ -126,6 +126,14 @@ export interface Settings {
   agent: AgentSettings;
   explorer: ExplorerSettings;
   workflow?: WorkflowSettings;
+  mcp: McpSettings;
+}
+
+/** MCP 集成（设置 → 集成）：桥接总开关、随应用启动、自动批准 AI 修改。 */
+export interface McpSettings {
+  enabled: boolean;
+  auto_start: boolean;
+  auto_approve: boolean;
 }
 
 export interface WorkflowSettings {
@@ -228,7 +236,7 @@ export interface TimelineEntry {
 
 export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
 export type ConversionStatus = 'idle' | 'converting' | 'success' | 'error';
-export type SettingsTab = 'appearance' | 'editor' | 'image' | 'export' | 'ai' | 'web_search' | 'explorer' | 'workflow' | 'converter' | 'cloud';
+export type SettingsTab = 'appearance' | 'editor' | 'image' | 'export' | 'ai' | 'web_search' | 'explorer' | 'workflow' | 'converter' | 'cloud' | 'mcp';
 
 export interface ConverterModuleStatus {
   state: 'missing' | 'installing' | 'ready' | 'update_available' | 'incompatible' | 'corrupt' | 'error';
@@ -427,6 +435,11 @@ const defaultSettings: Settings = {
     render_in_preview: true,
     preserve_format: true,
   },
+  mcp: {
+    enabled: false,
+    auto_start: false,
+    auto_approve: false,
+  },
 };
 
 const normalizeSettings = (saved: Settings): Settings => ({
@@ -456,6 +469,7 @@ const normalizeSettings = (saved: Settings): Settings => ({
   },
   explorer: { ...defaultSettings.explorer, ...saved.explorer },
   workflow: { ...defaultSettings.workflow, ...saved.workflow },
+  mcp: { ...defaultSettings.mcp, ...saved.mcp },
 });
 
 const initialSettings = (() => {

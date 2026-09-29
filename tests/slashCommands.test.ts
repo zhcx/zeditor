@@ -5,6 +5,7 @@ import {
   findSlashCommandTrigger,
   SLASH_COMMANDS,
 } from '../src/utils/slashCommands.ts';
+import { slashAiGenie } from '../src/utils/aiGenies.ts';
 
 test('opens slash commands for the first token on a line', () => {
   assert.deepEqual(findSlashCommandTrigger('/h2', 20, 23), {
@@ -85,4 +86,49 @@ test('slide separator command inserts a horizontal rule', () => {
   const command = SLASH_COMMANDS.find((item) => item.id === 'slide');
   assert.ok(command);
   assert.match(command.insertion.text, /^---$/m);
+});
+
+test('every AI slash command maps to a runnable genie without a prompt', () => {
+  // 回归：斜杠菜单的 AI 动作必须能映射为精灵（此前选择「AI 问答」等无反应）。
+  for (const command of SLASH_COMMANDS) {
+    if (!command.ai || command.needsPrompt) continue;
+    const genie = slashAiGenie(command);
+    assert.ok(genie, command.id);
+    assert.ok(genie.backendAction.length > 0, command.id);
+    assert.ok(genie.action === 'replace' || genie.action === 'insert', command.id);
+  }
+});
+
+test('ask and write commands require a supplementary prompt before executing', () => {
+  const ask = SLASH_COMMANDS.find((item) => item.id === 'ai-ask');
+  const write = SLASH_COMMANDS.find((item) => item.id === 'ai-write');
+  assert.ok(ask?.ai === 'ask' && ask.needsPrompt);
+  assert.ok(write?.ai === 'write' && write.needsPrompt);
+
+  assert.equal(slashAiGenie(ask), null, '缺少补充说明时不构造精灵');
+  const genie = slashAiGenie(ask, '  把上文整理成三步操作指南  ');
+  assert.ok(genie);
+  assert.equal(genie.backendAction, 'transform');
+  assert.equal(genie.action, 'insert');
+  assert.equal(genie.scope, 'document');
+  assert.equal(genie.instruction, '把上文整理成三步操作指南', '去除首尾空白');
+});
+
+test('slash AI genies align with the runGenie execution contract', () => {
+  const byId = new Map(SLASH_COMMANDS.map((item) => [item.id, item]));
+  const expectations: Array<[string, string, 'replace' | 'insert']> = [
+    ['ai-continue', 'continue', 'insert'],
+    ['ai-polish', 'polish', 'replace'],
+    ['ai-translate', 'translate', 'replace'],
+    ['ai-summarize', 'summarize', 'insert'],
+  ];
+  for (const [id, backendAction, action] of expectations) {
+    const command = byId.get(id);
+    assert.ok(command, id);
+    const genie = slashAiGenie(command!);
+    assert.ok(genie, id);
+    assert.equal(genie!.backendAction, backendAction, id);
+    assert.equal(genie!.action, action, id);
+    assert.equal(genie!.instruction, undefined, `${id} 不接受补充说明`);
+  }
 });

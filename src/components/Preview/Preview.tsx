@@ -63,6 +63,10 @@ const md = new MarkdownIt({
     if (lang === 'markmap') {
       return `<pre class="hljs"><code class="language-markmap">${md.utils.escapeHtml(str)}</code></pre>`;
     }
+    if (lang === 'svg') {
+      // SVG 图形围栏：保留源码交给二次渲染（校验 + 净化后内联显示）。
+      return `<pre class="hljs"><code class="language-svg">${md.utils.escapeHtml(str)}</code></pre>`;
+    }
     if (lang && hljs.getLanguage(lang)) {
       try {
         return `<pre class="hljs"><code class="language-${md.utils.escapeHtml(lang)}">${hljs.highlight(str, { language: lang, ignoreIllegals: true }).value}</code></pre>`;
@@ -551,6 +555,31 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       if (observer) observer.observe(block);
       else void renderMermaid(block);
     });
+
+    // SVG 图形：` ```svg ` 围栏像 Mermaid 一样二次渲染，但渲染是同步的，
+    // 无需懒加载与防抖。校验失败显示「无效 SVG」错误块（参考 VMark 设计）。
+    const svgBlocks = containerRef.current.querySelectorAll('code.language-svg');
+    if (svgBlocks.length > 0) {
+      void import('../../utils/svgFigure').then(({ buildSvgFigureHtml, attachSvgFigureInteractions, createDomSvgParser }) => {
+        if (disposed) return;
+        const parse = createDomSvgParser();
+        svgBlocks.forEach((block) => {
+          const pre = block.parentElement;
+          if (!pre) return;
+          void buildSvgFigureHtml(block.textContent || '', parse).then((result) => {
+            if (disposed) return;
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = result.html;
+            const figure = wrapper.firstElementChild;
+            if (figure instanceof HTMLElement) {
+              pre.replaceWith(figure);
+              if (result.ok) attachSvgFigureInteractions(figure);
+              onContentRendered?.();
+            }
+          });
+        });
+      });
+    }
 
     // GitHub Actions 工作流：`yaml` 围栏里若是可识别的工作流，就替换为只读
     // 依赖图（与 Mermaid 一样只读、可折叠）。识别需要 YAML 解析器，因此先做

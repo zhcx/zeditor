@@ -1,4 +1,6 @@
 import type { AIChangeKind } from '../stores/aiStore';
+import type { EditorController } from '../types/editor';
+import type { SlashCommand, SlashCommandAiAction } from './slashCommands';
 
 /** 精灵作用范围：选区 / 段落 / 全文（参考 VMark AI Genies 的范围系统）。 */
 export type GenieScope = 'selection' | 'block' | 'document';
@@ -93,5 +95,59 @@ export function freeformGenie(instruction: string, scope: GenieScope): GenieDefi
     backendAction: 'transform',
     instruction,
     kind: 'polish',
+  };
+}
+
+/** 按范围从编辑器提取精灵目标。选区为空时回退到段落（VMark 回退行为）。 */
+export function extractGenieTarget(view: EditorController, scope: GenieScope, fallback = true): GenieTarget | null {
+  const docLength = view.state.doc.length;
+  const fullText = view.state.sliceDoc(0, docLength);
+  const head = view.state.selection.main.to;
+
+  if (scope === 'selection') {
+    const sel = view.state.selection.main;
+    if (!sel.empty) {
+      return { scope, text: view.state.sliceDoc(sel.from, sel.to), from: sel.from, to: sel.to, insertAt: sel.to };
+    }
+    return fallback ? extractGenieTarget(view, 'block', false) : null;
+  }
+
+  if (scope === 'block') {
+    // 段落 = 光标前后最近的空行之间（Markdown 块级近似）。
+    let start = fullText.lastIndexOf('\n\n', Math.max(0, head - 1));
+    start = start === -1 ? 0 : start + 2;
+    let end = fullText.indexOf('\n\n', head);
+    if (end === -1) end = docLength;
+    if (start > end) start = end;
+    const blockText = fullText.slice(start, end);
+    if (!blockText.trim()) return null;
+    return { scope, text: blockText, from: start, to: end, insertAt: end };
+  }
+
+  if (!fullText.trim()) return null;
+  return { scope, text: fullText, from: 0, to: docLength, insertAt: head };
+}
+
+/** 斜杠命令 AI 动作 → 精灵基础定义：/ask、/write 等复用 runGenie 执行链路。 */
+const SLASH_AI_BASE: Record<SlashCommandAiAction, Omit<GenieDefinition, 'id' | 'category' | 'instruction'>> = {
+  ask: { name: 'AI 问答', description: '向 AI 提问并插入回答', backendAction: 'transform', scope: 'document', action: 'insert', icon: '💬', kind: 'polish' },
+  write: { name: 'AI 写作', description: '按你的要求生成内容', backendAction: 'transform', scope: 'document', action: 'insert', icon: '📝', kind: 'polish' },
+  continue: { name: 'AI 续写', description: '根据上文继续写作', backendAction: 'continue', scope: 'block', action: 'insert', icon: '✍️', kind: 'continuation' },
+  polish: { name: 'AI 润色', description: '润色当前段落或选区', backendAction: 'polish', scope: 'selection', action: 'replace', icon: '✨', kind: 'polish' },
+  translate: { name: 'AI 翻译', description: '翻译当前段落或选区', backendAction: 'translate', scope: 'selection', action: 'replace', icon: '🌐', kind: 'translation' },
+  summarize: { name: 'AI 总结', description: '总结全文要点', backendAction: 'summarize', scope: 'document', action: 'insert', icon: '📋', kind: 'structure' },
+};
+
+/** 把斜杠命令的 AI 动作映射为精灵定义；/ask、/write 必须提供补充说明（问题 / 写作要求）。 */
+export function slashAiGenie(command: SlashCommand, prompt?: string): GenieDefinition | null {
+  const action = command.ai;
+  if (!action) return null;
+  const needsPrompt = action === 'ask' || action === 'write';
+  if (needsPrompt && !prompt?.trim()) return null;
+  return {
+    id: `slash-${action}`,
+    category: 'AI',
+    ...SLASH_AI_BASE[action],
+    instruction: needsPrompt ? prompt!.trim() : undefined,
   };
 }

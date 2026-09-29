@@ -1082,10 +1082,12 @@ async fn run_text_action(
 ) -> Result<AIResponse, String> {
     let prompt = get_prompt(action, content, context, settings);
     // 输出长度与输入同量级，给足余量避免截断；扩展类动作按 2 倍估计。
-    let scale = if matches!(action, PromptAction::Expand) { 2 } else { 1 };
-    let max_tokens = Some(
-        (((content.chars().count() * scale) as u32) / 2).clamp(400, 4000),
-    );
+    let scale = if matches!(action, PromptAction::Expand) {
+        2
+    } else {
+        1
+    };
+    let max_tokens = Some((((content.chars().count() * scale) as u32) / 2).clamp(400, 4000));
     let result = call_api(prompt, settings, max_tokens, temperature).await?;
 
     Ok(AIResponse {
@@ -1125,7 +1127,14 @@ pub async fn transform(
     instruction: Option<&str>,
     settings: &AISettings,
 ) -> Result<AIResponse, String> {
-    run_text_action(PromptAction::Transform, content, instruction, settings, Some(0.5)).await
+    run_text_action(
+        PromptAction::Transform,
+        content,
+        instruction,
+        settings,
+        Some(0.5),
+    )
+    .await
 }
 
 /// 为「另存为/保存」对话框生成文件名建议。只取开头片段即可概括主题，

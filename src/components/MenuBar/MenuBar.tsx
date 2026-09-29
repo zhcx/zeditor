@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { open as openDialog, save, message } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
@@ -48,6 +48,12 @@ interface UpdateInfo {
   auto_install_supported: boolean;
   release_notes: string;
   published_at: string;
+}
+
+interface RecentFolderEntry {
+  path: string;
+  title: string;
+  last_opened: number;
 }
 
 interface DownloadProgress {
@@ -414,6 +420,25 @@ export function MenuBar() {
 
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
+  // 最近打开的工作区文件夹（Rust recent_folders.json，文件菜单数据源）。
+  const [recentFolders, setRecentFolders] = useState<RecentFolderEntry[]>([]);
+
+  const refreshRecentFolders = useCallback(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    invoke<RecentFolderEntry[]>('get_recent_folders')
+      .then((list) => {
+        const sorted = [...list].sort((a, b) => b.last_opened - a.last_opened).slice(0, 10);
+        setRecentFolders(sorted);
+      })
+      .catch(() => undefined);
+  }, []);
+
+  useEffect(() => {
+    refreshRecentFolders();
+    const handler = () => refreshRecentFolders();
+    window.addEventListener('zeditor-recent-folders-changed', handler);
+    return () => window.removeEventListener('zeditor-recent-folders-changed', handler);
+  }, [refreshRecentFolders]);
   const [helpModal, setHelpModal] = useState<'shortcuts' | 'syntax' | 'about' | 'update' | null>(null);
   const [updateInfo, setUpdateInfo] = useState<UpdateInfo | null>(null);
   const [updateError, setUpdateError] = useState<string | null>(null);
@@ -666,6 +691,34 @@ export function MenuBar() {
     closeMenus();
   };
 
+  const openRecentFolder = (path: string) => {
+    setActiveMenu(null);
+    setMenuOpen(false);
+    window.dispatchEvent(new CustomEvent('zeditor-open-folder', { detail: { path } }));
+  };
+
+  // 文件菜单「最近的文件夹」：与 VMark 的「最近的工作区」对齐，最多 10 条，
+  // 按最后打开时间排序；数据源是 Rust 端 recent_folders.json。
+  const recentFolderMenuItems: MenuItem[] = recentFolders.length > 0
+    ? [
+        ...recentFolders.map((folder) => ({
+          label: folder.title || folder.path.split(/[\\/]/).filter(Boolean).pop() || folder.path,
+          action: () => openRecentFolder(folder.path),
+        })),
+        { divider: true, label: '' },
+        {
+          label: '清除最近文件夹',
+          action: () => {
+            setActiveMenu(null);
+            setMenuOpen(false);
+            if ('__TAURI_INTERNALS__' in window) {
+              void invoke('clear_recent_folders').then(() => setRecentFolders([])).catch(() => undefined);
+            }
+          },
+        },
+      ]
+    : [{ label: '（暂无最近文件夹）', action: () => undefined }];
+
   const menus: MenuGroup[] = [
     {
       label: APP_NAME,
@@ -685,6 +738,7 @@ export function MenuBar() {
         { label: '新建', action: handleNewFile, shortcut: 'Ctrl+N' },
         { label: '打开', action: handleOpenFile, shortcut: 'Ctrl+O' },
         { label: '导入并转换文档…', action: handleConvertDocument },
+        ...('__TAURI_INTERNALS__' in window ? [{ label: '最近的文件夹', children: recentFolderMenuItems } satisfies MenuItem] : []),
         { label: '保存', action: handleSaveFile, shortcut: 'Ctrl+S' },
         { label: '另存为', action: handleSaveAs, shortcut: 'Ctrl+Shift+S' },
         { divider: true, label: '' },

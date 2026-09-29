@@ -2,6 +2,15 @@
 
 ## 未发布
 
+### MCP 集成（AI 助手接入，参考 VMark MCP 设计）
+
+- 新增 **MCP 服务器**：AI 助手（Claude Desktop / Claude Code / Codex CLI / Gemini CLI 等 MCP 兼容客户端）经 `zeditor_mcp_server` 二进制（stdio ↔ WebSocket 桥接）读写文档。架构：`AI 助手 ←stdio→ MCP server ←WS(127.0.0.1 + 随机令牌)→ 编辑器桥接 → 前端执行`。
+- **11 个工具**（对齐 VMark 编辑器读写主轴）：`session_get_state`、`workspace_new/open/save/save_as/close/switch_tab`、`document_read/write`、`selection_get/set`；`document_write` 支持 `expected_revision` 乐观并发（STALE 错误信封）。
+- **安全边界**：桥接仅监听本机、令牌认证；文件操作限定在已打开的工作区根与文档目录内（`INVALID_PATH` 拒绝越界）；未开自动批准时，AI 修改以「AI 修改建议」内联审阅呈现，由用户接受或拒绝。
+- **设置 → 集成**：启用 MCP 服务器、启动时自动运行、自动批准编辑三个开关；桥接状态与启动/停止；四个 AI 助手的一键配置安装与状态（已安装 / 路径不匹配 / 未安装）。
+- 状态栏 MCP 指示器：灰 = 未运行，绿 = 运行中，脉冲绿 = 有 AI 助手连接；点击直达设置。
+- MCP server 二进制作为 sidecar 随安装包分发：由 Cargo `[[bin]]` 编译、`tauri build` 自动打包到主程序旁（无需 externalBin 占位文件）。
+
 ## v0.5.4（2026-09-29）
 
 ### AI 指令面板（AI Palette，参考 VMark AI Genies）

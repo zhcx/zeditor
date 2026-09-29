@@ -1,15 +1,14 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../stores/appStore';
-import { useAIStore } from '../../stores/aiStore';
-import type { EditorController } from '../../types/editor';
+import { useAIStore, isAIConfigured } from '../../stores/aiStore';
 import {
   BUILTIN_GENIES,
+  extractGenieTarget,
   freeformGenie,
   templateToInstruction,
   type GenieDefinition,
   type GenieScope,
-  type GenieTarget,
 } from '../../utils/aiGenies';
 import '../../styles/ai-palette.css';
 
@@ -41,36 +40,6 @@ function loadPromptHistory(): string[] {
   } catch {
     return [];
   }
-}
-
-/** 按范围从编辑器提取精灵目标。选区为空时回退到段落（VMark 回退行为）。 */
-function extractTarget(view: EditorController, scope: GenieScope, fallback = true): GenieTarget | null {
-  const docLength = view.state.doc.length;
-  const fullText = view.state.sliceDoc(0, docLength);
-  const head = view.state.selection.main.to;
-
-  if (scope === 'selection') {
-    const sel = view.state.selection.main;
-    if (!sel.empty) {
-      return { scope, text: view.state.sliceDoc(sel.from, sel.to), from: sel.from, to: sel.to, insertAt: sel.to };
-    }
-    return fallback ? extractTarget(view, 'block', false) : null;
-  }
-
-  if (scope === 'block') {
-    // 段落 = 光标前后最近的空行之间（Markdown 块级近似）。
-    let start = fullText.lastIndexOf('\n\n', Math.max(0, head - 1));
-    start = start === -1 ? 0 : start + 2;
-    let end = fullText.indexOf('\n\n', head);
-    if (end === -1) end = docLength;
-    if (start > end) start = end;
-    const blockText = fullText.slice(start, end);
-    if (!blockText.trim()) return null;
-    return { scope, text: blockText, from: start, to: end, insertAt: end };
-  }
-
-  if (!fullText.trim()) return null;
-  return { scope, text: fullText, from: 0, to: docLength, insertAt: head };
 }
 
 function customGenieToDefinition(payload: CustomGeniePayload): GenieDefinition {
@@ -109,17 +78,34 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
   const historyBrowseIndex = useRef(-1);
 
   // 打开时：重置状态、自动探测初始范围（有选区 → selection，否则 block）。
+  // 状态重置放入定时器回调：同步 setState 在 effect 体内会触发级联渲染。
   useEffect(() => {
     if (!visible) return;
-    setQuery('');
-    setSelectedIndex(0);
-    setConfirmFreeform(false);
-    setNotice('');
-    historyBrowseIndex.current = -1;
-    const hasSelection = editorView ? !editorView.state.selection.main.empty : false;
-    setScope(hasSelection ? 'selection' : 'block');
-    const timer = window.setTimeout(() => inputRef.current?.focus(), 30);
+    const timer = window.setTimeout(() => {
+      setQuery('');
+      setSelectedIndex(0);
+      setConfirmFreeform(false);
+      setNotice('');
+      historyBrowseIndex.current = -1;
+      const hasSelection = editorView ? !editorView.state.selection.main.empty : false;
+      setScope(hasSelection ? 'selection' : 'block');
+      inputRef.current?.focus();
+    }, 30);
     return () => window.clearTimeout(timer);
+  }, [visible, editorView]);
+
+  // 关闭面板后把焦点还给编辑器：面板卸载后焦点会落到 body 上，
+  // 之后在编辑框输入 '/' 等将无法触发斜杠命令与编辑器快捷键。
+  const wasOpenRef = useRef(false);
+  useEffect(() => {
+    if (visible) {
+      wasOpenRef.current = true;
+      return;
+    }
+    if (wasOpenRef.current) {
+      wasOpenRef.current = false;
+      editorView?.focus();
+    }
   }, [visible, editorView]);
 
   const loadCustomGenies = useCallback(async () => {
@@ -133,7 +119,9 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
   }, []);
 
   useEffect(() => {
-    if (visible) void loadCustomGenies();
+    if (!visible) return;
+    const timer = window.setTimeout(() => void loadCustomGenies(), 0);
+    return () => window.clearTimeout(timer);
   }, [visible, loadCustomGenies]);
 
   const allGenies = useMemo(() => [...BUILTIN_GENIES, ...customGenies], [customGenies]);
@@ -179,11 +167,16 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
       setNotice('编辑器未就绪');
       return;
     }
+    // 提前检查 AI 配置：未配置时保留面板并提示，而不是关闭后静默失败。
+    if (!isAIConfigured(useAppStore.getState().settings.ai)) {
+      setNotice('AI 未就绪：请先在「设置 → AI 助手」中启用并配置（Ollama 本地模型无需密钥）');
+      return;
+    }
     // 生效范围：精灵自身范围优先；选区精灵在无选区时回退到段落。
     const effectiveScope = genie.scope === 'selection' && editorView.state.selection.main.empty
       ? 'block'
       : genie.scope;
-    const target = extractTarget(editorView, effectiveScope);
+    const target = extractGenieTarget(editorView, effectiveScope);
     if (!target) {
       setNotice(`${SCOPE_LABELS[effectiveScope]}范围为空，请先选择或输入文本`);
       return;
@@ -197,7 +190,11 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
       setNotice('编辑器未就绪');
       return;
     }
-    const target = extractTarget(editorView, scope);
+    if (!isAIConfigured(useAppStore.getState().settings.ai)) {
+      setNotice('AI 未就绪：请先在「设置 → AI 助手」中启用并配置（Ollama 本地模型无需密钥）');
+      return;
+    }
+    const target = extractGenieTarget(editorView, scope);
     if (!target) {
       setNotice(`${SCOPE_LABELS[scope]}范围为空，请先选择或输入文本`);
       return;

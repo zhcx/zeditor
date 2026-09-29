@@ -125,6 +125,11 @@ type DirectoryHandleWithEntries = FileSystemDirectoryHandle & {
 };
 
 const getFolderName = (path: string) => path.split(/[\\/]/).filter(Boolean).pop() || path;
+const swapSetKey = (source: Set<string>, oldKey: string, newKey: string) => {
+  const next = new Set(source);
+  if (next.delete(oldKey)) next.add(newKey);
+  return next;
+};
 const normalizeNode = (node: RawFileNode): FileNode => ({
   name: node.name,
   path: node.path,
@@ -140,12 +145,18 @@ function FolderIcon({ open: isOpen = false }: { open?: boolean }) {
   return <span className={`explorer-icon folder-icon ${isOpen ? 'open' : ''}`} aria-hidden="true" />;
 }
 
-function ExplorerActionIcon({ type }: { type: 'newFile' | 'openFile' | 'openFolder' }) {
+function ExplorerActionIcon({ type }: { type: 'newFile' | 'openFile' | 'openFolder' | 'expandAll' | 'collapseAll' }) {
   if (type === 'newFile') {
     return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>;
   }
   if (type === 'openFile') {
     return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.8h5l3 3v9.4H4zM9 1.8v3.3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  }
+  if (type === 'expandAll') {
+    return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 2.2h11.6v11.6H2.2zM5.8 6.6 8 8.8l2.2-2.2" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  }
+  if (type === 'collapseAll') {
+    return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 2.2h11.6v11.6H2.2zM5.8 9.4 8 7.2l2.2 2.2" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" /></svg>;
   }
   return (
     <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true">
@@ -353,6 +364,12 @@ function ExplorerSidebar({ style }: SidebarProps) {
       }
       setLoadedFolders(previous => new Set(previous).add(folderPath));
       setExpandedNodes(previous => new Set(previous).add(folderPath));
+      if (!folderPath.startsWith('web://')) {
+        // 记录到 Rust 端最近文件夹列表（文件菜单「最近的文件夹」数据源）。
+        void invoke('update_recent_folder', { path: folderPath, title: browserHandle?.name || getFolderName(folderPath) })
+          .then(() => window.dispatchEvent(new CustomEvent('zeditor-recent-folders-changed')))
+          .catch(() => undefined);
+      }
     } catch (error) {
       console.error('Failed to load folder contents:', error);
     }
@@ -389,6 +406,118 @@ function ExplorerSidebar({ style }: SidebarProps) {
     }, 30000);
     setContextMenu(null);
   }, []);
+
+  // ── 启动恢复与整树操作 ────────────────────────────────────
+  // 挂载时把上次会话持久化的工作区根目录重新加载进资源管理器（VMark 会话
+  // 恢复行为）。恢复的根目录保持折叠；读取失败（被移动 / 删除 / 离线）的
+  // 根从持久化列表清理，避免每次启动重复重试失效路径。
+  const restoredOnceRef = useRef(false);
+  useEffect(() => {
+    if (restoredOnceRef.current) return;
+    restoredOnceRef.current = true;
+    const storedRoots = readStoredStringArray(WORKSPACE_ROOTS_KEY).filter(root => !root.startsWith('web://'));
+    if (storedRoots.length === 0) return;
+    void (async () => {
+      for (const root of storedRoots) {
+        try {
+          const tree = await readFolder(root);
+          setWorkspaceFolders(previous => previous.some(folder => folder.path === root)
+            ? previous
+            : [...previous, { name: getFolderName(root), path: root, tree }]);
+          setLoadedFolders(previous => new Set(previous).add(root));
+        } catch {
+          const remaining = readStoredStringArray(WORKSPACE_ROOTS_KEY);
+          if (remaining.includes(root)) writeStoredStringArray(WORKSPACE_ROOTS_KEY, remaining.filter(item => item !== root));
+        }
+      }
+    })();
+  }, [readFolder]);
+
+  // 全部折叠：收起工作区所有目录（含已加载的子目录），保留「打开的编辑器」
+  // 分组自身的展开状态。
+  const collapseAllFolders = useCallback(() => {
+    const rootPaths = workspaceFolders.map(folder => folder.path);
+    const isUnderRoot = (path: string) => rootPaths.some(root =>
+      path === root || path.startsWith(`${root}/`) || path.startsWith(`${root}\\`));
+    setExpandedNodes(previous => {
+      const next = new Set(previous);
+      for (const path of [...next]) {
+        if (isUnderRoot(path)) next.delete(path);
+      }
+      return next;
+    });
+  }, [workspaceFolders]);
+
+  // 全部展开：懒加载树需要逐层读取目录。设置读取预算（500 个目录）与深度
+  // 上限（8 层），防止超大目录或符号链接环拖垮界面。
+  const expandAllFolders = useCallback(async () => {
+    const loaded = new Set(loadedFolders);
+    let budget = 500;
+    const expandNodes = async (nodes: FileNode[], depth: number): Promise<void> => {
+      if (depth > 8) return;
+      for (const node of nodes) {
+        if (!node.isDirectory) continue;
+        setExpandedNodes(previous => new Set(previous).add(node.path));
+        let children = node.children || [];
+        if (!loaded.has(node.path)) {
+          if (budget <= 0) continue;
+          budget -= 1;
+          loaded.add(node.path);
+          try {
+            children = await readFolder(node.path);
+          } catch {
+            continue;
+          }
+          setWorkspaceFolders(previous => refreshWorkspaceFolderTree(previous, node.path, children));
+          setLoadedFolders(previous => new Set(previous).add(node.path));
+        }
+        await expandNodes(children, depth + 1);
+      }
+    };
+    for (const folder of workspaceFolders) {
+      setExpandedNodes(previous => new Set(previous).add(folder.path));
+      await expandNodes(folder.tree, 1);
+    }
+  }, [loadedFolders, readFolder, workspaceFolders]);
+
+  // 关闭所有工作区根目录：行为与单个「关闭文件夹」一致（不删除磁盘内容），
+  // 同步清理持久化列表、展开状态与防自动加回标记。
+  const closeAllWorkspaceFolders = useCallback(() => {
+    const paths = workspaceFolders.map(folder => folder.path);
+    if (paths.length === 0) { setContextMenu(null); return; }
+    const isUnderRoot = (path: string) => paths.some(root =>
+      path === root || path.startsWith(`${root}/`) || path.startsWith(`${root}\\`));
+    setWorkspaceFolders([]);
+    setExpandedNodes(previous => {
+      const next = new Set(previous);
+      for (const path of [...next]) {
+        if (isUnderRoot(path)) next.delete(path);
+      }
+      return next;
+    });
+    setLoadedFolders(previous => {
+      const next = new Set(previous);
+      for (const path of [...next]) {
+        if (isUnderRoot(path)) next.delete(path);
+      }
+      return next;
+    });
+    const persistable = paths.filter(path => !path.startsWith('web://'));
+    if (persistable.length > 0) {
+      writeStoredStringArray(WORKSPACE_ROOTS_KEY, readStoredStringArray(WORKSPACE_ROOTS_KEY).filter(root => !persistable.includes(root)));
+    }
+    const removed = new Set(recentlyRemovedRootsRef.current);
+    paths.forEach(path => removed.add(path));
+    recentlyRemovedRootsRef.current = removed;
+    paths.forEach(path => {
+      setTimeout(() => {
+        const current = new Set(recentlyRemovedRootsRef.current);
+        current.delete(path);
+        recentlyRemovedRootsRef.current = current;
+      }, 30000);
+    });
+    setContextMenu(null);
+  }, [workspaceFolders]);
 
   // ── 历史记录管理 ──────────────────────────────────────────
   const HISTORY_KEY = 'zeditor.explorer-history';
@@ -444,6 +573,19 @@ function ExplorerSidebar({ style }: SidebarProps) {
     }
   }, [addWorkspaceFolder, currentFile, workspaceFolders]);
 
+  // 跨组件打开工作区文件夹：文件菜单「最近的文件夹」与窗口拖放的目录经
+  // 'zeditor-open-folder' 事件桥接进来（addWorkspaceFolder 是组件闭包）。
+  useEffect(() => {
+    const handler = (event: Event) => {
+      const path = (event as CustomEvent<{ path?: string }>).detail?.path;
+      if (typeof path !== 'string' || !path) return;
+      void addWorkspaceFolder(path);
+      addToHistory(path, getFolderName(path), 'folder');
+    };
+    window.addEventListener('zeditor-open-folder', handler);
+    return () => window.removeEventListener('zeditor-open-folder', handler);
+  }, [addWorkspaceFolder, addToHistory]);
+
   // ── 内联重命名 ──────────────────────────────────────────
   const startRenaming = (path: string, currentName: string) => {
     setRenaming({ path, name: currentName });
@@ -457,13 +599,29 @@ function ExplorerSidebar({ style }: SidebarProps) {
     const parent = renaming.path.substring(0, renaming.path.length - renaming.name.length);
     const newPath = `${parent}${renameValue.trim()}`;
     if (newPath === renaming.path) { setRenaming(null); return; }
+    const isWorkspaceRoot = workspaceFolders.some(folder => folder.path === renaming.path);
     try {
       if (isTauriRuntime()) {
         await invoke('rename_fs_item', { oldPath: renaming.path, newPath });
       }
-      // Refresh the parent folder
-      const parentDir = renaming.path.replace(/[\\/][^\\/]+$/, '');
-      void refreshWorkspaceFolder(parentDir);
+      if (isWorkspaceRoot) {
+        // 根目录重命名：子节点路径前缀全部变化，旧树不可复用——重读目录树，
+        // 并同步条目、展开 / 已加载集合与持久化的根目录列表。
+        const tree = isTauriRuntime() ? await readFolder(newPath).catch(() => []) : [];
+        setWorkspaceFolders(previous => previous.map(folder => folder.path === renaming.path
+          ? { ...folder, name: renameValue.trim(), path: newPath, tree }
+          : folder));
+        setExpandedNodes(previous => swapSetKey(previous, renaming.path, newPath));
+        setLoadedFolders(previous => swapSetKey(previous, renaming.path, newPath));
+        if (!renaming.path.startsWith('web://')) {
+          writeStoredStringArray(WORKSPACE_ROOTS_KEY, readStoredStringArray(WORKSPACE_ROOTS_KEY)
+            .map(root => (root === renaming.path ? newPath : root)));
+        }
+      } else {
+        // Refresh the parent folder
+        const parentDir = renaming.path.replace(/[\\/][^\\/]+$/, '');
+        void refreshWorkspaceFolder(parentDir);
+      }
     } catch (error) {
       console.error('重命名失败:', error);
     }
@@ -807,6 +965,12 @@ function ExplorerSidebar({ style }: SidebarProps) {
             <button onClick={() => { useAppStore.getState().addTab(); setExpandedNodes(previous => new Set(previous).add(OPEN_EDITORS_ID)); }} title="新建文件" aria-label="新建文件"><ExplorerActionIcon type="newFile" /></button>
             <button onClick={() => void handleOpenFile()} title="打开文件" aria-label="打开文件"><ExplorerActionIcon type="openFile" /></button>
             <button onClick={() => void handleOpenFolder()} title="打开文件夹" aria-label="打开文件夹"><ExplorerActionIcon type="openFolder" /></button>
+            {workspaceFolders.length > 0 && (
+              <>
+                <button onClick={() => void expandAllFolders()} title="展开所有文件夹" aria-label="展开所有文件夹"><ExplorerActionIcon type="expandAll" /></button>
+                <button onClick={collapseAllFolders} title="折叠所有文件夹" aria-label="折叠所有文件夹"><ExplorerActionIcon type="collapseAll" /></button>
+              </>
+            )}
           </div>
         </header>
 
@@ -1126,9 +1290,16 @@ function ExplorerSidebar({ style }: SidebarProps) {
             在资源管理器中打开
           </button>
           {contextMenu.targetType === 'root' && (
-            <button className="context-menu-item danger" onClick={() => { removeWorkspaceFolder(contextMenu.node.path); }}>
-              关闭文件夹
-            </button>
+            <>
+              <button className="context-menu-item danger" onClick={() => { removeWorkspaceFolder(contextMenu.node.path); }}>
+                关闭文件夹
+              </button>
+              {workspaceFolders.length > 1 && (
+                <button className="context-menu-item danger" onClick={() => { closeAllWorkspaceFolders(); }}>
+                  关闭所有文件夹
+                </button>
+              )}
+            </>
           )}
 
           <div className="context-menu-divider" />

@@ -101,11 +101,7 @@ fn parse_genie_file(rel_path: &str, raw: &str) -> Option<CustomGenie> {
             .unwrap_or_default()
     };
 
-    let name = rel_path
-        .rsplit('/')
-        .next()
-        .unwrap_or(rel_path)
-        .to_string();
+    let name = rel_path.rsplit('/').next().unwrap_or(rel_path).to_string();
 
     let scope = match field("scope").as_str() {
         "block" => "block".to_string(),

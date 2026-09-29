@@ -15,6 +15,7 @@ mod commands;
 mod converter;
 mod image;
 mod imaging;
+mod mcp;
 mod pdf;
 pub mod webdav;
 
@@ -219,6 +220,8 @@ fn main() {
             commands::get_recent_folders,
             commands::update_recent_folder,
             commands::remove_recent_folder,
+            commands::clear_recent_folders,
+            commands::is_directory,
             commands::workspace_search,
             commands::web_search,
             commands::check_for_updates,
@@ -254,6 +257,11 @@ fn main() {
             agent::agent_get_changes,
             agent::agent_apply_changes,
             agent::agent_discard_session,
+            mcp::mcp_bridge_status,
+            mcp::mcp_bridge_set_enabled,
+            mcp::mcp_bridge_respond,
+            mcp::mcp_install_client_config,
+            mcp::mcp_client_config_status,
             pdf::converter::export_pdf_direct,
         ])
         .manage(pending_open_files)
@@ -273,6 +281,22 @@ fn main() {
                 s3_queue_path,
                 Arc::new(TauriWebDavEventSink(_app.handle().clone())),
             ));
+
+            // MCP 桥接：设置 → 集成中「启用 + 自动运行」时随应用启动。
+            // 仅监听 127.0.0.1 并持有随机令牌，AI 助手经 zeditor_mcp_server
+            // 二进制（stdio→WebSocket）接入，工具调用由前端执行器处理。
+            let mcp_bridge = mcp::McpBridge::new(_app.handle().clone());
+            let mcp_settings = commands::load_settings_for_startup(_app.handle()).mcp;
+            _app.manage(mcp_bridge);
+            if mcp_settings.enabled && mcp_settings.auto_start {
+                let handle = _app.handle().clone();
+                tauri::async_runtime::spawn(async move {
+                    let bridge = handle.state::<mcp::McpBridge>();
+                    if let Err(error) = bridge.start().await {
+                        log_startup(&format!("mcp bridge start failed: {error}"));
+                    }
+                });
+            }
             log_startup(&format!(
                 "native setup finished in {} ms",
                 boot_start.elapsed().as_millis()

@@ -27,6 +27,9 @@ const md = new MarkdownIt({
     if (lang === 'mermaid') {
       return `<pre class="hljs"><code class="language-mermaid">${md.utils.escapeHtml(str)}</code></pre>`;
     }
+    if (lang === 'svg') {
+      return `<pre class="hljs"><code class="language-svg">${md.utils.escapeHtml(str)}</code></pre>`;
+    }
     if (lang && hljs.getLanguage(lang)) {
       try {
         return `<pre class="hljs"><code class="language-${md.utils.escapeHtml(lang)}">${hljs.highlight(str, { language: lang, ignoreIllegals: true }).value}</code></pre>`;
@@ -134,6 +137,30 @@ export function PresentationView({ onExit }: PresentationViewProps) {
 
     deck.initialize().then(() => {
       if (cancelled) return;
+
+      // SVG 图形围栏：与预览一致做校验 + 净化渲染（演示中不挂交互控件）。
+      const svgBlocks = deckElement.querySelectorAll('code.language-svg');
+      if (svgBlocks.length > 0) {
+        void import('../../utils/svgFigure').then(async ({ buildSvgFigureHtml, createDomSvgParser }) => {
+          if (cancelled) return;
+          const parse = createDomSvgParser();
+          for (const block of svgBlocks) {
+            if (cancelled) return;
+            const pre = block.parentElement;
+            if (!pre) continue;
+            const result = await buildSvgFigureHtml(block.textContent || '', parse);
+            if (cancelled) return;
+            const wrapper = document.createElement('div');
+            wrapper.innerHTML = result.html;
+            const figure = wrapper.firstElementChild;
+            if (figure instanceof HTMLElement) {
+              pre.replaceWith(figure);
+              // 图形替换会改变幻灯片内容尺寸，需要让 Reveal.js 重新排版
+              deck.layout();
+            }
+          }
+        });
+      }
 
       // Mermaid 图表延迟渲染
       const mermaidBlocks = deckElement.querySelectorAll('code.language-mermaid');

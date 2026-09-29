@@ -5276,6 +5276,22 @@ textarea {
   color: var(--text-muted);
 }
 
+/* MCP 桥接指示器：灰 = 未运行，绿 = 运行中，脉冲绿 = 有 AI 助手连接。 */
+.status-mcp { display: inline-flex; align-items: center; gap: 5px; }
+.status-mcp-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--text-muted);
+  opacity: .55;
+}
+.status-mcp-dot.running { background: #3fb27f; opacity: 1; }
+.status-mcp-dot.connected { background: #3fb27f; opacity: 1; animation: status-mcp-pulse 1.6s ease-in-out infinite; }
+@keyframes status-mcp-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgb(63 178 127 / 45%); }
+  50% { box-shadow: 0 0 0 4px rgb(63 178 127 / 0%); }
+}
+
 .status-item:hover { background: transparent; color: var(--text-secondary); }
 .status-divider { color: var(--border-strong); }
 
@@ -6481,6 +6497,20 @@ textarea:focus-visible {
 .preview-document .mermaid-error { margin: 1.5em 0; padding: 12px; color: #b43d3d; border: 1px solid color-mix(in srgb, #d9534f 42%, var(--border-soft)); border-radius: 8px; background: color-mix(in srgb, #d9534f 8%, var(--bg-elevated)); }
 .preview-document .mermaid-error pre { margin: 8px 0 0; padding: 8px; overflow-x: auto; color: var(--text-primary); background: var(--bg-secondary); border-radius: 5px; text-align: left; }
 
+/* SVG 图形（```svg 围栏）：渲染前经 DOMPurify 净化（移除 script 与 on* 属性）。 */
+.preview-document .svg-figure { margin: 1.5em 0; padding: 1em; border-radius: 12px; background: var(--bg-elevated); border: 1px solid var(--border-soft); }
+.preview-document .svg-figure figcaption { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-bottom: .7em; color: var(--text-muted); font-size: .78em; text-align: left; }
+.preview-document .svg-figure-tools { display: inline-flex; gap: 6px; }
+.preview-document .svg-figure-tools button { border: 1px solid var(--border-color); border-radius: 5px; padding: 2px 8px; color: var(--text-secondary); background: transparent; font-size: 11px; cursor: pointer; }
+.preview-document .svg-figure-tools button:hover { color: var(--text-primary); border-color: var(--accent-color); }
+/* 平移 / 缩放舞台：拖拽时禁用文本选择，保留纵向滚动（touch-action: pan-y）。 */
+.preview-document .svg-figure-stage { overflow: hidden; cursor: grab; touch-action: pan-y; user-select: none; }
+.preview-document .svg-figure-stage.dragging { cursor: grabbing; }
+.preview-document .svg-figure-stage svg { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+.preview-document .svg-figure-error { margin: 1.5em 0; padding: 12px; color: #b43d3d; border: 1px solid color-mix(in srgb, #d9534f 42%, var(--border-soft)); border-radius: 8px; background: color-mix(in srgb, #d9534f 8%, var(--bg-elevated)); }
+.preview-document .svg-figure-error span { display: block; margin-top: 4px; font-size: .85em; }
+.preview-document .svg-figure-error pre { margin: 8px 0 0; padding: 8px; overflow-x: auto; color: var(--text-primary); background: var(--bg-secondary); border-radius: 5px; text-align: left; }
+
 /* Math block */
 .preview-document .katex-display {
   margin: 1.2em 0;
@@ -6931,6 +6961,29 @@ textarea:focus-visible {
 .converter-advanced { border-top: 1px solid var(--border-color); padding-top: 12px; color: var(--text-secondary); }
 .converter-advanced summary { cursor: pointer; color: var(--text-primary); margin-bottom: 8px; }
 .converter-advanced code { color: var(--text-primary); }
+
+/* ── 集成（MCP）设置：与文档转换页共享同一套行 / 按钮样式 ───────── */
+.settings-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+/* AI 助手配置列表：整行块，单列堆叠（避免内容被挤进两列网格的窄列）。 */
+.settings-main .setting-item.mcp-clients-item {
+  grid-template-columns: 1fr;
+  align-items: start;
+  gap: 12px;
+}
+.mcp-client-list { display: grid; gap: 8px; }
+.mcp-client-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 12px;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: var(--surface-muted);
+}
+.mcp-client-row .mcp-client-name { flex: 1; min-width: 0; color: var(--text-primary); font-size: 13px; }
+.mcp-client-status { font-size: 12px; white-space: nowrap; }
+.mcp-client-status.ok { color: var(--accent-color); }
+.mcp-client-status.warn { color: var(--warning-color); }
 .update-toast-error { position: fixed; z-index: 1200; right: 20px; bottom: 20px; max-width: min(420px, calc(100vw - 40px)); padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--danger-color) 45%, transparent); border-radius: var(--radius-sm); color: var(--danger-color); background: color-mix(in srgb, var(--danger-color) 9%, var(--bg-elevated)); box-shadow: var(--shadow-card); font-size: 12px; line-height: 1.45; }
 [data-theme$="dark"] .update-toast-error { color: color-mix(in srgb, var(--danger-color) 80%, #fff); background: color-mix(in srgb, var(--danger-color) 16%, var(--bg-elevated)); border-color: color-mix(in srgb, var(--danger-color) 42%, transparent); }
 @media (max-width: 680px) { .wechat-theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
@@ -6969,6 +7022,7 @@ textarea:focus-visible {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
   padding: 0 10px 0 18px;
   color: var(--text-secondary);
   font-size: 11px;
@@ -6977,10 +7031,19 @@ textarea:focus-visible {
   text-transform: uppercase;
 }
 
-.vscode-explorer-actions { display: flex; align-items: center; gap: 2px; }
+/* 标题保持单行：操作按钮增多时用省略号而不是换行（此前「资源管理器」被挤成两行）。 */
+.vscode-explorer-header > span {
+  flex: 1 1 auto;
+  min-width: 0;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.vscode-explorer-actions { display: flex; align-items: center; gap: 2px; flex: 0 0 auto; }
 .vscode-explorer-actions button {
-  width: 28px;
-  height: 28px;
+  width: 24px;
+  height: 24px;
   display: inline-flex;
   align-items: center;
   justify-content: center;

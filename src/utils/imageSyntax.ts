@@ -15,6 +15,18 @@
 /** 允许复制进 `.assets` 的图片扩展名，与桌面端 `IMAGE_EXTENSIONS` 保持一致。 */
 export const IMAGE_FILE_EXTENSIONS = ['png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'svg', 'avif', 'ico', 'tif', 'tiff', 'heic'];
 
+/**
+ * 把剪贴板图片的 MIME 子类型规范化为扩展名：
+ * `image/svg+xml` → `svg`、`image/jpeg` → `jpg`；未知类型回退 `png`。
+ * 修复此前 `image/svg+xml` 被切成 `svg+xml` 导致后端白名单拒绝、SVG 无法粘贴的问题。
+ */
+export function clipboardImageExtension(mimeType: string): string {
+  const subtype = (mimeType.split('/')[1] || '').split(';')[0].trim().toLowerCase();
+  if (subtype === 'svg+xml') return 'svg';
+  if (subtype === 'jpeg') return 'jpg';
+  return subtype && IMAGE_FILE_EXTENSIONS.includes(subtype) ? subtype : 'png';
+}
+
 export interface ImageSpec {
   alt: string;
   src: string;

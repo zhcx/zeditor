@@ -98,10 +98,19 @@
   flex: 1;
   min-width: 0;
   border: 0;
+  appearance: none;
   background: transparent;
   color: var(--text-primary);
   font: 400 13px/1.5 var(--font-ui);
   padding: 9px 0;
+  outline: none;
+}
+
+/* 全局 button/input:focus-visible 描边规则（element + pseudo-class，特异性
+   0-1-1）会盖过上面单类选择器的 outline:none，在聚焦输入框上再画一圈内嵌
+   描边，形成「框中框」。输入行的聚焦态由 :focus-within 统一呈现，这里用
+   更高特异性显式关闭输入框自身的描边。 */
+.ai-palette-input-row .ai-palette-input:focus-visible {
   outline: none;
 }
 

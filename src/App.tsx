@@ -26,6 +26,7 @@ const ConverterDialog = lazy(() => import('./components/ConverterDialog/Converte
 const PresentationView = lazy(() => import('./components/Presentation/PresentationView').then(m => ({ default: m.PresentationView })));
 const AIPalette = lazy(() => import('./components/AIPalette/AIPalette').then(m => ({ default: m.AIPalette })));
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
+import { initMcpDispatcher } from './services/mcpDispatcher';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -473,6 +474,11 @@ function App() {
     };
   }, [settings.appearance.theme]);
 
+  // MCP 工具执行器：接收桥接转发的 AI 助手工具调用（设置 → 集成）。
+  useEffect(() => {
+    void initMcpDispatcher();
+  }, []);
+
   // Listen for Tauri file drop events using webview window
   useEffect(() => {
     // Keep the native drag-and-drop integration out of plain browser previews.
@@ -484,6 +490,16 @@ function App() {
     const unlisten = webview.listen<DragDropPayload>('tauri://drag-drop', async (event) => {
       const paths = event.payload.paths;
       for (const path of paths) {
+        // 拖入目录：作为工作区根打开（对齐 VMark 的拖放打开工作区），
+        // 而不是当作文档读取。探测失败时按文件继续处理。
+        try {
+          if (await invoke<boolean>('is_directory', { path })) {
+            window.dispatchEvent(new CustomEvent('zeditor-open-folder', { detail: { path } }));
+            continue;
+          }
+        } catch {
+          // 忽略探测失败，走下方的文件路径。
+        }
         // 视频 / 音频按素材处理：复制到文档资源目录并插入媒体语法，
         // 而不是当作文档打开。
         if (isMediaFilePath(path)) {

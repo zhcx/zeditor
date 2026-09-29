@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Settings } from '../../stores/appStore';
 import { useAIStore, type AIEditMode } from '../../stores/aiStore';
 import { WebDavStatusItem } from '../WebDav/WebDavStatusItem';
@@ -53,6 +54,28 @@ export function StatusBar() {
   const hasSelection = Boolean(selection && !selection.empty);
   const companionEnabled = settings.ai.enabled && settings.ai.auto_suggest;
   const companionStyleLabel = WRITING_STYLES.find(({ value }) => value === settings.ai.writing_style)?.label || '正式';
+  const [mcpRunning, setMcpRunning] = useState(false);
+  const [mcpConnected, setMcpConnected] = useState(0);
+
+  // MCP 桥接状态：绿色 = 运行中且有 AI 助手连接，灰绿 = 运行中等待连接，灰色 = 未运行。
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    invoke<{ running: boolean; connected: number }>('mcp_bridge_status')
+      .then((status) => {
+        setMcpRunning(Boolean(status.running));
+        setMcpConnected(Number(status.connected || 0));
+      })
+      .catch(() => undefined);
+    const handler = (event: Event) => {
+      const detail = (event as CustomEvent<{ event?: string; data?: { running?: boolean; connected?: number } }>).detail;
+      if (detail?.data?.running !== undefined) setMcpRunning(Boolean(detail.data.running));
+      if (detail?.data?.connected !== undefined) setMcpConnected(Number(detail.data.connected));
+      if (detail?.event === 'connected') setMcpConnected((count) => count + 1);
+      if (detail?.event === 'disconnected') setMcpConnected((count) => Math.max(0, count - 1));
+    };
+    window.addEventListener('zeditor-mcp-status', handler);
+    return () => window.removeEventListener('zeditor-mcp-status', handler);
+  }, []);
 
   useEffect(() => {
     if (!aiMenuOpen && !companionMenuOpen) return;
@@ -315,7 +338,23 @@ export function StatusBar() {
           </div>
         ) : <span className="status-item">{currentFile ? currentFile.split(/[\\/]/).pop() : '未保存'}</span>}
       </div>
-      <div className="statusbar-right"><span className="status-item">{wordCount}</span><span className="status-divider" aria-hidden="true" /><span className="status-item">UTF-8</span></div>
+      <div className="statusbar-right">
+        {settings.mcp.enabled && (
+          <>
+            <button
+              type="button"
+              className={`status-item status-button status-mcp${mcpRunning ? ' is-running' : ''}`}
+              title={`MCP 服务器：${mcpRunning ? `运行中${mcpConnected > 0 ? ` · ${mcpConnected} 个 AI 助手已连接` : ' · 等待连接'}` : '未运行'}（点击打开设置）`}
+              onClick={() => { setSettingsTab('mcp'); setSettingsOpen(true); }}
+            >
+              <span className={`status-mcp-dot${mcpRunning ? (mcpConnected > 0 ? ' connected' : ' running') : ''}`} aria-hidden="true" />
+              <span>MCP</span>
+            </button>
+            <span className="status-divider" aria-hidden="true" />
+          </>
+        )}
+        <span className="status-item">{wordCount}</span><span className="status-divider" aria-hidden="true" /><span className="status-item">UTF-8</span>
+      </div>
     </div>
   );
 }

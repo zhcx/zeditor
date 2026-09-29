@@ -69,6 +69,51 @@ pub struct FileNode {
     pub children: Option<Vec<FileNode>>,
 }
 
+fn default_history_retention_days() -> u32 {
+    30
+}
+
+fn default_explorer_auto_refresh() -> bool {
+    true
+}
+
+fn default_refresh_interval_seconds() -> u32 {
+    5
+}
+
+/// 资源管理器设置。前端 `Settings.explorer` 的持久化载体：此前 Rust 端
+/// 没有对应字段，保存时被静默丢弃，导致桌面端重启后自动刷新等设置回退默认。
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ExplorerSettings {
+    #[serde(default = "default_history_retention_days")]
+    pub history_retention_days: u32,
+    #[serde(default = "default_explorer_auto_refresh")]
+    pub auto_refresh: bool,
+    #[serde(default = "default_refresh_interval_seconds")]
+    pub refresh_interval_seconds: u32,
+}
+
+impl Default for ExplorerSettings {
+    fn default() -> Self {
+        Self {
+            history_retention_days: default_history_retention_days(),
+            auto_refresh: default_explorer_auto_refresh(),
+            refresh_interval_seconds: default_refresh_interval_seconds(),
+        }
+    }
+}
+
+/// MCP 集成设置（设置 → 集成）：桥接总开关、随应用启动、自动批准 AI 修改。
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct McpSettings {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub auto_start: bool,
+    #[serde(default)]
+    pub auto_approve: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub appearance: AppearanceSettings,
@@ -84,6 +129,10 @@ pub struct Settings {
     pub webdav: WebDavSettings,
     #[serde(default)]
     pub s3: S3Settings,
+    #[serde(default)]
+    pub explorer: ExplorerSettings,
+    #[serde(default)]
+    pub mcp: McpSettings,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -340,6 +389,8 @@ impl Default for Settings {
             },
             webdav: WebDavSettings::default(),
             s3: S3Settings::default(),
+            explorer: ExplorerSettings::default(),
+            mcp: McpSettings::default(),
         }
     }
 }
@@ -385,6 +436,20 @@ pub async fn get_settings(app: AppHandle) -> Result<Settings, String> {
         save_settings_inner(&app, &s)?;
         Ok(s)
     }
+}
+
+/// 启动时读取设置（无副作用：不创建默认设置文件）。
+pub fn load_settings_for_startup(app: &AppHandle) -> Settings {
+    let Ok(path) = app_config_file(app, "settings.json") else {
+        return Settings::default();
+    };
+    if !path.exists() {
+        return Settings::default();
+    }
+    std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str(&text).ok())
+        .unwrap_or_default()
 }
 
 #[tauri::command]
@@ -433,6 +498,8 @@ pub async fn upload_image_bytes(
         "gif" => "gif",
         "webp" => "webp",
         "bmp" => "bmp",
+        // SVG 走矢量格式；预览对内联 SVG 做净化，<img> 上下文不执行脚本。
+        "svg" => "svg",
         _ => return Err("Unsupported clipboard image format".into()),
     };
     if data_base64.len() > (MAX_CLIPBOARD_IMAGE_BYTES * 4 / 3) + 4 {
@@ -1465,6 +1532,27 @@ pub async fn remove_recent_folder(
     )
     .map_err(|e| e.to_string())?;
     Ok(recent)
+}
+
+/// 清空最近文件夹列表（菜单「清除最近文件夹」）。
+#[tauri::command]
+pub async fn clear_recent_folders(app: AppHandle) -> Result<(), String> {
+    let _guard = RECENT_FOLDERS_LOCK
+        .lock()
+        .map_err(|_| "最近文件夹记录锁已损坏".to_string())?;
+    let rp = get_recent_folders_path(&app)?;
+    if rp.exists() {
+        std::fs::write(&rp, "[]").map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
+/// 判断路径是否为目录：拖放接入工作区时区分「文件夹」与「文件」。
+#[tauri::command]
+pub fn is_directory(path: String) -> Result<bool, String> {
+    std::fs::metadata(&path)
+        .map(|metadata| metadata.is_dir())
+        .map_err(|e| e.to_string())
 }
 
 #[derive(Debug, Clone, Deserialize)]

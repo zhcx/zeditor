@@ -13,6 +13,7 @@ import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../..
 import { contentFontStack } from '../../utils/appearanceSettings';
 import { DocumentSessions, sameDocument } from '../../utils/documentSafety';
 import { filterSlashCommands, findSlashCommandTrigger, type SlashCommand } from '../../utils/slashCommands';
+import { extractGenieTarget, slashAiGenie } from '../../utils/aiGenies';
 import { MARKMAP_TEMPLATE, MARKMAP_TEMPLATE_SELECTION } from '../../utils/markmapSource';
 import { SlashCommandMenu, type SlashMenuAnchor } from './SlashCommandMenu';
 import { ImageOptionsModal, Toolbar } from '../Toolbar/Toolbar';
@@ -29,7 +30,7 @@ import {
   isOpenableUrl,
   type InlineTarget,
 } from '../../utils/inlineTargets';
-import { imageDialogFilters } from '../../utils/imageSyntax';
+import { clipboardImageExtension, imageDialogFilters } from '../../utils/imageSyntax';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { open as showOpenDialog } from '@tauri-apps/plugin-dialog';
 import { InlinePopup, type InlinePopupFields } from './InlinePopup';
@@ -405,6 +406,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const slashSelectedIndexRef = useRef(0);
   const [slashMenu, setSlashMenu] = useState<SlashMenuState | null>(null);
   const [slashSelectedIndex, setSlashSelectedIndex] = useState(0);
+  // 斜杠命令的 AI 补充说明输入框（/ask、/write 需先输入问题或写作要求）。
+  const [slashPrompt, setSlashPrompt] = useState<{ command: SlashCommand; anchor: SlashMenuAnchor } | null>(null);
+  const [slashPromptValue, setSlashPromptValue] = useState('');
+  const slashPromptRef = useRef<HTMLDivElement>(null);
+  // AI 动作在编辑器实例闭包内执行（需要 controller），用 ref 桥接到渲染层。
+  const slashAiRunRef = useRef<(command: SlashCommand, prompt?: string) => void>(() => {});
   const [contextMenu, setContextMenu] = useState<EditorContextMenuState | null>(null);
   const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
   const contextMenuRef = useRef<HTMLDivElement>(null);
@@ -754,6 +761,32 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     slashCommandRunRef.current(command);
   }, []);
 
+  // ── 斜杠命令 AI 动作的补充说明输入框 ──────────────────────
+  const closeSlashPrompt = useCallback(() => {
+    setSlashPrompt(null);
+    setSlashPromptValue('');
+    controllerRef.current?.focus();
+  }, []);
+
+  const submitSlashPrompt = useCallback(() => {
+    const prompt = slashPromptValue.trim();
+    const current = slashPrompt;
+    setSlashPrompt(null);
+    setSlashPromptValue('');
+    if (!current || !prompt) return;
+    slashAiRunRef.current(current.command, prompt);
+  }, [slashPrompt, slashPromptValue]);
+
+  // 输入框打开时点击外部区域关闭（与斜杠菜单的关闭行为一致）。
+  useEffect(() => {
+    if (!slashPrompt) return;
+    const handlePointerDown = (event: PointerEvent) => {
+      if (!slashPromptRef.current?.contains(event.target as Node)) closeSlashPrompt();
+    };
+    window.addEventListener('pointerdown', handlePointerDown, true);
+    return () => window.removeEventListener('pointerdown', handlePointerDown, true);
+  }, [slashPrompt, closeSlashPrompt]);
+
   useEffect(() => {
     const root = editorRef.current;
     if (!root || monacoRef.current || !activeTabId) return;
@@ -854,6 +887,38 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       controller.focus();
     };
 
+    // 斜杠命令的 AI 动作（/ask、/write、/ai、/polish…）：统一走 aiStore.runGenie，
+    // 结果以「AI 修改建议」内联弹窗呈现，与 AI 指令面板的行为完全一致。
+    const runSlashAiCommand = (command: SlashCommand, prompt?: string) => {
+      const genie = slashAiGenie(command, prompt);
+      if (!genie) return;
+      const selection = controller.getSelection();
+      const docText = controller.getValue();
+      // 空文档没有可转换的上下文：/ask、/write 退化为单轮问答，回答直接插入光标处。
+      if ((command.ai === 'ask' || command.ai === 'write') && !docText.trim()) {
+        const insertAt = selection.empty ? selection.to : selection.from;
+        void (async () => {
+          const answer = await useAIStore.getState().chatForEditor(prompt || '', '');
+          if (!answer) {
+            useAIStore.getState().setStatus('error', 'AI 未返回结果：请确认已在「设置 → AI 助手」中启用并配置 AI');
+            return;
+          }
+          controller.replaceRange(insertAt, insertAt, `${answer}\n`);
+          controller.focus();
+        })();
+        return;
+      }
+      const effectiveScope = genie.scope === 'selection' && selection.empty ? 'block' : genie.scope;
+      const target = extractGenieTarget(controller, effectiveScope);
+      if (!target) {
+        useAIStore.getState().setStatus('error', '目标范围为空，请先输入或选择文本');
+        return;
+      }
+      controller.focus();
+      void useAIStore.getState().runGenie(genie, target);
+    };
+    slashAiRunRef.current = runSlashAiCommand;
+
     const runSlashCommand = (command: SlashCommand) => {
       const menu = slashMenuRef.current;
       if (!menu) return;
@@ -864,6 +929,18 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       if (command.id === 'table') {
         controller.replaceRange(menu.from, menu.to, '', { from: menu.from, to: menu.from });
         insertTableAtCursor(3, 3);
+        return;
+      }
+      // AI 动作命令：先删掉触发的 `/ask` 等文本；需要补充说明的命令
+      // （/ask、/write）弹出说明输入框，其余立即执行。
+      if (command.ai) {
+        controller.replaceRange(menu.from, menu.to, '', { from: menu.from, to: menu.from });
+        if (command.needsPrompt) {
+          setSlashPrompt({ command, anchor: menu.anchor });
+          setSlashPromptValue('');
+          return;
+        }
+        runSlashAiCommand(command);
         return;
       }
       const { text, selectionStart = text.length, selectionEnd = selectionStart } = command.insertion;
@@ -1356,7 +1433,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       if (isTauriRuntime() && store.currentFile) {
         try {
           const dataUrl = await fileAsDataUrl(image);
-          const extension = image.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+          const extension = clipboardImageExtension(image.type);
           if (await insertImageFromBytes(dataUrl.split(',')[1], extension, '粘贴的图片')) return;
         } catch {
           // 落回图床 / dataURL 兜底路径
@@ -1376,7 +1453,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         const dataUrl = await fileAsDataUrl(image);
         let url = dataUrl;
         if (isTauriRuntime()) {
-          const extension = image.type.split('/')[1]?.replace('jpeg', 'jpg') || 'png';
+          const extension = clipboardImageExtension(image.type);
           url = await invoke<string>('upload_image_bytes', {
             dataBase64: dataUrl.split(',')[1],
             extension,
@@ -1533,6 +1610,41 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           onSelectedIndexChange={selectSlashIndex}
           onClose={closeSlashMenu}
         />
+      )}
+      {slashPrompt && (
+        <div
+          ref={slashPromptRef}
+          className="slash-ai-prompt"
+          style={{
+            left: Math.max(12, Math.min(slashPrompt.anchor.left, window.innerWidth - 392)),
+            top: slashPrompt.anchor.bottom + 8,
+          }}
+          role="dialog"
+          aria-label={`${slashPrompt.command.title}补充说明`}
+        >
+          <textarea
+            autoFocus
+            value={slashPromptValue}
+            rows={3}
+            onChange={(event) => setSlashPromptValue(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') {
+                event.preventDefault();
+                closeSlashPrompt();
+              } else if (event.key === 'Enter' && !event.shiftKey) {
+                event.preventDefault();
+                submitSlashPrompt();
+              }
+            }}
+            placeholder={slashPrompt.command.ai === 'write'
+              ? '想写什么？描述你的要求，如「一篇关于远程办公利弊的短文」'
+              : '想问什么？如「把上文整理成三步操作指南」'}
+          />
+          <div className="slash-ai-prompt-actions">
+            <button type="button" onClick={closeSlashPrompt}>取消</button>
+            <button type="button" className="primary" disabled={!slashPromptValue.trim()} onClick={submitSlashPrompt}>执行</button>
+          </div>
+        </div>
       )}
       {inlinePopup && (
         <InlinePopup
