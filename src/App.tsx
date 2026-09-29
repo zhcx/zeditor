@@ -24,6 +24,7 @@ const ImmersiveOutline = lazy(() => import('./components/Immersive/ImmersiveOutl
 const UnsavedChangesDialog = lazy(() => import('./components/UnsavedChangesDialog/UnsavedChangesDialog').then(m => ({ default: m.UnsavedChangesDialog })));
 const ConverterDialog = lazy(() => import('./components/ConverterDialog/ConverterDialog').then(m => ({ default: m.ConverterDialog })));
 const PresentationView = lazy(() => import('./components/Presentation/PresentationView').then(m => ({ default: m.PresentationView })));
+const AIPalette = lazy(() => import('./components/AIPalette/AIPalette').then(m => ({ default: m.AIPalette })));
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
@@ -135,6 +136,25 @@ function App() {
   const [closeSaving, setCloseSaving] = useState(false);
   const [presentationVisible, setPresentationVisible] = useState(false);
   const closePresentation = useCallback(() => setPresentationVisible(false), []);
+  const [aiPaletteVisible, setAiPaletteVisible] = useState(false);
+  const closeAiPalette = useCallback(() => setAiPaletteVisible(false), []);
+
+  // AI 指令面板：Ctrl/Cmd+J 快捷键或菜单事件打开（VMark 精灵选择器的等价入口）。
+  useEffect(() => {
+    const openPalette = () => setAiPaletteVisible(true);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
+        event.preventDefault();
+        setAiPaletteVisible(visible => !visible);
+      }
+    };
+    window.addEventListener('zeditor-ai-palette', openPalette);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('zeditor-ai-palette', openPalette);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
   const closePromptResolver = useRef<((action: UnsavedChangesAction) => void) | null>(null);
   const dragValues = useRef({ splitRatio, sidebarWidth, proofreadPanelWidth, chatbotPanelWidth });
   const immersivePolicy = getImmersiveWorkspacePolicy(mode, chatbotVisible);
@@ -1144,6 +1164,9 @@ function App() {
           <PresentationView onExit={closePresentation} />
         </Suspense>
       )}
+      <Suspense fallback={null}>
+        <AIPalette visible={aiPaletteVisible} onClose={closeAiPalette} />
+      </Suspense>
     </div>
   );
 }

@@ -171,31 +171,31 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.5.3 更新
+## v0.5.4 更新
 
 ### 更新日志
 
 - **校对功能：AI / Markdown 双模式**：「设置 → AI 助手」新增「使用 AI 校对」开关——开启时走原有 AI 校对，关闭或 AI 未配置时改用内置 Markdown 静态校对（未闭合围栏、反向链接、跳级标题、断开锚点、表格列数不匹配、空链接等正确性检查，规则对齐 VMark lint 设计）；静态校对结果与 AI 校对同构，共用侧栏面板、波浪线装饰与「应用修复」交互，report-only 问题只提示不显示应用按钮。
 - **Markmap 思维导图**：`markmap` 围栏里的标准 Markdown 标题层级（`#` / `##` / `###`）渲染为可交互 SVG 树，支持拖动平移、`Ctrl` + 滚轮缩放、点击分支圆圈折叠、适应视图与 2 倍分辨率 PNG 导出；配色跟随明暗主题，解析与渲染库首次遇到围栏时才按需加载；`/markmap` 命令、工具栏「图表 → Markmap 思维导图」或「功能 → 插入思维导图」均可快速插入。
-- **发布质量**：版本源统一为 0.5.3；新增 AI / Markdown 双模式校对与 Markmap 相关单元测试。
+- **发布质量**：版本源统一为 0.5.4；新增 AI / Markdown 双模式校对与 Markmap 相关单元测试。
 
-### v0.5.3 平台安装包对照
+### v0.5.4 平台安装包对照
 
-> 以下链接指向 v0.5.3 Release 资产；安装包由 GitHub Actions 根据 v0.5.3 标签源码构建。
+> 以下链接指向 v0.5.4 Release 资产；安装包由 GitHub Actions 根据 v0.5.4 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor-0.5.3-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.3/Zeditor_0.5.3_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor-0.5.4-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.4/Zeditor_0.5.4_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.3.md`](docs/releases/v0.5.3.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.4.md`](docs/releases/v0.5.4.md)。
 
 ## Contributors
 

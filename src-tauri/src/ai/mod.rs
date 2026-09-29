@@ -1,4 +1,5 @@
 mod client;
+pub mod genies;
 mod prompts;
 
 use tauri::WebviewWindow;
@@ -6,6 +7,11 @@ use tauri::WebviewWindow;
 use crate::commands::{self, AISettings};
 
 pub use client::AIResponse;
+
+/// 本地免密钥提供商（如 Ollama）：无需配置 API 密钥即可调用。
+fn provider_requires_key(settings: &AISettings) -> bool {
+    settings.provider != "ollama"
+}
 
 /// 将 AI 操作隔离到独立 tokio task 中，通过 JoinError 捕获 panic，
 /// 防止 hyper/reqwest 内部 panic 导致进程死亡。
@@ -31,6 +37,13 @@ async fn run_ai_action_safely(
             "summarize" => client::summarize(&content, &settings).await,
             "outline" => client::outline(&content, &settings).await,
             "filename" => client::filename(&content, &settings).await,
+            "polish" => client::polish(&content, &settings).await,
+            "condense" => client::condense(&content, &settings).await,
+            "simplify" => client::simplify(&content, &settings).await,
+            "expand" => client::expand(&content, &settings).await,
+            "vivid" => client::vivid(&content, &settings).await,
+            "title" => client::title(&content, &settings).await,
+            "transform" => client::transform(&content, context.as_deref(), &settings).await,
             "chat" => {
                 client::chat(
                     &content,
@@ -86,7 +99,7 @@ pub async fn ai_request(
         return Err("AI功能未启用".to_string());
     }
 
-    if settings.api_key.is_empty() {
+    if settings.api_key.is_empty() && provider_requires_key(&settings) {
         return Err("请先配置API密钥".to_string());
     }
 
@@ -122,7 +135,7 @@ pub async fn ai_chat_streaming(
         return Err("AI功能未启用".to_string());
     }
 
-    if settings.api_key.is_empty() {
+    if settings.api_key.is_empty() && provider_requires_key(&settings) {
         return Err("请先配置API密钥".to_string());
     }
 
@@ -169,7 +182,7 @@ pub async fn ai_streaming(
         return Err("AI功能未启用".to_string());
     }
 
-    if settings.api_key.is_empty() {
+    if settings.api_key.is_empty() && provider_requires_key(&settings) {
         return Err("请先配置API密钥".to_string());
     }
 
@@ -177,8 +190,13 @@ pub async fn ai_streaming(
 }
 
 #[tauri::command]
-pub async fn fetch_ai_models(api_key: String, api_endpoint: String) -> Result<Vec<String>, String> {
-    if api_key.is_empty() {
+pub async fn fetch_ai_models(
+    api_key: String,
+    api_endpoint: String,
+    provider: Option<String>,
+) -> Result<Vec<String>, String> {
+    // Ollama 等本地提供商无需密钥即可拉取模型列表。
+    if api_key.is_empty() && provider.as_deref() != Some("ollama") {
         return Err("API密钥不能为空".to_string());
     }
     if api_endpoint.is_empty() {
@@ -186,4 +204,43 @@ pub async fn fetch_ai_models(api_key: String, api_endpoint: String) -> Result<Ve
     }
 
     client::fetch_models(&api_key, &api_endpoint).await
+}
+
+#[derive(Debug, Clone, serde::Serialize)]
+pub struct EnvKeyResult {
+    pub api_key: String,
+    pub var_name: String,
+}
+
+/// 按服务商读取常见的环境变量 API 密钥，用于设置页一键导入。
+/// 变量在进程启动时读取一次；Windows 用户/系统变量对 GUI 启动同样生效。
+#[tauri::command]
+pub fn read_ai_env_key(provider: String) -> Option<EnvKeyResult> {
+    let candidates: &[&str] = match provider.as_str() {
+        "anthropic" => &["ANTHROPIC_API_KEY"],
+        "openai" => &["OPENAI_API_KEY"],
+        "gemini" => &["GOOGLE_API_KEY", "GEMINI_API_KEY"],
+        "deepseek" => &["DEEPSEEK_API_KEY"],
+        "kimi" => &["MOONSHOT_API_KEY", "KIMI_API_KEY"],
+        "zhipu" => &["ZHIPUAI_API_KEY", "ZHIPU_API_KEY"],
+        "minimax" => &["MINIMAX_API_KEY"],
+        "siliconflow" => &["SILICONFLOW_API_KEY"],
+        "mimo" => &["MIMO_API_KEY"],
+        "volcengine" => &["ARK_API_KEY", "VOLCENGINE_API_KEY"],
+        "longcat" => &["LONGCAT_API_KEY"],
+        _ => &[],
+    };
+
+    for var_name in candidates {
+        if let Ok(value) = std::env::var(var_name) {
+            let trimmed = value.trim().to_string();
+            if !trimmed.is_empty() {
+                return Some(EnvKeyResult {
+                    api_key: trimmed,
+                    var_name: (*var_name).to_string(),
+                });
+            }
+        }
+    }
+    None
 }

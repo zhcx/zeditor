@@ -1068,6 +1068,66 @@ pub async fn outline(content: &str, settings: &AISettings) -> Result<AIResponse,
     })
 }
 
+// ---------------------------------------------------------------------------
+// AI 精灵（Genie）动作：统一的「处理文本 → 返回结果」入口，返回 data.text。
+// ---------------------------------------------------------------------------
+
+/// 单条 Genie 动作的通用实现：构造提示词 → 调用 API → 包成 { text } 响应。
+async fn run_text_action(
+    action: PromptAction,
+    content: &str,
+    context: Option<&str>,
+    settings: &AISettings,
+    temperature: Option<f32>,
+) -> Result<AIResponse, String> {
+    let prompt = get_prompt(action, content, context, settings);
+    // 输出长度与输入同量级，给足余量避免截断；扩展类动作按 2 倍估计。
+    let scale = if matches!(action, PromptAction::Expand) { 2 } else { 1 };
+    let max_tokens = Some(
+        (((content.chars().count() * scale) as u32) / 2).clamp(400, 4000),
+    );
+    let result = call_api(prompt, settings, max_tokens, temperature).await?;
+
+    Ok(AIResponse {
+        success: true,
+        data: serde_json::json!({ "text": result }),
+        message: None,
+    })
+}
+
+pub async fn polish(content: &str, settings: &AISettings) -> Result<AIResponse, String> {
+    run_text_action(PromptAction::Polish, content, None, settings, Some(0.5)).await
+}
+
+pub async fn condense(content: &str, settings: &AISettings) -> Result<AIResponse, String> {
+    run_text_action(PromptAction::Condense, content, None, settings, Some(0.2)).await
+}
+
+pub async fn simplify(content: &str, settings: &AISettings) -> Result<AIResponse, String> {
+    run_text_action(PromptAction::Simplify, content, None, settings, Some(0.3)).await
+}
+
+pub async fn expand(content: &str, settings: &AISettings) -> Result<AIResponse, String> {
+    run_text_action(PromptAction::Expand, content, None, settings, Some(0.7)).await
+}
+
+pub async fn vivid(content: &str, settings: &AISettings) -> Result<AIResponse, String> {
+    run_text_action(PromptAction::Vivid, content, None, settings, Some(0.8)).await
+}
+
+pub async fn title(content: &str, settings: &AISettings) -> Result<AIResponse, String> {
+    run_text_action(PromptAction::Title, content, None, settings, Some(0.7)).await
+}
+
+/// 自定义精灵与自由格式指令：instruction 为用户指令，content 为待处理文本。
+pub async fn transform(
+    content: &str,
+    instruction: Option<&str>,
+    settings: &AISettings,
+) -> Result<AIResponse, String> {
+    run_text_action(PromptAction::Transform, content, instruction, settings, Some(0.5)).await
+}
+
 /// 为「另存为/保存」对话框生成文件名建议。只取开头片段即可概括主题，
 /// 避免把大文档整体送进模型。
 pub async fn filename(content: &str, settings: &AISettings) -> Result<AIResponse, String> {

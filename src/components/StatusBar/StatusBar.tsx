@@ -215,6 +215,7 @@ export function StatusBar() {
                 <button type="button" className="status-ai-power" onClick={() => void setAIEnabled(false)}>关闭</button>
               </div>
               <div className="status-ai-actions">
+                <button type="button" role="menuitem" onClick={() => { setAiMenuOpen(false); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }}><span>⌘</span><strong>AI 指令面板</strong><small>Ctrl+J · 搜索指令或输入自定义要求</small></button>
                 <button type="button" role="menuitem" disabled={!hasSelection} title={!hasSelection ? '请先选择文字' : undefined} onClick={() => void handleRewrite()}><span>改</span><strong>重写选中</strong><small>{hasSelection ? '润色当前选区' : '请先选择文字'}</small></button>
                 <button type="button" role="menuitem" disabled={!hasSelection} title={!hasSelection ? '请先选择文字' : undefined} onClick={() => void handleTranslate()}><span>译</span><strong>翻译选中</strong><small>{hasSelection ? '翻译当前选区' : '请先选择文字'}</small></button>
                 <button type="button" role="menuitem" onClick={() => void handleSummarize()}><span>摘</span><strong>生成摘要</strong><small>提炼当前文档</small></button>

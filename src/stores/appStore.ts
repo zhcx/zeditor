@@ -160,6 +160,8 @@ export interface WebSearchSettings {
 export type AIProviderId =
   | 'openai'
   | 'anthropic'
+  | 'gemini'
+  | 'ollama'
   | 'deepseek'
   | 'siliconflow'
   | 'mimo'
@@ -176,6 +178,8 @@ export interface AIProviderDefinition {
   endpoint: string;
   model: string;
   supportsThinking?: boolean;
+  /** 本地/免密钥提供商（如 Ollama）：调用与设置时跳过 API 密钥校验。 */
+  keyless?: boolean;
 }
 
 export interface AIProviderProfile {
@@ -188,6 +192,7 @@ export interface AIProviderProfile {
 export const AI_PROVIDER_DEFINITIONS: AIProviderDefinition[] = [
   { id: 'openai', label: 'OpenAI', endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
   { id: 'anthropic', label: 'Anthropic (Claude)', endpoint: 'https://api.anthropic.com/v1', model: 'claude-sonnet-4-20250514' },
+  { id: 'gemini', label: 'Google Gemini', endpoint: 'https://generativelanguage.googleapis.com/v1beta/openai', model: 'gemini-2.0-flash' },
   { id: 'deepseek', label: 'DeepSeek', endpoint: 'https://api.deepseek.com/v1', model: 'deepseek-chat', supportsThinking: true },
   { id: 'siliconflow', label: '硅基流动 (SiliconFlow)', endpoint: 'https://api.siliconflow.cn/v1', model: 'Qwen/Qwen3-35B-A3B', supportsThinking: true },
   { id: 'mimo', label: '小米 MiMo', endpoint: 'https://api.xiaomimimo.com/v1', model: 'mimo-v2.5-pro', supportsThinking: true },
@@ -196,8 +201,14 @@ export const AI_PROVIDER_DEFINITIONS: AIProviderDefinition[] = [
   { id: 'zhipu', label: '智谱 AI', endpoint: 'https://open.bigmodel.cn/api/paas/v4', model: 'glm-4.7', supportsThinking: true },
   { id: 'minimax', label: 'MiniMax', endpoint: 'https://api.minimaxi.com/v1', model: 'MiniMax-M2.7', supportsThinking: true },
   { id: 'kimi', label: 'Kimi / Moonshot', endpoint: 'https://api.moonshot.cn/v1', model: 'kimi-k2.5', supportsThinking: true },
+  { id: 'ollama', label: 'Ollama（本地模型）', endpoint: 'http://localhost:11434/v1', model: 'qwen3:8b', keyless: true },
   { id: 'custom', label: '自定义 OpenAI 兼容', endpoint: 'https://api.openai.com/v1', model: 'gpt-4o-mini' },
 ];
+
+/** 该提供商是否需要 API 密钥（本地模型免密钥）。 */
+export function providerNeedsKey(provider: AIProviderId | string): boolean {
+  return provider !== 'ollama';
+}
 
 export interface Tab {
   id: string;

@@ -1,5 +1,24 @@
 # 更新日志
 
+## 未发布
+
+## v0.5.4（2026-09-29）
+
+### AI 指令面板（AI Palette，参考 VMark AI Genies）
+
+- 新增 **AI 指令面板**（`Ctrl/Cmd+J`，或「功能 → AI 指令面板」、状态栏 AI 菜单）：类聚焦搜索的统一 AI 入口，收录 12 个内置指令，按「编辑 / 创意 / 结构 / 工具」分类——润色、精简、简化、改写、扩展、生动化、续写、摘要、大纲、标题、翻译、校对。
+- **范围系统**：`Tab` 在「选区 → 段落 → 全文」间切换；选区指令在无选区时自动降级为当前段落（对齐 VMark 回退行为）；摘要 / 大纲 / 标题作用于全文，结果在光标处插入。
+- **自由指令**：输入无匹配指令时，输入框变为自由格式提示词，两次 `Enter` 确认发送（防误触），`↑↓` 循环浏览最近的指令历史。
+- **内联审查**：所有指令结果以「AI 修改建议」差异弹窗呈现（接受 / 拒绝 / 一键撤销），替换类指令在文档已变化时拒绝应用并提示重新执行。
+- **自定义指令（自定义精灵）**：应用配置目录 `genies/` 下的 Markdown 文件即自定义指令——YAML frontmatter（`description` / `scope` / `category` / `action: replace|insert` / `model`）+ 提示词模板（`{{content}}` 为目标文本占位符），子目录自动成为分类；面板底部可打开指令文件夹（含示例文件）与刷新。`model` 字段支持按指令覆盖全局模型，把简单任务路由到更快 / 更便宜的模型。
+
+### AI 提供商：Ollama 本地模型与 Google Gemini
+
+- 新增 **Ollama（本地模型）** 提供商：默认端点 `http://localhost:11434/v1`，**无需 API 密钥**即可使用（校对、伴写、指令面板、聊天全链路），支持 `ollama pull` 的任意模型；端点可改为局域网远程 Ollama 主机，满足隐私 / 离线 / 自托管需求。
+- 新增 **Google Gemini** 提供商：走 OpenAI 兼容端点（`generativelanguage.googleapis.com/v1beta/openai`），默认模型 `gemini-2.0-flash`。
+- **环境变量密钥一键导入**（参考 VMark 自动填充机制）：设置页 API 密钥栏新增 `⤓` 按钮，从 `ANTHROPIC_API_KEY`、`OPENAI_API_KEY`、`GOOGLE_API_KEY` / `GEMINI_API_KEY`、`DEEPSEEK_API_KEY`、`MOONSHOT_API_KEY` 等系统环境变量读取并填入当前服务商密钥。
+- 「获取模型列表」对 Ollama 跳过密钥校验，可直接拉取本地已安装模型；服务商下拉框移除重复选项。
+
 ## v0.5.3（2026-09-29）
 
 ### 校对功能：AI / Markdown 双模式

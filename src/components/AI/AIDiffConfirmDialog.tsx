@@ -12,6 +12,7 @@ const KIND_LABELS: Record<AIChangeKind, string> = {
   structure: '结构调整',
   continuation: '伴写续写',
   proofread: '校对修复',
+  transform: 'AI 指令',
 };
 
 export function AIDiffConfirmDialog() {

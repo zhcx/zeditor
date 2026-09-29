@@ -2,9 +2,15 @@ import { sameDocument, type DocumentSnapshot } from '../utils/documentSafety';
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { useAppStore, type AIProviderId } from './appStore';
+import { useAppStore, providerNeedsKey, type AIProviderId } from './appStore';
 import { parseAIProviderProfiles } from '../utils/aiProviderProfiles';
 import { lintMarkdown } from '../utils/markdownLint';
+import { extractGenieText, type GenieDefinition, type GenieTarget } from '../utils/aiGenies';
+
+/** AI 是否已就绪：已启用，且（有密钥 或 使用 Ollama 等免密钥提供商）。 */
+export function isAIConfigured(ai: { enabled: boolean; api_key: string; provider: string }): boolean {
+  return ai.enabled && (Boolean(ai.api_key) || !providerNeedsKey(ai.provider));
+}
 
 export interface ProofreadResult {
   from: number;
@@ -161,7 +167,7 @@ export type ReasoningEffort = 'off' | 'fast' | 'balanced' | 'deep';
 
 export type AIStatus = 'idle' | 'loading' | 'proofreading' | 'companion' | 'success' | 'error';
 export type AIEditMode = 'ask' | 'suggest';
-export type AIChangeKind = 'polish' | 'translation' | 'fact' | 'structure' | 'continuation' | 'proofread';
+export type AIChangeKind = 'polish' | 'translation' | 'fact' | 'structure' | 'continuation' | 'proofread' | 'transform';
 
 export interface AIEditProposal {
   source: DocumentSnapshot;
@@ -301,6 +307,8 @@ interface AIState {
   continueWriting: (beforeText: string) => Promise<string>;
   chatForEditor: (userMessage: string, source?: string) => Promise<string>;
   suggestFilename: (content: string) => Promise<string | null>;
+  /** 统一的精灵执行入口：按目标文本调用后端动作，并以内联建议（replace/insert）呈现结果。 */
+  runGenie: (genie: GenieDefinition, target: GenieTarget) => Promise<void>;
 
   // UI控制
   setProofreadPanelVisible: (visible: boolean) => void;
@@ -419,7 +427,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     // 校对模式：开启「使用 AI 校对」且 AI 可用时走 AI；其余情况退化为内置
     // Markdown 静态校对（断链、未闭合围栏、跳级标题等正确性检查）。
     const aiRequested = settings.ai.proofread_with_ai !== false;
-    const aiReady = settings.ai.enabled && Boolean(settings.ai.api_key);
+    const aiReady = isAIConfigured(settings.ai);
     if (aiRequested && !aiReady) {
       set({
         status: 'error',
@@ -556,7 +564,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       return;
     }
 
-    if (!settings.ai.api_key) {
+    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
       set({ status: 'error', statusMessage: '请先配置API密钥', companionSuggestions: [] });
       return;
     }
@@ -627,7 +635,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       return text;
     }
 
-    if (!settings.ai.api_key) {
+    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
       set({ status: 'error', statusMessage: '请先配置API密钥' });
       return text;
     }
@@ -671,7 +679,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       return text;
     }
 
-    if (!settings.ai.api_key) {
+    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
       set({ status: 'error', statusMessage: '请先配置API密钥' });
       return text;
     }
@@ -717,7 +725,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       return '';
     }
 
-    if (!settings.ai.api_key) {
+    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
       set({ status: 'error', statusMessage: '请先配置API密钥' });
       return '';
     }
@@ -761,7 +769,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       return '';
     }
 
-    if (!settings.ai.api_key) {
+    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
       set({ status: 'error', statusMessage: '请先配置API密钥' });
       return '';
     }
@@ -802,7 +810,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   continueWriting: async (beforeText) => {
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled || !settings.ai.api_key) {
+    if (!settings.ai.enabled || (!settings.ai.api_key && providerNeedsKey(settings.ai.provider))) {
       return '';
     }
 
@@ -843,7 +851,7 @@ ${beforeText.slice(-2000)}`,
   chatForEditor: async (userMessage, source) => {
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled || !settings.ai.api_key) {
+    if (!settings.ai.enabled || (!settings.ai.api_key && providerNeedsKey(settings.ai.provider))) {
       return '';
     }
 
@@ -877,7 +885,7 @@ ${beforeText.slice(-2000)}`,
   suggestFilename: async (content) => {
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled || !settings.ai.api_key || !content.trim()) {
+    if (!settings.ai.enabled || (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) || !content.trim()) {
       return null;
     }
 
@@ -903,6 +911,107 @@ ${beforeText.slice(-2000)}`,
     } catch {
       // 文件名建议是锦上添花的功能，任何失败都静默回退。
       return null;
+    }
+  },
+
+  // 统一的精灵执行入口（参考 VMark AI Genies 工作流：选中文本 → 调用精灵 →
+  // 内联审查建议）。结果通过 proposeEdit 呈现，用户可接受 / 拒绝 / 撤销。
+  runGenie: async (genie, target) => {
+    const appState = useAppStore.getState();
+    const ai = appState.settings.ai;
+
+    if (!isAIConfigured(ai)) {
+      set({
+        status: 'error',
+        statusMessage: ai.enabled
+          ? '请先在「设置 → AI 助手」中配置 API 密钥'
+          : '请先在「设置 → AI 助手」中启用 AI',
+      });
+      return;
+    }
+
+    const text = target.text.trim();
+    if (!text) {
+      set({ status: 'error', statusMessage: '目标范围为空，请先选择或定位到要处理的文本' });
+      return;
+    }
+
+    set({ status: 'loading', statusMessage: `「${genie.name}」处理中...` });
+
+    // 精灵级模型覆盖：简单任务路由到更快/更便宜的模型（VMark 单精灵模型覆盖）。
+    const requestSettings = genie.model?.trim() ? { ...ai, model: genie.model.trim() } : ai;
+
+    try {
+      let result = '';
+
+      if (genie.backendAction === 'continue') {
+        // 续写：把目标文本作为前文上下文，从插入点继续。
+        result = await get().continueWriting(text);
+      } else if (genie.backendAction === 'proofread') {
+        // 校对走专用链路（含静态回退），结果直接进入校对面板。
+        await get().checkProofread(target.text, target.from);
+        return;
+      } else {
+        const isTranslate = genie.backendAction === 'translate';
+        const requestData: Record<string, unknown> = {
+          action: genie.backendAction,
+          content: target.text,
+          settings: requestSettings,
+        };
+        if (genie.backendAction === 'transform') {
+          requestData.context = genie.instruction || undefined;
+        } else if (isTranslate) {
+          requestData.context = '英文';
+        }
+
+        const response = await invokeWithTimeout<{
+          success: boolean;
+          data: Record<string, unknown>;
+          message?: string;
+        }>('ai_request', requestData, 120000);
+
+        if (!response.success) {
+          set({ status: 'error', statusMessage: response.message || '「' + genie.name + '」执行失败' });
+          return;
+        }
+        result = extractGenieText(response.data, genie.backendAction);
+      }
+
+      if (!result.trim()) {
+        set({ status: 'error', statusMessage: 'AI 未返回可用结果，请重试或调整指令' });
+        return;
+      }
+
+      const insertAt = Math.min(Math.max(target.insertAt, 0), appState.content.length);
+      if (genie.action === 'insert') {
+        get().proposeEdit({
+          kind: genie.kind,
+          reason: `AI 精灵「${genie.name}」：${genie.description || '生成内容'}。生成内容请人工复核。`,
+          before: '',
+          after: result.endsWith('\n') ? result : `${result}\n`,
+          from: insertAt,
+          to: insertAt,
+        });
+      } else {
+        // 替换：以请求返回后的最新文档校验目标文本，文档已变时拒绝应用（VMark 安全建议审查）。
+        const latestContent = useAppStore.getState().content;
+        const sameTab = useAppStore.getState().activeTabId === appState.activeTabId;
+        if (!sameTab || latestContent.slice(target.from, target.to) !== target.text) {
+          set({ status: 'error', statusMessage: '文档已发生变化，无法安全应用精灵结果。请重新执行。' });
+          return;
+        }
+        get().proposeEdit({
+          kind: genie.kind,
+          reason: `AI 精灵「${genie.name}」：${genie.description || '改写内容'}。结果不应视为事实修改。`,
+          before: target.text,
+          after: result,
+          from: target.from,
+          to: target.to,
+        });
+      }
+    } catch (error) {
+      console.error(`精灵「${genie.name}」执行错误:`, error);
+      set({ status: 'error', statusMessage: formatError(error) });
     }
   },
 
@@ -981,7 +1090,7 @@ ${beforeText.slice(-2000)}`,
 
       try {
         if (!browserSettings.enabled) throw new Error('请先在设置中启用 AI 助手');
-        if (!browserSettings.api_key.trim()) throw new Error('请先配置 API 密钥');
+        if (!browserSettings.api_key.trim() && providerNeedsKey(browserSettings.provider)) throw new Error('请先配置 API 密钥');
         const requestContent = [messageContent, selection?.workspaceContext?.content ? `[本地工作区上下文：${selection.workspaceContext.retrievalOnly ? '仅检索片段' : '所选内容'}]\n${selection.workspaceContext.content}` : '', selection?.searchContext ? `[网络搜索上下文]\n${selection.searchContext}` : ''].filter(Boolean).join('\n\n---\n\n');
         const response = await fetch('/api/ai-chat', {
           method: 'POST',
@@ -1047,7 +1156,7 @@ ${beforeText.slice(-2000)}`,
       return;
     }
 
-    if (!settings.ai.api_key) {
+    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
       set({ status: 'error', statusMessage: '请先配置API密钥' });
       return;
     }

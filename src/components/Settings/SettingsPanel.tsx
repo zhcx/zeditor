@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { AI_PROVIDER_DEFINITIONS, useAppStore, type AIProviderId, type ConverterModuleStatus, type SettingsTab } from '../../stores/appStore';
+import { AI_PROVIDER_DEFINITIONS, providerNeedsKey, useAppStore, type AIProviderId, type ConverterModuleStatus, type SettingsTab } from '../../stores/appStore';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { FontFamilyPicker } from './FontFamilyPicker';
@@ -65,9 +65,9 @@ function SettingToggle({ label, description, checked, onChange }: SettingToggleP
   );
 }
 
-const fetchModelsFromApi = async (apiKey: string, apiEndpoint: string): Promise<string[]> => {
+const fetchModelsFromApi = async (apiKey: string, apiEndpoint: string, provider?: string): Promise<string[]> => {
   if (isTauriRuntime()) {
-    return invoke<string[]>('fetch_ai_models', { apiKey, apiEndpoint });
+    return invoke<string[]>('fetch_ai_models', { apiKey, apiEndpoint, provider });
   }
 
   const response = await fetch(`${apiEndpoint.replace(/\/+$/, '')}/models`, {
@@ -128,6 +128,7 @@ export function SettingsPanel() {
   const [localSettings, setLocalSettings] = useState(settings);
   const [activeTab, setActiveTab] = useState<SettingsTab>(settingsTab);
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
+  const [envKeyInfo, setEnvKeyInfo] = useState('');
   const [models, setModels] = useState<string[]>([]);
   const [fetchingModels, setFetchingModels] = useState(false);
   const [fetchError, setFetchError] = useState('');
@@ -956,8 +957,6 @@ export function SettingsPanel() {
                       {AI_PROVIDER_DEFINITIONS.map((provider) => (
                         <option key={provider.id} value={provider.id}>{provider.label}</option>
                       ))}
-                      <option value="siliconflow">硅基流动 (SiliconFlow)</option>
-                      <option value="custom">自定义</option>
                     </select>
                   </div>
 
@@ -979,8 +978,37 @@ export function SettingsPanel() {
                             },
                           });
                         }}
-                        placeholder="sk-..."
+                        placeholder={providerNeedsKey(localSettings.ai.provider) ? 'sk-...' : '本地 Ollama 无需 API 密钥'}
                       />
+                      {providerNeedsKey(localSettings.ai.provider) && (
+                        <button
+                          className="toggle-visibility-btn"
+                          onClick={async () => {
+                            try {
+                              const result = await invoke<{ api_key: string; var_name: string } | null>('read_ai_env_key', { provider: localSettings.ai.provider });
+                              if (result?.api_key) {
+                                const keys = { ...parseProviderKeys(), [localSettings.ai.provider]: result.api_key };
+                                setLocalSettings({
+                                  ...localSettings,
+                                  ai: {
+                                    ...localSettings.ai,
+                                    api_key: result.api_key,
+                                    provider_api_keys: JSON.stringify(keys),
+                                  },
+                                });
+                                setEnvKeyInfo(`已从环境变量 ${result.var_name} 导入密钥`);
+                              } else {
+                                setEnvKeyInfo('未检测到与当前服务商匹配的环境变量密钥');
+                              }
+                            } catch (error) {
+                              setEnvKeyInfo(`读取环境变量失败: ${String(error)}`);
+                            }
+                          }}
+                          title="从系统环境变量导入 API 密钥"
+                        >
+                          ⤓
+                        </button>
+                      )}
                       <button
                         className="toggle-visibility-btn"
                         onClick={() => setApiKeyVisible(!apiKeyVisible)}
@@ -989,6 +1017,7 @@ export function SettingsPanel() {
                         {apiKeyVisible ? '🙈' : '👁'}
                       </button>
                     </div>
+                    {envKeyInfo && <div className="fetch-error">{envKeyInfo}</div>}
                   </div>
 
                   <div className="setting-item">
@@ -1030,7 +1059,7 @@ export function SettingsPanel() {
                       <button
                         className="fetch-models-btn"
                         onClick={async () => {
-                          if (!localSettings.ai.api_key) {
+                          if (!localSettings.ai.api_key && providerNeedsKey(localSettings.ai.provider)) {
                             setFetchError('请先填写 API 密钥');
                             return;
                           }
@@ -1040,6 +1069,7 @@ export function SettingsPanel() {
                             const result = await fetchModelsFromApi(
                               localSettings.ai.api_key,
                               localSettings.ai.api_endpoint,
+                              localSettings.ai.provider,
                             );
                             setModels(result);
                             if (result.length > 0) {
