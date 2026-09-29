@@ -396,25 +396,6 @@ SignPath Foundation 申请目前处于准备/审核阶段；在正式启用前�
 
 ---
 
-## 🚀 版本更新日志
-
- - **v0.5.3**（2026-09-29）：新增 **AI / Markdown 双模式校对**——「设置 → AI 助手」新增「使用 AI 校对」开关，开启时走 AI 校对，关闭或 AI 未配置时改用内置 Markdown 静态校对（未闭合围栏、跳级标题、断开锚点、表格列数不匹配等正确性检查，结果与 AI 校对同构）；新增 **Markmap 思维导图**，`markmap` 围栏渲染为可交互 SVG 树，支持平移、缩放、折叠与 2 倍分辨率 PNG 导出。详见 [v0.5.3 发布说明](docs/releases/v0.5.3.md)。
-   - 平台安装包（由 `v0.5.3` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.3_x64-setup.exe` / `Zeditor_0.5.3_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.5.2**（2026-09-24）：新增**内联弹窗**——链接 / 图片 / 公式 / 脚注 / Wiki 链接点击即在原位弹出编辑窗，`Ctrl+K` 编辑链接、`Ctrl+点击` 直接打开、公式带 KaTeX 实时预览；新增 **GitHub Actions 工作流查看器**，将 `.github/workflows` 的 YAML 渲染为可交互 job 依赖图并支持诊断与结构化编辑。详见 [v0.5.2 发布说明](docs/releases/v0.5.2.md)。
-   - 平台安装包（由 `v0.5.2` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.2_x64-setup.exe` / `Zeditor_0.5.2_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.5.0**（2026-09-23）：右键菜单按场景重组、浮动工具栏精简为文字标签，修复表格新增行列占位、选择器与滚动条、预览指示条位置等问题。详见 [v0.5.0 发布说明](docs/releases/v0.5.0.md)。
-   - 平台安装包（由 `v0.5.0` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.5.0_x64-setup.exe` / `Zeditor_0.5.0_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.4.9**（2026-09-22）：完善表格编辑与图片支持——表格增删行列、对齐、键盘导航与列宽拖动，图片统一复制到 `.assets` 并支持尺寸与双击编辑。详见 [v0.4.9 发布说明](docs/releases/v0.4.9.md)。
-   - 平台安装包（由 `v0.4.9` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.9_x64-setup.exe` / `Zeditor_0.4.9_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.4.8**（2026-09-22）：新增本地视频 / 音频媒体语法、插入媒体与拖拽导入，素材复制到 `.assets` 目录，预览渲染原生播放器。详见 [v0.4.8 发布说明](docs/releases/v0.4.8.md)。
-   - 平台安装包（由 `v0.4.8` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.8_x64-setup.exe` / `Zeditor_0.4.8_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
- - **v0.4.7**（2026-09-21）：新增文本清理、自动配对与 Tab 跳出，支持 Markdown 格式标记和代码上下文保护。详见 [v0.4.7 发布说明](docs/releases/v0.4.7.md)。
-   - 平台安装包（由 `v0.4.7` 标签触发 GitHub Actions 构建）：Windows `Zeditor_0.4.7_x64-setup.exe` / `Zeditor_0.4.7_x64_en-US.msi`、macOS（Apple Silicon / Intel）`.dmg`、Linux `.deb` / `.rpm` / `.AppImage`。
-
-完整发布说明见 [`docs/releases/`](docs/releases/)。
-
----
-
 <div align="center">
 
 **用 ❤️ 和 Claude Code、CodeX 构建**
