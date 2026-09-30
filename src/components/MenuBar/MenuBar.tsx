@@ -179,7 +179,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.5.4**
+**Zeditor v0.5.5**
 
 一款现代化的 Markdown 编辑器
 
@@ -198,6 +198,7 @@ graph TD
 - GitHub Release 自动检查更新
 
 **本版本更新**
+- **链接检查**：视图菜单「检查 Markdown」一键扫描文档中失效的本地链接与图片，结果面板列出并支持 F2 / Shift+F2 在问题间跳转
 - **内联弹窗**：点击链接、图片、公式、脚注或 Wiki 链接即在原位弹出编辑窗；Ctrl+K 编辑链接、Ctrl+点击直接打开，公式带 KaTeX 实时预览
 - **工作流查看器**：打开 .github/workflows 下的 YAML 渲染为可交互的 job 依赖图，支持诊断与结构化编辑
 - **智能 Tab 导航**：Tab 可在括号、引号、行内格式与链接字段之间穿梭，支持中日韩括号与多光标
@@ -768,6 +769,7 @@ export function MenuBar() {
         { label: '插入表格', action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
         { label: '插入思维导图', action: () => requestInsert('markmap') },
         { label: 'AI 指令面板', action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }, shortcut: 'Ctrl+J' },
+        { label: '检查链接', action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-check-links')); }, shortcut: 'Ctrl+Alt+V' },
         {
           label: '表格操作',
           children: [

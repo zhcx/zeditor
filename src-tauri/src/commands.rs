@@ -211,6 +211,10 @@ fn default_smart_pairs() -> bool {
     true
 }
 
+fn default_check_local_links() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EditorSettings {
     pub auto_save_interval: u32,
@@ -224,6 +228,9 @@ pub struct EditorSettings {
     pub input_engine: EditorInputEngine,
     #[serde(default)]
     pub pin_toolbar: bool,
+    /// 链接检查开关：Markdown 检查时验证本地链接与图片是否存在（默认开启）。
+    #[serde(default = "default_check_local_links")]
+    pub check_local_links: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -324,6 +331,7 @@ impl Default for Settings {
                 favorite_emojis: default_favorite_emojis(),
                 input_engine: EditorInputEngine::default(),
                 pin_toolbar: false,
+                check_local_links: default_check_local_links(),
             },
             image_hosting: ImageHostingSettings {
                 active_service: "local".into(),
@@ -1300,6 +1308,97 @@ pub async fn resolve_media_sources(
     }
 
     Ok(resolved)
+}
+
+fn is_unc_path(value: &str) -> bool {
+    value.starts_with("\\\\") || value.starts_with("//")
+}
+
+/// 驱动器相对路径（`C:file.md`）：相对应用工作目录而非文档位置，语义不明。
+fn is_drive_relative_path(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() >= 2
+        && bytes[0].is_ascii_alphabetic()
+        && bytes[1] == b':'
+        && !matches!(bytes.get(2), Some(b'\\') | Some(b'/'))
+}
+
+/// Windows 根相对路径（`/docs/x.md`）：位于文档所在盘符的根目录。
+fn is_windows_root_relative(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    !bytes.is_empty()
+        && matches!(bytes[0], b'/' | b'\\')
+        && !matches!(bytes.get(1), Some(b'/') | Some(b'\\'))
+}
+
+/// 文档所在盘符前缀（`D:`）；文档位于 UNC 路径上时返回 None。
+fn document_drive_prefix(document_path: &str) -> Option<String> {
+    match Path::new(document_path).components().next() {
+        Some(std::path::Component::Prefix(prefix)) => {
+            let text = prefix.as_os_str().to_string_lossy().to_string();
+            if text.starts_with("\\\\") {
+                None
+            } else {
+                Some(text)
+            }
+        }
+        _ => None,
+    }
+}
+
+/// 链接检查：批量验证文档中的本地链接 / 图片目标是否存在。
+///
+/// 返回与 targets 等长的状态列表：`"file"` | `"dir"` | `"missing"` | `"error"`。
+/// `"error"` 表示运行时无法判断（权限被拒、非法路径等），前端按「沉默优于错误」
+/// 跳过；相对路径基于文档所在目录解析，UNC 网络路径永不查找。
+#[tauri::command]
+pub async fn check_link_targets(
+    document_path: String,
+    targets: Vec<String>,
+) -> Result<Vec<String>, String> {
+    let document_dir = document_dir_of(&document_path);
+    let mut results = Vec::with_capacity(targets.len());
+
+    for target in targets {
+        let trimmed = target.trim();
+        // UNC 网络路径会联系远端主机并可能泄露登录凭据；驱动器相对路径
+        // （`C:file.md`）相对应用工作目录，两者都不做文件查找。
+        if trimmed.is_empty() || is_unc_path(trimmed) || is_drive_relative_path(trimmed) {
+            results.push("error".to_string());
+            continue;
+        }
+        let candidate = if Path::new(trimmed).is_absolute() {
+            PathBuf::from(trimmed)
+        } else if is_windows_root_relative(trimmed) {
+            // `/docs/x.md`：位于文档自身所在的驱动器（与 VMark 行为一致）。
+            match document_drive_prefix(&document_path) {
+                Some(prefix) => PathBuf::from(format!("{prefix}{trimmed}")),
+                None => {
+                    results.push("error".to_string());
+                    continue;
+                }
+            }
+        } else {
+            match &document_dir {
+                Some(dir) => dir.join(trimmed.replace('\\', "/")),
+                None => {
+                    results.push("error".to_string());
+                    continue;
+                }
+            }
+        };
+        match tokio::fs::metadata(&candidate).await {
+            Ok(meta) if meta.is_file() => results.push("file".to_string()),
+            Ok(_) => results.push("dir".to_string()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                results.push("missing".to_string())
+            }
+            // 探测异常（权限、非法路径等）按「无法判断」处理，不误报缺失。
+            Err(_) => results.push("error".to_string()),
+        }
+    }
+
+    Ok(results)
 }
 
 /// 把外部图片复制到文档同级的 `.assets` 目录，返回可直接引用的相对路径。
@@ -2293,6 +2392,55 @@ mod workspace_search_tests {
             .expect("read second result")
             .contains("needle"));
         std::fs::remove_dir_all(root).ok();
+    }
+}
+
+#[cfg(test)]
+mod link_check_tests {
+    use super::{
+        document_drive_prefix, is_drive_relative_path, is_unc_path, is_windows_root_relative,
+        Settings,
+    };
+
+    #[test]
+    fn unc_and_drive_relative_paths_are_rejected() {
+        assert!(is_unc_path(r"\\server\share\a.md"));
+        assert!(is_unc_path("//server/share/a.md"));
+        assert!(!is_unc_path("docs/a.md"));
+        assert!(is_drive_relative_path("C:file.md"));
+        assert!(!is_drive_relative_path("C:\\file.md"));
+        assert!(!is_drive_relative_path("C:/file.md"));
+        assert!(!is_drive_relative_path("src/a.md"));
+    }
+
+    #[test]
+    fn windows_root_relative_paths_map_to_document_drive() {
+        assert!(is_windows_root_relative("/docs/a.md"));
+        assert!(is_windows_root_relative("\\docs\\a.md"));
+        assert!(!is_windows_root_relative("//server/share"));
+        assert!(!is_windows_root_relative("./a.md"));
+        #[cfg(target_os = "windows")]
+        {
+            assert_eq!(
+                document_drive_prefix("D:\\notes\\a.md").as_deref(),
+                Some("D:")
+            );
+            assert_eq!(document_drive_prefix(r"\\server\share\a.md"), None);
+        }
+    }
+
+    #[test]
+    fn old_settings_default_to_link_check_enabled() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["editor"]
+            .as_object_mut()
+            .unwrap()
+            .remove("check_local_links");
+        let restored: Settings = serde_json::from_value(value).unwrap();
+        assert_eq!(
+            serde_json::to_value(restored).unwrap()["editor"]["check_local_links"],
+            true
+        );
     }
 }
 

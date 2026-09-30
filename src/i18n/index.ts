@@ -163,6 +163,12 @@ const entries: Record<string, Translation> = {
     en: 'When on, proofreading uses the AI model; when off, it uses the built-in Markdown lint (unclosed fences, reversed links, skipped heading levels, broken anchors, etc.)',
   },
   '问题:': { 'zh-CN': '问题:', 'zh-TW': '問題:', en: 'Issue:' },
+  '检查链接': { 'zh-CN': '检查链接', 'zh-TW': '檢查連結', en: 'Check links' },
+  '检查本地链接': { 'zh-CN': '检查本地链接', 'zh-TW': '檢查本地連結', en: 'Check local links' },
+  'Markdown 检查时验证本地链接与图片文件是否存在；外部 URL、仅片段链接与网络路径自动跳过，未保存文档不检查': { 'zh-CN': 'Markdown 检查时验证本地链接与图片文件是否存在；外部 URL、仅片段链接与网络路径自动跳过，未保存文档不检查', 'zh-TW': 'Markdown 檢查時驗證本地連結與圖片檔案是否存在；外部 URL、僅片段連結與網路路徑自動跳過，未儲存文件不檢查', en: 'Verify that local links and image files exist during Markdown checks; external URLs, fragment-only links, and network paths are skipped, and unsaved documents are not checked' },
+  '正在检查本地链接...': { 'zh-CN': '正在检查本地链接...', 'zh-TW': '正在檢查本地連結...', en: 'Checking local links...' },
+  '链接检查完成，未发现问题': { 'zh-CN': '链接检查完成，未发现问题', 'zh-TW': '連結檢查完成，未發現問題', en: 'Link check finished, no issues found' },
+  '链接检查需要文档落盘路径，请先保存文档。': { 'zh-CN': '链接检查需要文档落盘路径，请先保存文档。', 'zh-TW': '連結檢查需要文件已儲存的路徑，請先儲存文件。', en: 'Link check needs a saved file path; save the document first.' },
 };
 
 const englishEntries: Record<string, string> = {

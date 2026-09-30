@@ -741,6 +741,15 @@ export function SettingsPanel() {
                   editor: { ...localSettings.editor, inline_popups: checked },
                 })}
               />
+              <SettingToggle
+                label="检查本地链接"
+                description="Markdown 检查时验证本地链接与图片文件是否存在；外部 URL、仅片段链接与网络路径自动跳过，未保存文档不检查"
+                checked={localSettings.editor.check_local_links !== false}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  editor: { ...localSettings.editor, check_local_links: checked },
+                })}
+              />
               <div className="setting-item emoji-favorites-setting">
                 <label>
                   常用表情

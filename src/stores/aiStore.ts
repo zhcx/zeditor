@@ -5,6 +5,7 @@ import { listen } from '@tauri-apps/api/event';
 import { useAppStore, providerNeedsKey, type AIProviderId } from './appStore';
 import { parseAIProviderProfiles } from '../utils/aiProviderProfiles';
 import { lintMarkdown } from '../utils/markdownLint';
+import { findMissingLocalLinks } from '../services/linkCheck';
 import { extractGenieText, type GenieDefinition, type GenieTarget } from '../utils/aiGenies';
 
 /** AI 是否已就绪：已启用，且（有密钥 或 使用 Ollama 等免密钥提供商）。 */
@@ -257,6 +258,30 @@ function cacheCompanionSuggestions(key: string, suggestions: string[]) {
   }
 }
 
+/**
+ * 链接检查：验证内容中的本地链接 / 图片目标是否存在，转为与静态校对同构的
+ * report-only 结果（suggestion 与原文一致，面板据此隐藏「应用」按钮）。
+ * 诊断代码 M001 / M002 与 VMark 的 linkCheck 规则对齐。
+ */
+async function collectLinkCheckResults(content: string, baseOffset: number): Promise<ProofreadResult[]> {
+  const documentPath = useAppStore.getState().currentFile;
+  const findings = await findMissingLocalLinks(documentPath, content, baseOffset);
+  return findings.map((finding) => ({
+    from: finding.from,
+    to: finding.to,
+    original: finding.raw,
+    suggestion: finding.raw,
+    type: 'markdown',
+    explanation: finding.kind === 'image'
+      ? `[M001] 图片文件不存在：${finding.path}`
+      : finding.kind === 'media'
+        ? `[M001] 媒体文件不存在：${finding.path}`
+        : finding.kind === 'reference'
+          ? `[M002] 链接引用目标不存在：${finding.path}`
+          : `[M002] 链接文件不存在：${finding.path}`,
+  }));
+}
+
 interface AIState {
   status: AIStatus;
   statusMessage: string;
@@ -299,6 +324,8 @@ interface AIState {
   rejectPendingEdit: () => void;
   undoLastAiRound: () => void;
   checkProofread: (content: string, baseOffset?: number) => Promise<void>;
+  /** 仅运行链接检查（菜单「检查链接」/ Ctrl+Alt+V）：结果替换当前校对结果并进入同一面板。 */
+  runLinkCheck: () => Promise<void>;
   getCompanionSuggestion: (content: string, context?: string) => Promise<void>;
   rewriteSelection: (text: string) => Promise<string>;
   translateText: (text: string, targetLang?: string) => Promise<string>;
@@ -465,6 +492,12 @@ export const useAIStore = create<AIState>((set, get) => ({
         type: 'markdown',
         explanation: `[${issue.ruleId}] ${issue.message}`,
       }));
+      // 链接检查与 Markdown 检查同时运行（对齐 VMark）：本地链接 / 图片目标
+      // 缺失时报 M001 / M002；结果合并后按文档顺序排列，索引与装饰位置一致。
+      if (settings.editor.check_local_links !== false) {
+        results.push(...await collectLinkCheckResults(trimmedContent, resultOffset));
+        results.sort((left, right) => left.from - right.from);
+      }
       set({
         status: 'success',
         statusMessage: results.length > 0 ? `发现 ${results.length} 处问题` : '校对完成，未发现问题',
@@ -553,6 +586,34 @@ export const useAIStore = create<AIState>((set, get) => ({
     if (lastError) {
       set({ status: 'error', statusMessage: `校对失败（已重试${PROOFREAD_MAX_RETRIES}次）: ${formatError(lastError)}` });
     }
+  },
+
+  runLinkCheck: async () => {
+    // 显式命令（菜单 / Ctrl+Alt+V）：忽略「检查本地链接」设置开关，总是执行。
+    if (get().status === 'proofreading') {
+      console.warn('[link-check] 检查进行中，忽略重复请求');
+      return;
+    }
+    const { content, currentFile } = useAppStore.getState();
+    const trimmedContent = content.trim();
+    if (!trimmedContent) {
+      set({ status: 'idle', statusMessage: '' });
+      return;
+    }
+    if (!currentFile) {
+      set({ status: 'error', statusMessage: '链接检查需要文档落盘路径，请先保存文档。' });
+      return;
+    }
+    set({ status: 'proofreading', statusMessage: '正在检查本地链接...' });
+    const trimStartOffset = Math.max(0, content.indexOf(trimmedContent));
+    const results = await collectLinkCheckResults(trimmedContent, trimStartOffset);
+    set({
+      status: 'success',
+      statusMessage: results.length > 0 ? `发现 ${results.length} 处问题` : '链接检查完成，未发现问题',
+      proofreadResults: results,
+      errorCount: results.length,
+      proofreadPanelVisible: results.length > 0,
+    });
   },
 
   getCompanionSuggestion: async (content, context) => {

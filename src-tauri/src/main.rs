@@ -215,6 +215,7 @@ fn main() {
             commands::copy_fs_item,
             commands::import_media_asset,
             commands::resolve_media_sources,
+            commands::check_link_targets,
             commands::import_image_asset,
             commands::import_image_bytes,
             commands::get_recent_folders,

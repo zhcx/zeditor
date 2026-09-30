@@ -156,6 +156,45 @@ function App() {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
+
+  // 链接检查：菜单「检查链接」/ Ctrl+Alt+V 触发（对齐 VMark 的检查入口），
+  // F2 / Shift+F2 在当前检查结果之间循环跳转并用编辑器选中定位。
+  useEffect(() => {
+    const runCheck = () => { void useAIStore.getState().runLinkCheck(); };
+    const navigateResult = (direction: 1 | -1): boolean => {
+      const { proofreadResults } = useAIStore.getState();
+      const { editorView } = useAppStore.getState();
+      if (proofreadResults.length === 0 || !editorView) return false;
+      const sorted = [...proofreadResults].sort((left, right) => left.from - right.from);
+      const cursor = editorView.getSelection().from;
+      const next = direction === 1
+        ? sorted.find(result => result.from > cursor) ?? sorted[0]
+        : [...sorted].reverse().find(result => result.from < cursor) ?? sorted[sorted.length - 1];
+      if (!next) return false;
+      useAIStore.getState().setProofreadPanelVisible(true);
+      editorView.setSelection(next.from, next.to);
+      editorView.revealOffset(next.from);
+      editorView.focus();
+      return true;
+    };
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
+        event.preventDefault();
+        runCheck();
+        return;
+      }
+      // IME 组合期间不拦截 F2，避免与输入法候选键冲突。
+      if (event.key === 'F2' && !event.isComposing) {
+        if (navigateResult(event.shiftKey ? -1 : 1)) event.preventDefault();
+      }
+    };
+    window.addEventListener('zeditor-check-links', runCheck);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('zeditor-check-links', runCheck);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
   const closePromptResolver = useRef<((action: UnsavedChangesAction) => void) | null>(null);
   const dragValues = useRef({ splitRatio, sidebarWidth, proofreadPanelWidth, chatbotPanelWidth });
   const immersivePolicy = getImmersiveWorkspacePolicy(mode, chatbotVisible);

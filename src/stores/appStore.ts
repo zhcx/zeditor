@@ -45,6 +45,8 @@ export interface Settings {
     spell_check: boolean;
     auto_complete: boolean;
     smart_pairs?: boolean;
+    /** 链接检查：Markdown 检查时验证本地链接与图片文件是否存在（默认开启）。 */
+    check_local_links?: boolean;
     /** 内联弹窗：点击链接 / 图片 / 公式 / 脚注 / Wiki 链接时就地弹出编辑窗。 */
     inline_popups?: boolean;
     /** Keep the command bar visible above the editor instead of selection-only. */
@@ -336,6 +338,7 @@ const defaultSettings: Settings = {
     smart_pairs: true,
     pin_toolbar: false,
     inline_popups: true,
+    check_local_links: true,
     favorite_emojis: ['😀', '👍', '❤️', '🎉', '✅', '⚠️', '💡', '🚀'],
     input_engine: 'editContext',
   },
