@@ -62,6 +62,7 @@
 - **沉浸阅读 / 沉浸写作** - 阅读与写作分别提供专注空间，可保留大纲和 AI Chatbox
 - **演示模式** - 按 `---` 分隔符将文档变为全屏幻灯片，支持图表、公式与代码高亮，Esc 退出
 - **富文本粘贴** - 从网页、Word 等复制的富文本自动转换为 Markdown 插入
+- **斜杠命令** - 行首输入 `/` 唤出可筛选的命令菜单，内置 40 条命令（28 条插入、6 条 AI 动作、6 条图表与其他），Enter / Tab 插入、Esc 关闭
 - **表格编辑** - 菜单、`Ctrl+Shift+T` 或斜杠 `/table` 插入表格（默认 3 × 3），光标进入表格即出现浮动工具栏：增删行列、左中右对齐、整理格式；Tab / Shift+Tab 切换单元格，方向键移动，Enter 新增一行
 - **智能 Tab 导航** - Tab 在括号、引号、行内格式与链接之间穿梭：`(文字|)` 跳过闭合括号、`**加粗|**` 跳出格式标记、`[文字|](链接)` 进入 / 跳出链接；支持中日韩括号与弯引号，嵌套每次只跳出一层，多光标各自独立，代码块与行内代码中自动停用
 - **图片支持** - 文件对话框、拖拽、粘贴三条路径统一复制到文档同级的 `.assets` 目录；双击图片编辑路径、替代文本与尺寸，右键快速调整大小
@@ -69,6 +70,7 @@
 - **Monaco 编辑器** - 语法高亮、自动换行、当前行定位和专业编辑体验
 - **可调节布局** - 自由拖动调整侧边栏和编辑区域宽度
 - **同步滚动与大纲** - 编辑器和预览联动，按 Markdown 标题自动生成大纲
+- **自动保存** - 默认每 30 秒自动保存已有路径且已修改的标签，间隔可在「设置 → 编辑器」调整
 
 ### 🎨 渲染能力
 - **数学公式** - KaTeX 渲染，支持行内与块级公式
@@ -76,15 +78,15 @@
 - **Markmap 思维导图** - 用标准 Markdown 标题层级（`#` / `##` / `###`）描述导图，渲染为可交互 SVG 树：拖动平移、`Ctrl` + 滚轮缩放、点击分支圆圈折叠，支持适应视图与 2 倍分辨率 PNG 导出；`/markmap` 命令、工具栏「图表」或「功能 → 插入思维导图」可快速插入
 - **GitHub Actions 工作流查看器** - 把 `.github/workflows` 下的 YAML 渲染成可交互的 job 依赖图（DAG），支持点击查看 job / step 详情、`GHA-*` 诊断（重复 job、循环依赖、未知引用、`pull_request_target` 安全提示等）、Mermaid / SVG 导出；Markdown 代码围栏中的工作流同样内联渲染（只读）；结构化编辑 job / step / `with` 字段后写回编辑器，保留注释与缩进
 - **代码高亮** - highlight.js 支持
-- **任务列表** - 待办事项管理
+- **任务列表** - `- [ ]` / `- [x]` 待办清单，在预览中直接点击勾选框即可同步改写 Markdown 源码
 - **GitHub 风格 Markdown** - 更贴近 GitHub 的排版与换行行为
 - **图片与视频** - 本地图片复制到 `.assets` 后离线可看，支持 `{width=420}` 尺寸语法；视频支持 B 站、YouTube 与 Vimeo
 - **表格渲染** - 按对齐标记渲染，预览中可拖动表头分隔线调整列宽（双击恢复自动宽度）
 - **写作辅助** - Markdown 检查与格式化、完整语法指南、原生 Emoji 和常用表情
 
 ### 🎯 界面设计
-- **多主题支持** - 内置「深色主题」（深炭灰 + 天蓝）与「浅色主题」（中性灰 + 钴蓝）两套简约现代配色，可从“功能 → 主题”菜单切换，当前主题在菜单中带 ✓ 标识
-- **统一的视觉语言** - 双主题共用一套圆角、阴影、焦点与滚动条规范，编辑器配色与工作区完全一致
+- **多主题支持** - 内置 12 套主题（6 浅色 + 6 深色，含 VS Code / Gruvbox / Nord / Dracula / Solarized 等知名配色），可从“功能 → 主题”菜单切换，当前主题在菜单中带 ✓ 标识
+- **统一的视觉语言** - 12 套主题共用一套圆角、阴影、焦点与滚动条规范，编辑器配色与工作区完全一致
 - **编辑增强** - 编辑器行号、可拖动网格选择并插入 Markdown 表格
 - **图片导出** - 支持 1:1、4:3、16:9、9:16、A4 比例预览并导出 PNG
 - **现代化设计** - Notion 风格的简洁界面
@@ -120,7 +122,7 @@ Zeditor 支持将 **DOC、DOCX、PPT、PPTX、XLS、XLSX、ODF、RTF、EPUB、CS
 - **思考模式** — 关闭/快速/均衡/深度，灵活控制 AI 推理强度
 - **关联文档** — 一键将当前编辑文档作为对话上下文
 - **附件上传** — 图片和文本文件上传，与对话一起发送
-- **本地 Agent（Beta）** — 在同一面板调用 Claude Code、Codex 或 OpenCode，支持流式任务、命令审批和会话恢复
+- **本地 Agent（Beta）** — 在同一面板调用 Claude Code、Codex、OpenCode 或 Pi，支持流式任务、命令审批和会话恢复
 - **隔离变更审阅** — Git 仓库任务在临时 worktree 中工作，完成后可按文件应用，不覆盖当前未提交修改
 - **MCP 集成** — 让 Claude Desktop / Claude Code / Codex CLI / Gemini CLI 等 AI 助手通过 MCP 协议直接读写你正在编辑的文档，详见 [MCP 集成使用指南](docs/mcp-support.md)
 
@@ -147,8 +149,9 @@ Zeditor 支持将 **DOC、DOCX、PPT、PPTX、XLS、XLSX、ODF、RTF、EPUB、CS
 | Claude Code | Stream JSON + PreToolUse 审批 Hook |
 | Codex | App Server JSON-RPC v2 |
 | OpenCode | 本地 Server API + SSE |
+| Pi | RPC 模式（stdio JSONL） |
 
-Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor 复用各 CLI 的登录与默认模型，不保存其账号凭据。Git 根目录中的任务使用隔离 worktree；其他目录在进入 Agent 后授权为当前会话的读写范围，修改会直接写入。命令、网络和 MCP 默认逐次审批，也可仅对当前会话启用完全允许。详细说明见 [Agent 使用与安全说明](docs/agent-support.md)。
+Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor 复用各 CLI 的登录与默认模型，不保存其账号凭据。Git 根目录中的任务使用隔离 worktree；其他目录在进入 Agent 后授权为当前会话的读写范围，修改会直接写入。命令、网络和 MCP 默认逐次审批，也可仅对当前会话启用完全允许（Pi 无逐工具审批，进入任务后自行执行读写，隔离审阅仍生效）。详细说明见 [Agent 使用与安全说明](docs/agent-support.md)。
 
 ### 🔄 自动更新
 
@@ -172,32 +175,32 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.5.5 更新
+## v0.5.6 更新
 
 ### 更新日志
 
-- **MCP 集成**：内置 MCP 服务器，Claude Desktop、Claude Code、Codex CLI、Gemini CLI 可直接读写你正在编辑的文档——读取内容、改写选区、新建 / 保存 / 切换标签页。**设置 → 集成** 可一键配置各助手并查看安装状态；桥接仅监听本机并带随机令牌认证，文件操作限定在已打开的工作区范围内，默认以「AI 修改建议」内联审阅 AI 的修改。详见 [MCP 集成使用指南](docs/mcp-support.md)。
-- **设置界面统一与美化**：设置面板中 14 个原生下拉全部替换为统一的自绘下拉（主题化浮层、品牌色徽标与说明、搜索框、键盘导航）；按钮统一为主 / 次 / 幽灵图标三级体系；输入框与下拉触发器统一为 42px 高、8px 圆角与一致的聚焦光环，全部随明暗主题自动适配。
-- **资源管理器工作区分组标题**：文件夹区域新增「工作区」分类标题（折叠箭头 + 数量），可整体折叠 / 展开；根文件夹标题缩进一级，层级更清晰。
-- **发布质量**：版本源统一为 0.5.5；新增 MCP 工具接线与设置控件相关测试。
+- **Agent 交互响应性能优化**：用户输入到首个反馈显著加快——启动隔离工作区与 CLI 探测并行执行、仓库全量文件哈希分片并行；耗时步骤前即时显示进展提示（「正在准备隔离工作区…」「正在启动 …」），告别提交后数秒无响应。流式输出改为按帧合并渲染，`AgentMarkdown` 按固定节奏追赶，长回答期间输入框与滚动保持流畅。
+- **窄窗口 Agent 输入框工具栏换行**：未最大化窗口下「+ / @引用 / 审批 / 模型 / 推理强度 / 发送」以可读最小宽度换行，不再因控件被挤扁而文字重叠。
+- **侧栏默认宽度修正**：新会话默认宽度 220px → 250px，资源管理器标题完整可见。
+- **主题子菜单溢出修复**：视图 → 主题列表靠近视口底部时自动向上翻转，12 套主题不再被裁切。
 
-### v0.5.5 平台安装包对照
+### v0.5.6 平台安装包对照
 
-> 以下链接指向 v0.5.5 Release 资产；安装包由 GitHub Actions 根据 v0.5.5 标签源码构建。
+> 以下链接指向 v0.5.6 Release 资产；安装包由 GitHub Actions 根据 v0.5.6 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor-0.5.5-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.5/Zeditor_0.5.5_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor-0.5.6-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.5.md`](docs/releases/v0.5.5.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.6.md`](docs/releases/v0.5.6.md)。
 
 ## Contributors
 

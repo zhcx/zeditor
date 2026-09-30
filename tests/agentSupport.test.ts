@@ -63,6 +63,54 @@ test('Agent settings and direct-write status stay inside compact surfaces', () =
   assert.match(styles, /\.agent-direct-write-banner[\s\S]*border-radius:/);
 });
 
+test('Agent streaming coalesces events per frame and throttles markdown re-rendering', () => {
+  const store = read('src/stores/agentStore.ts');
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+
+  // 逐 token 到达的增量必须按帧合并后再 setState，避免整面板每 token 重渲染。
+  assert.match(store, /const applyAgentEvents = \(state: AgentState, payloads: AgentEvent\[\]\)/);
+  assert.match(store, /requestAnimationFrame\(flushAgentEvents\)/);
+  // 收尾/审批事件不能等帧回调，否则窗口不可见时任务状态会长时间不更新。
+  assert.match(store, /payload\.kind === 'done' \|\| payload\.kind === 'error' \|\| payload\.kind === 'approval_requested'/);
+
+  // Markdown 解析按固定节奏追赶最新内容，不再对每个 token 重排。
+  assert.match(panel, /const STREAM_RENDER_INTERVAL_MS = 80;/);
+  assert.match(panel, /const timelineBlocks = useMemo\(\(\) => buildTimelineBlocks\(timeline\), \[timeline\]\)/);
+});
+
+test('Agent startup reports progress before slow preparation steps', () => {
+  const rust = read('src-tauri/src/agent/mod.rs');
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+  // 隔离工作区准备（worktree + 基线提交）与 CLI 冷启动耗时数秒，必须先给出提示。
+  assert.match(rust, /fn emit_progress\(app: &AppHandle, session_id: &str, sequence: u64, content: &str\)/);
+  assert.match(rust, /正在准备隔离工作区/);
+  assert.match(rust, /正在启动 \{\}/);
+  // 状态行需直接可见：折叠进「活动详情」会让启动提示失去意义。
+  assert.match(panel, /if \(statusOnly\) \{/);
+});
+
+test('Agent startup work runs in parallel instead of serially', () => {
+  const rust = read('src-tauri/src/agent/mod.rs');
+  const git = read('src-tauri/src/agent/git.rs');
+  // 探测不再阻塞在启动路径上，与隔离工作区准备并行。
+  assert.match(rust, /let probe_task = tokio::task::spawn_blocking/);
+  // 版本与能力两次 CLI 冷启动并行。
+  assert.match(rust, /std::thread::scope\(\|scope\| \{[\s\S]{0,200}probe_capabilities/);
+  // 基线哈希分片并行，大型仓库下把数秒的串行哈希摊到多个核。
+  assert.match(git, /fn hash_baselines\(/);
+  assert.match(git, /std::thread::scope\(\|scope\|/);
+});
+
+test('Agent composer toolbar wraps instead of collapsing controls into each other', () => {
+  const styles = read('src/styles/main.css');
+  const toolbar = styles.match(/^\.agent-composer-toolbar\s*\{([^}]*)\}/m)?.[1] || '';
+  // 未最大化窗口下工具栏必须换行、且保留最小可读宽度，否则触发器内容溢出重叠。
+  assert.match(toolbar, /flex-wrap:\s*wrap/);
+  assert.match(toolbar, /min-width:\s*0/);
+  assert.match(styles, /\.agent-composer \.agent-effort-menu \{ min-width: 72px; \}/);
+  assert.match(styles, /\.agent-composer \.agent-model-menu \{ margin-left: auto; \}/);
+});
+
 test('non-Git Agent sessions authorize the current directory for direct writes', () => {
   const types = read('src/types/agent.ts');
   const panel = read('src/components/Chatbot/AgentPanel.tsx');
@@ -137,7 +185,7 @@ test('Agent conversation renders safe Markdown and integrates with the active ed
   const store = read('src/stores/agentStore.ts');
   const rust = read('src-tauri/src/agent/mod.rs');
   assert.match(panel, /agentMarkdown\.use\(taskLists\)/);
-  assert.match(panel, /sanitizeRenderedHtml\(agentMarkdown\.render\(content\)\)/);
+  assert.match(panel, /sanitizeRenderedHtml\(agentMarkdown\.render\(/);
   assert.match(panel, /editorView\.getSelection\(\)/);
   assert.match(panel, /editorView\.replaceRange/);
   assert.match(panel, /引用当前选区或文档/);

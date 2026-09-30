@@ -93,6 +93,55 @@ fn copy_untracked(root: &Path, worktree: &Path) -> Result<(), String> {
     Ok(())
 }
 
+/// 为会话起始快照计算每个文件的哈希（应用变更前用于冲突检测）。
+///
+/// 串行哈希在万级文件的仓库上需要数秒，而 SHA-256 计算与文件读取互相独立，
+/// 这里按可用并行度分片并行；结果与串行实现完全一致。
+fn hash_baselines(
+    root: &Path,
+    files: Vec<String>,
+) -> Result<HashMap<String, Option<String>>, String> {
+    if files.is_empty() {
+        return Ok(HashMap::new());
+    }
+    let workers = std::thread::available_parallelism()
+        .map(usize::from)
+        .unwrap_or(1)
+        .clamp(1, 8)
+        .min(files.len());
+    if workers <= 1 {
+        let mut hashes = HashMap::with_capacity(files.len());
+        for relative in &files {
+            hashes.insert(relative.clone(), file_hash(&root.join(relative))?);
+        }
+        return Ok(hashes);
+    }
+    let chunk = files.len().div_ceil(workers);
+    let joined = std::thread::scope(|scope| {
+        files
+            .chunks(chunk)
+            .map(|slice| {
+                scope.spawn(move || -> Result<Vec<(String, Option<String>)>, String> {
+                    slice
+                        .iter()
+                        .map(|relative| Ok((relative.clone(), file_hash(&root.join(relative))?)))
+                        .collect()
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|handle| handle.join())
+            .collect::<Vec<_>>()
+    });
+    let mut hashes = HashMap::with_capacity(files.len());
+    for entry in joined {
+        for (relative, hash) in entry.map_err(|_| "基线哈希线程异常退出".to_string())?? {
+            hashes.insert(relative, hash);
+        }
+    }
+    Ok(hashes)
+}
+
 pub fn create_isolated_worktree(
     root: &Path,
     session_dir: &Path,
@@ -117,10 +166,7 @@ pub fn create_isolated_worktree(
     }
     copy_untracked(root, session_dir)?;
 
-    let mut baseline_hashes = HashMap::new();
-    for relative in tracked_and_untracked(root)? {
-        baseline_hashes.insert(relative.clone(), file_hash(&root.join(&relative))?);
-    }
+    let baseline_hashes = hash_baselines(root, tracked_and_untracked(root)?)?;
 
     git(session_dir, &["add", "-A"])?;
     git(
@@ -383,6 +429,31 @@ pub fn session_worktree_path(storage_root: &Path, session_id: &str) -> PathBuf {
 mod tests {
     use super::*;
     use crate::agent::{AgentApprovalMode, AgentBackendId, AgentSessionStatus};
+
+    #[test]
+    fn baseline_hashes_match_serial_hashing_across_shards() {
+        let root =
+            std::env::temp_dir().join(format!("zeditor-agent-hash-test-{}", uuid::Uuid::new_v4()));
+        fs::create_dir_all(root.join("nested")).unwrap();
+        let mut files = (0..25)
+            .map(|index| format!("file-{index}.md"))
+            .collect::<Vec<_>>();
+        for (index, name) in files.iter().enumerate() {
+            fs::write(root.join(name), format!("content {index}")).unwrap();
+        }
+        fs::write(root.join("nested").join("inner.md"), "inner").unwrap();
+        files.push("nested/inner.md".into());
+        files.push("missing.md".into());
+
+        let hashes = hash_baselines(&root, files.clone()).unwrap();
+
+        assert_eq!(hashes.len(), files.len());
+        for relative in &files {
+            assert_eq!(hashes[relative], file_hash(&root.join(relative)).unwrap());
+        }
+        assert!(hashes["missing.md"].is_none());
+        fs::remove_dir_all(root).unwrap();
+    }
 
     #[test]
     fn porcelain_z_rename_entry_does_not_produce_ghost_file() {

@@ -8,6 +8,7 @@ pub enum AgentBackendId {
     ClaudeCode,
     Codex,
     Opencode,
+    Pi,
 }
 
 impl AgentBackendId {
@@ -16,6 +17,7 @@ impl AgentBackendId {
             Self::ClaudeCode => "claude",
             Self::Codex => "codex",
             Self::Opencode => "opencode",
+            Self::Pi => "pi",
         }
     }
 
@@ -24,6 +26,7 @@ impl AgentBackendId {
             Self::ClaudeCode => "Claude Code",
             Self::Codex => "Codex",
             Self::Opencode => "OpenCode",
+            Self::Pi => "Pi",
         }
     }
 }
@@ -62,10 +65,14 @@ impl AgentCapabilities {
     pub fn for_backend(backend: AgentBackendId) -> Self {
         Self {
             streaming: true,
-            approvals: true,
+            // Pi 没有逐工具审批：命令与编辑默认自行执行，安全边界仍由隔离
+            // worktree + 应用前审阅承担。扩展发出的 extension_ui_request 仍会
+            // 复用审批卡片，但不计入该能力。
+            approvals: !matches!(backend, AgentBackendId::Pi),
             session_resume: true,
             model_override: true,
-            profile_override: true,
+            // Pi 没有 agent/profile 概念，模型与推理等级通过 RPC 命令设置。
+            profile_override: !matches!(backend, AgentBackendId::Pi),
             reasoning_effort: !matches!(backend, AgentBackendId::Opencode),
             file_context: true,
         }

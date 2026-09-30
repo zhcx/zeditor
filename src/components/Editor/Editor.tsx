@@ -11,6 +11,7 @@ import { useAIStore, type ProofreadResult } from '../../stores/aiStore';
 import type { EditorController, EditorDispatchSpec, EditorLine } from '../../types/editor';
 import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../../utils/editorLayout';
 import { contentFontStack } from '../../utils/appearanceSettings';
+import { ensureMonacoTheme } from '../../themes/monaco';
 import { DocumentSessions, sameDocument } from '../../utils/documentSafety';
 import { filterSlashCommands, findSlashCommandTrigger, type SlashCommand } from '../../utils/slashCommands';
 import { extractGenieTarget, slashAiGenie } from '../../utils/aiGenies';
@@ -1287,6 +1288,25 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         return;
       }
 
+      // Ctrl/Cmd+B / Ctrl/Cmd+I：加粗与斜体，与工具栏、右键菜单同源。
+      if (primaryModifier && !browserEvent.shiftKey && !browserEvent.altKey) {
+        const marker = key.toLowerCase() === 'b' ? '**' : key.toLowerCase() === 'i' ? '*' : null;
+        if (marker) {
+          event.preventDefault();
+          event.stopPropagation();
+          const selection = controller.getSelection();
+          const selected = controller.getText(selection.from, selection.to);
+          const text = selected || '文本';
+          const cursor = selection.from + marker.length;
+          controller.replaceRange(selection.from, selection.to, `${marker}${text}${marker}`, {
+            from: cursor,
+            to: cursor + text.length,
+          });
+          controller.focus();
+          return;
+        }
+      }
+
       // 表格键盘导航：Tab / Shift+Tab 跳到相邻单元格，方向键移动，Enter 新增一行。
       const tableKey: TableNavigationKey | null = key === 'Tab'
         ? (browserEvent.shiftKey ? 'Shift+Tab' : 'Tab')
@@ -1387,10 +1407,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     });
 
     const handleTheme = (event: Event) => {
-      const theme = (event as CustomEvent<string>).detail;
-      monaco.editor.setTheme(theme.endsWith('-dark') ? 'vs-dark' : 'vs');
+      const themeId = (event as CustomEvent<string>).detail;
+      monaco.editor.setTheme(ensureMonacoTheme(monaco, themeId));
     };
     window.addEventListener('zeditor-theme-change', handleTheme);
+    // 编辑器挂载早于 App 的主题广播时，直接按当前主题初始化 Monaco 配色。
+    monaco.editor.setTheme(ensureMonacoTheme(monaco, document.documentElement.dataset.theme ?? ''));
 
     // 菜单栏的表格与图片入口通过事件驱动，避免菜单组件直接依赖编辑器实例。
     const handleTableActionRequest = (event: Event) => {

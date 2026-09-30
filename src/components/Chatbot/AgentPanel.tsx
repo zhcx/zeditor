@@ -18,6 +18,7 @@ const BACKEND_LABELS: Record<AgentBackendId, string> = {
   claude_code: 'Claude Code',
   codex: 'Codex',
   opencode: 'OpenCode',
+  pi: 'Pi',
 };
 
 const EFFORT_LABELS: Record<string, string> = {
@@ -82,6 +83,8 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
   const selectedPaths = changes?.files
     .map((file) => file.path)
     .filter((path) => !excludedPaths.includes(path)) || [];
+  // 时间线很长时逐帧重新分组是纯浪费：只在事件归并产出的新数组上重算。
+  const timelineBlocks = useMemo(() => buildTimelineBlocks(timeline), [timeline]);
 
   useEffect(() => {
     void initialize();
@@ -315,7 +318,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
         {workspaceRoot && timeline.length === 0 && (
           <div className="agent-empty-state"><strong>让 Agent 在当前目录中处理任务</strong><span>Git 根目录使用隔离工作区，其他目录在当前授权范围内直接写入。</span></div>
         )}
-        {buildTimelineBlocks(timeline).map((block) => block.type === 'activity' ? (
+        {timelineBlocks.map((block) => block.type === 'activity' ? (
           <AgentActivity key={block.id} items={block.items} />
         ) : (
           <article key={block.item.id} className={`chatbot-message agent-message ${block.item.kind === 'user' ? 'user' : 'assistant'} agent-message-${block.item.kind}`}>
@@ -514,8 +517,21 @@ function fileName(path: string) {
   return path.split(/[\\/]/).pop() || path;
 }
 
+/** 流式期间的 Markdown 重排间隔：逐 token 解析 + 净化会让长回答越写越卡。 */
+const STREAM_RENDER_INTERVAL_MS = 80;
+
 function AgentMarkdown({ content, compact = false }: { content: string; compact?: boolean }) {
-  const html = useMemo(() => sanitizeRenderedHtml(agentMarkdown.render(content)), [content]);
+  // 助手消息在流式输出期间每个 token 都会变化。直接对每次变化执行
+  // MarkdownIt 解析 + DOMPurify 净化，单个长回答累计是 O(n²) 开销，
+  // 且发生在渲染关键路径上，会拖慢输入与滚动。这里按固定节奏追赶最新
+  // 内容：流结束后最后一次定时器一定把内容收敛到完整文本。
+  const [rendered, setRendered] = useState(content);
+  useEffect(() => {
+    if (rendered === content) return;
+    const handle = window.setTimeout(() => setRendered(content), STREAM_RENDER_INTERVAL_MS);
+    return () => window.clearTimeout(handle);
+  }, [content, rendered]);
+  const html = useMemo(() => sanitizeRenderedHtml(agentMarkdown.render(rendered)), [rendered]);
   return <div className={`agent-message-content agent-markdown${compact ? ' compact' : ''}`} dangerouslySetInnerHTML={{ __html: html }} />;
 }
 
@@ -551,8 +567,16 @@ function AgentActivity({ items }: { items: AgentTimelineItem[] }) {
   const hasTools = toolStarts.length > 0;
   const statusOnly = items.every((item) => item.kind === 'status');
 
-  if (statusOnly && items.length === 1) {
-    return <div className="agent-activity-status"><span aria-hidden="true">·</span>{items[0].content}</div>;
+  // 纯状态块（启动进展、“已开始处理”、重试提示）逐行直接展示：折叠进
+  // 「活动详情」会让任务启动阶段的关键提示看不见，正好抵消进展反馈的意义。
+  if (statusOnly) {
+    return (
+      <>
+        {items.map((item) => (
+          <div key={item.id} className="agent-activity-status"><span aria-hidden="true">·</span>{item.content}</div>
+        ))}
+      </>
+    );
   }
 
   let summary = '活动详情';

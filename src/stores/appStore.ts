@@ -427,6 +427,7 @@ const defaultSettings: Settings = {
       claude_code: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
       codex: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
       opencode: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
+      pi: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
     },
   },
   explorer: {
@@ -468,6 +469,7 @@ const normalizeSettings = (saved: Settings): Settings => ({
       claude_code: { ...defaultSettings.agent.backends.claude_code, ...saved.agent?.backends?.claude_code },
       codex: { ...defaultSettings.agent.backends.codex, ...saved.agent?.backends?.codex },
       opencode: { ...defaultSettings.agent.backends.opencode, ...saved.agent?.backends?.opencode },
+      pi: { ...defaultSettings.agent.backends.pi, ...saved.agent?.backends?.pi },
     },
   },
   explorer: { ...defaultSettings.explorer, ...saved.explorer },
@@ -548,7 +550,8 @@ export const useAppStore = create<AppState>((set, get) => ({
   currentFile: null,
   settings: initialSettings,
   sidebarVisible: true,
-  sidebarWidth: 220,
+  // 默认宽度需容下资源管理器头部标题（约 222px：5 个操作按钮 + 内边距 + 标题），取 250 留余量。
+  sidebarWidth: 250,
   outlineVisible: false,
   settingsOpen: false,
   settingsTab: 'appearance',

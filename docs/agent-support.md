@@ -1,10 +1,10 @@
 # Local Agent Beta
 
-Zeditor Desktop can run Claude Code, Codex, or OpenCode from the AI side panel. This is separate from the API-based AI features: translation, proofreading, companion writing, and ordinary AI chat continue to use the provider configured in AI Settings.
+Zeditor Desktop can run Claude Code, Codex, OpenCode, or Pi from the AI side panel. This is separate from the API-based AI features: translation, proofreading, companion writing, and ordinary AI chat continue to use the provider configured in AI Settings.
 
 ## Requirements
 
-- Install and sign in to at least one supported CLI: `claude`, `codex`, or `opencode`.
+- Install and sign in to at least one supported CLI: `claude`, `codex`, `opencode`, or `pi`.
 - Open the directory you want to use as the Zeditor workspace. Git repository roots use isolated worktrees; other directories require explicit session authorization and are edited directly.
 - Enable **Local Agent (Beta)** under **Settings → AI Assistant**, then run environment detection.
 - Leave executable, model, and profile fields empty to reuse the CLI defaults.
@@ -30,6 +30,17 @@ Tiered approval is the default:
 An approval card offers one-time approval, approval for the same action type during the session, complete approval for the current session, or rejection. Complete approval auto-accepts later command, network, and MCP requests, but does not remove worktree isolation or hard-deny rules.
 
 Complete approval exists only in memory. Restarting Zeditor, creating a new session, or restoring a previous session returns to tiered approval. It can also be disabled immediately from the Agent panel; operations already running are not retroactively interrupted.
+
+### Backend differences
+
+Approval coverage depends on what the CLI exposes:
+
+- **Claude Code** asks for every Bash, Write/Edit, WebFetch/WebSearch, and MCP call through a `PreToolUse` hook.
+- **Codex** forwards its app-server approval requests into the same cards.
+- **OpenCode** uses its `permission.asked` events.
+- **Pi** has **no per-tool approval**. Once the workspace is trusted it runs commands and edits on its own, so tiered approval cannot intercept them and the hard-deny rules for external paths and `git push` do not apply. Worktree isolation plus review-before-apply stay in effect, and Pi extension prompts (`select` / `confirm`) are still surfaced as approval cards.
+
+Because Pi runs autonomously, treat its sessions the same way you would treat a fully approved Claude Code session: review the pending change set before applying it.
 
 ## Local data
 

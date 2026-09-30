@@ -78,6 +78,77 @@ const appendEvent = (items: AgentTimelineItem[], event: AgentEvent): AgentTimeli
 
 const errorText = (error: unknown) => String(error).replace(/^Error:\s*/, '');
 
+/**
+ * 把一帧内到达的多条事件一次性归约到 store。
+ *
+ * 流式输出时后端会逐 token 发送 `message_delta`（长回答可达上千条），
+ * 此前每条事件都调用一次 set()，导致整棵面板（时间线、Markdown 解析、
+ * 输入框）以每秒数十次的频率重渲染，输入与滚动明显发卡。这里改为按帧
+ * 合并：一帧内的增量合并进同一条时间线条目，只触发一次渲染。
+ */
+const applyAgentEvents = (state: AgentState, payloads: AgentEvent[]) => {
+  let next = state;
+  let sawDone = false;
+  for (const payload of payloads) {
+    // 只丢弃「已知但不活跃」会话的事件。未知会话 id 说明这条事件属于刚提交
+    // 的那个回合——agent_start_turn 还没返回、store 尚未拿到 session id，
+    // 启动阶段的进展提示正是走这条路径，不能在这里被过滤掉。
+    const isBackgroundSession = next.activeSessionId
+      && payload.session_id !== next.activeSessionId
+      && next.sessions.some((session) => session.id === payload.session_id);
+    if (isBackgroundSession) continue;
+    const terminal = payload.kind === 'done' || payload.kind === 'error';
+    if (payload.kind === 'done') sawDone = true;
+    next = {
+      ...next,
+      activeSessionId: next.activeSessionId || payload.session_id,
+      timeline: appendEvent(next.timeline, payload),
+      pendingApproval: payload.kind === 'approval_requested' ? payload.approval || null
+        : payload.kind === 'approval_resolved' ? null : next.pendingApproval,
+      loading: terminal ? false : next.loading || payload.kind !== 'approval_resolved',
+      // Terminal errors already render in the timeline; diagnostics are reserved for launch failures.
+      diagnostic: payload.kind === 'error' ? '' : next.diagnostic,
+      sessions: next.sessions.map((session) => session.id === payload.session_id ? {
+        ...session,
+        status: payload.kind === 'done' ? 'completed' : payload.kind === 'error' ? 'error'
+          : payload.kind === 'approval_requested' ? 'waiting_approval' : 'running',
+      } : session),
+    };
+  }
+  return { state: next, sawDone };
+};
+
+let eventQueue: AgentEvent[] = [];
+let eventFrame: number | null = null;
+
+const flushAgentEvents = () => {
+  if (eventFrame !== null) {
+    if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(eventFrame);
+    eventFrame = null;
+  }
+  if (eventQueue.length === 0) return;
+  const batch = eventQueue;
+  eventQueue = [];
+  const { state, sawDone } = applyAgentEvents(useAgentStore.getState(), batch);
+  // 批内事件全部被会话过滤时 applyAgentEvents 返回原对象，setState 不会通知订阅者。
+  useAgentStore.setState(state);
+  if (sawDone) void useAgentStore.getState().refreshChanges();
+};
+
+const enqueueAgentEvent = (payload: AgentEvent) => {
+  eventQueue.push(payload);
+  // 收尾与审批必须即时可见：窗口不可见时 rAF 会被节流甚至暂停，
+  // 若把 done/error 也押在帧回调里，任务结束状态会长时间不更新。
+  if (payload.kind === 'done' || payload.kind === 'error' || payload.kind === 'approval_requested') {
+    flushAgentEvents();
+    return;
+  }
+  if (eventFrame !== null) return;
+  eventFrame = typeof requestAnimationFrame === 'function'
+    ? requestAnimationFrame(flushAgentEvents)
+    : (setTimeout(flushAgentEvents, 16) as unknown as number);
+};
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   backends: [],
   modelCatalogs: {},
@@ -97,24 +168,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
     if (!eventUnlisten) {
       eventUnlisten = await listen<AgentEvent>('agent-event', ({ payload }) => {
-        const state = get();
-        if (state.activeSessionId && payload.session_id !== state.activeSessionId) return;
-        const terminal = payload.kind === 'done' || payload.kind === 'error';
-        set({
-          activeSessionId: state.activeSessionId || payload.session_id,
-          timeline: appendEvent(state.timeline, payload),
-          pendingApproval: payload.kind === 'approval_requested' ? payload.approval || null
-            : payload.kind === 'approval_resolved' ? null : state.pendingApproval,
-          loading: terminal ? false : state.loading || payload.kind !== 'approval_resolved',
-          // Terminal errors already render in the timeline; diagnostics are reserved for launch failures.
-          diagnostic: payload.kind === 'error' ? '' : state.diagnostic,
-          sessions: state.sessions.map((session) => session.id === payload.session_id ? {
-            ...session,
-            status: payload.kind === 'done' ? 'completed' : payload.kind === 'error' ? 'error'
-              : payload.kind === 'approval_requested' ? 'waiting_approval' : 'running',
-          } : session),
-        });
-        if (payload.kind === 'done') void get().refreshChanges();
+        enqueueAgentEvent(payload);
       });
     }
     const sessions = await invoke<AgentSession[]>('agent_list_sessions');

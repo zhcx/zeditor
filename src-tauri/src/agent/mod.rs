@@ -39,6 +39,13 @@ enum PendingChannel {
         session_id: String,
         permission_id: String,
     },
+    /// Pi 扩展 UI 请求：回包字段随方法不同（select 用 value，confirm 用
+    /// confirmed），因此要把方法与候选值一并留存到响应时。
+    Pi {
+        id: String,
+        method: String,
+        allow_value: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone)]
@@ -327,9 +334,17 @@ fn ensure_backend_probed(executable: &Path, backend: AgentBackendId) -> Result<(
             return Ok(());
         }
     }
-    executable_version(executable)
+    // 版本与能力探测各要启动一次子进程（node 类 CLI 每次 0.5–3s）。两者互不
+    // 依赖，并行执行把首次探测的固定开销减半。
+    let (version, capabilities) = std::thread::scope(|scope| {
+        let version = scope.spawn(|| executable_version(executable));
+        let capabilities = scope.spawn(|| probe_capabilities(executable, backend));
+        (version.join(), capabilities.join())
+    });
+    version
+        .map_err(|_| format!("{} 版本探测线程异常退出", backend.label()))?
         .map_err(|error| format!("{} 不可用：{error}", backend.label()))?;
-    probe_capabilities(executable, backend)?;
+    capabilities.map_err(|_| format!("{} 能力探测线程异常退出", backend.label()))??;
     if let Ok(mut guard) = cache.lock() {
         guard.insert(key, ());
     }
@@ -352,6 +367,7 @@ fn probe_capabilities(path: &Path, backend: AgentBackendId) -> Result<(), String
         AgentBackendId::ClaudeCode => &["-p", "--help"],
         AgentBackendId::Codex => &["app-server", "--help"],
         AgentBackendId::Opencode => &["serve", "--help"],
+        AgentBackendId::Pi => &["--help"],
     };
     let output = process::executable_command(path)?
         .args(args)
@@ -366,6 +382,8 @@ fn probe_capabilities(path: &Path, backend: AgentBackendId) -> Result<(), String
         AgentBackendId::ClaudeCode => &["stream-json", "--settings"],
         AgentBackendId::Codex => &["app-server", "stdio"],
         AgentBackendId::Opencode => &["hostname", "port"],
+        // pi 的帮助文本只列出 `--mode`，RPC 取值不会出现在帮助里。
+        AgentBackendId::Pi => &["--mode"],
     };
     if !output.status.success() || required.iter().any(|needle| !help.contains(needle)) {
         return Err(format!(
@@ -385,6 +403,7 @@ pub async fn agent_detect_backends(
         AgentBackendId::ClaudeCode,
         AgentBackendId::Codex,
         AgentBackendId::Opencode,
+        AgentBackendId::Pi,
     ]
     .into_iter()
     .map(|id| {
@@ -495,12 +514,13 @@ pub async fn agent_start_turn(
         .ok_or_else(|| format!("未找到 {}", request.backend.label()))?;
     let executable = process::resolve_executable(executable)?;
     // 子进程探测放入阻塞线程池并按 mtime 缓存（见 ensure_backend_probed），
-    // 首条消息探测一次，后续消息零开销。
+    // 首条消息探测一次，后续消息零开销。这里只启动不等待：探测（两次 CLI 冷
+    // 启动）与下面的隔离工作区准备互不依赖，并行执行可省下首个回合数秒等待。
     let probe_backend = request.backend;
     let probe_executable = executable.clone();
-    tokio::task::spawn_blocking(move || ensure_backend_probed(&probe_executable, probe_backend))
-        .await
-        .map_err(|error| format!("{} 探测失败：{error}", request.backend.label()))??;
+    let probe_task = tokio::task::spawn_blocking(move || {
+        ensure_backend_probed(&probe_executable, probe_backend)
+    });
 
     // One running turn per workspace, regardless of backend.
     supervisor.ensure_loaded().await;
@@ -521,6 +541,18 @@ pub async fn agent_start_turn(
         supervisor.runtime(session_id).await?
     } else {
         let id = Uuid::new_v4().to_string();
+        // 隔离工作区准备（git worktree + 构建基线提交 + 全量文件哈希）在大型
+        // 仓库上可达数秒，先给界面一条进展提示，避免用户以为提交没有生效。
+        emit_progress(
+            &app,
+            &id,
+            0,
+            if direct_write {
+                "正在授权当前目录…"
+            } else {
+                "正在准备隔离工作区…"
+            },
+        );
         let worktree = if direct_write {
             root.clone()
         } else {
@@ -594,6 +626,17 @@ pub async fn agent_start_turn(
     *runtime.context_paths.lock().await = context_paths;
     *runtime.turn_id.lock().await = Uuid::new_v4().to_string();
     *runtime.executable.lock().await = Some(executable.clone());
+
+    // 与隔离工作区准备并行的探测到这里汇合（结果按 mtime 缓存，仅首次实际执行）。
+    probe_task
+        .await
+        .map_err(|error| format!("{} 探测失败：{error}", request.backend.label()))??;
+    emit_progress(
+        &app,
+        &runtime.session.lock().await.id.clone(),
+        1,
+        &format!("正在启动 {}…", request.backend.label()),
+    );
 
     if let Err(error) = spawn_turn(
         runtime.clone(),
@@ -673,6 +716,9 @@ async fn spawn_turn(
         )
         .await;
     }
+    // Pi 走通用 stdin JSON 通道：被引用的上下文文件合并进提示词，由 RPC 下发。
+    let pi_prompt = (session.backend == AgentBackendId::Pi)
+        .then(|| adapters::prompt_with_context(&prompt, &worktree, &context_paths));
     let current_exe = std::env::current_exe().map_err(|error| error.to_string())?;
     let mut launch = adapters::build_launch(adapters::AdapterLaunchConfig {
         backend: session.backend,
@@ -709,6 +755,28 @@ async fn spawn_turn(
             .map(adapters::codex_thread_resume)
             .unwrap_or_else(|| adapters::codex_thread_start(&worktree, model.as_deref()));
         write_json(&runtime.stdin, &thread_request).await?;
+    }
+
+    if protocol == AdapterProtocol::PiRpc {
+        // 恢复历史会话：pi 用会话文件路径做切换，路径来自上一回合 get_state。
+        if let Some(session_path) = session
+            .backend_session_id
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            write_json(&runtime.stdin, &adapters::pi_switch_session(session_path)).await?;
+        }
+        if let Some(level) = reasoning_effort
+            .as_deref()
+            .filter(|value| !value.is_empty())
+        {
+            write_json(&runtime.stdin, &adapters::pi_set_thinking_level(level)).await?;
+        }
+        // 先取状态拿到 sessionFile，作为下一步会话恢复的锚点。
+        write_json(&runtime.stdin, &adapters::pi_get_state()).await?;
+        if let Some(message) = pi_prompt {
+            write_json(&runtime.stdin, &adapters::pi_prompt(&message)).await?;
+        }
     }
 
     let output_runtime = runtime.clone();
@@ -1054,6 +1122,10 @@ async fn process_raw_event(
     if let Some(turn) = raw.turn_id.clone() {
         *runtime.turn_id.lock().await = turn;
     }
+    // kind 为空的元数据事件（如 Pi 的 get_state 响应）只更新会话标识，不渲染。
+    if raw.kind.is_empty() {
+        return;
+    }
     if let Some(approval) = raw.approval {
         let backend_session_id = match raw.backend_session_id.clone() {
             Some(value) => value,
@@ -1085,6 +1157,15 @@ async fn process_raw_event(
                     permission_id,
                 }
             }
+            AdapterProtocol::PiRpc => PendingChannel::Pi {
+                id: approval
+                    .backend_request_id
+                    .as_str()
+                    .map(str::to_string)
+                    .unwrap_or_else(|| approval.backend_request_id.to_string()),
+                method: approval.method.clone().unwrap_or_default(),
+                allow_value: adapters::pi_allow_option(&approval.options),
+            },
             AdapterProtocol::ClaudeJson => return,
         };
         handle_approval(runtime, app, approval, channel).await;
@@ -1310,6 +1391,8 @@ async fn watch_permission_bridge(runtime: Arc<SessionRuntime>, app: AppHandle) {
                         .or_else(|| value.pointer("/input/file_path").and_then(Value::as_str))
                         .or_else(|| value.pointer("/input/path").and_then(Value::as_str))
                         .map(str::to_string),
+                    method: None,
+                    options: Vec::new(),
                 };
                 let response_path = path.with_extension("response");
                 handle_approval(&runtime, &app, raw, PendingChannel::Bridge(response_path)).await;
@@ -1374,6 +1457,17 @@ async fn respond_channel(
             } else {
                 Err(format!("OpenCode 审批响应失败：{}", result.status()))
             }
+        }
+        PendingChannel::Pi {
+            id,
+            method,
+            allow_value,
+        } => {
+            write_json(
+                &runtime.stdin,
+                &adapters::pi_ui_response(id, method, decision != "deny", allow_value.as_deref()),
+            )
+            .await
         }
     }
 }
@@ -1460,6 +1554,9 @@ pub async fn agent_cancel_turn(
                 .send()
                 .await;
         }
+    } else if protocol == Some(AdapterProtocol::PiRpc) {
+        // 先请求 pi 中止当前回合，再兜底杀进程。
+        let _ = write_json(&runtime.stdin, &adapters::pi_abort()).await;
     }
     if let Some(mut child) = runtime.child.lock().await.take() {
         let _ = child.kill().await;
@@ -1571,6 +1668,20 @@ async fn emit_simple(
         AgentEvent::simple(&session_id, &turn_id, sequence, kind, content),
     )
     .await;
+}
+
+/// 启动阶段的进展提示。
+///
+/// 隔离工作区准备与 CLI 冷启动合计可达数秒，这段时间后端没有任何输出，
+/// 前端只会看到自己刚发出的那条提问，用户容易误以为卡住。这里直接向前端
+/// 发一条 status 事件；此时会话 runtime 还不存在，因此不写入事件历史。
+/// turn_id 留空 + 递增 sequence 保证时间线 key 唯一，且不会与真实事件
+/// （turn_id 为新 uuid）冲突。
+fn emit_progress(app: &AppHandle, session_id: &str, sequence: u64, content: &str) {
+    let _ = app.emit(
+        "agent-event",
+        &AgentEvent::simple(session_id, "", sequence, "status", content),
+    );
 }
 
 /// 单会话事件内存/落盘上限：事件同时保存在内存与 events.json 中，
@@ -1804,6 +1915,49 @@ mod tests {
         )
         .is_empty());
         assert!(serde_json::from_str::<Value>("{truncated").is_err());
+    }
+
+    #[test]
+    fn normalizes_pi_rpc_stream_events() {
+        let delta = json!({"type": "message_update", "assistantMessageEvent": {"type": "text_delta", "delta": "hello"}});
+        let events = adapters::line_events(AdapterProtocol::PiRpc, &delta);
+        assert_eq!(events[0].kind, "message_delta");
+        assert_eq!(events[0].content.as_deref(), Some("hello"));
+
+        // get_state 响应只用于提取会话文件，不产生可见条目。
+        let state = json!({"type": "response", "command": "get_state", "success": true, "data": {"sessionFile": "/tmp/session.jsonl", "sessionId": "s1"}});
+        let events = adapters::line_events(AdapterProtocol::PiRpc, &state);
+        assert_eq!(events[0].kind, "");
+        assert_eq!(
+            events[0].backend_session_id.as_deref(),
+            Some("/tmp/session.jsonl")
+        );
+
+        let tool = json!({"type": "tool_execution_start", "toolCallId": "c1", "toolName": "bash", "args": {"command": "ls"}});
+        let events = adapters::line_events(AdapterProtocol::PiRpc, &tool);
+        assert_eq!(events[0].kind, "tool_started");
+        assert_eq!(events[0].tool_name.as_deref(), Some("bash"));
+
+        let ui = json!({"type": "extension_ui_request", "id": "u1", "method": "select", "title": "Allow?", "options": ["Allow", "Block"]});
+        let events = adapters::line_events(AdapterProtocol::PiRpc, &ui);
+        let approval = events[0].approval.as_ref().unwrap();
+        assert_eq!(approval.method.as_deref(), Some("select"));
+        assert_eq!(
+            adapters::pi_allow_option(&approval.options).as_deref(),
+            Some("Allow")
+        );
+
+        let done = json!({"type": "agent_end", "messages": []});
+        assert_eq!(
+            adapters::line_events(AdapterProtocol::PiRpc, &done)[0].kind,
+            "done"
+        );
+        // 非对话框 UI 方法不进入审批流。
+        assert!(adapters::line_events(
+            AdapterProtocol::PiRpc,
+            &json!({"type": "extension_ui_request", "id": "u2", "method": "notify", "message": "hi"})
+        )
+        .is_empty());
     }
 
     #[test]

@@ -13,6 +13,7 @@ import {
   getRangeMarkerGeometry,
 } from '../../utils/appearanceSettings';
 import { LANGUAGE_OPTIONS, normalizeLanguage } from '../../i18n';
+import { THEMES } from '../../themes/apply';
 import type { AgentBackendId, AgentBackendStatus } from '../../types/agent';
 import { parseAIProviderProfiles } from '../../utils/aiProviderProfiles';
 import { WebDavSettings } from '../WebDav/WebDavSettings';
@@ -55,8 +56,7 @@ const AI_PROVIDER_OPTIONS = AI_PROVIDER_DEFINITIONS.map((provider) => {
 const LANGUAGE_SELECT_OPTIONS = LANGUAGE_OPTIONS.map((option) => ({ value: option.value, label: option.nativeLabel }));
 
 const THEME_OPTIONS = [
-  { value: 'vscode-dark', label: '深色主题' },
-  { value: 'vscode-light', label: '浅色主题' },
+  ...THEMES.map((theme) => ({ value: theme.id, label: `${theme.label}（${theme.labelEn}）` })),
   { value: 'system', label: '跟随系统' },
 ];
 
@@ -96,6 +96,7 @@ const AGENT_BACKEND_OPTIONS = [
   { value: 'claude_code', label: 'Claude Code' },
   { value: 'codex', label: 'Codex' },
   { value: 'opencode', label: 'OpenCode' },
+  { value: 'pi', label: 'Pi' },
 ];
 
 const REASONING_EFFORT_OPTIONS = [
@@ -1361,7 +1362,7 @@ export function SettingsPanel() {
               <div className="settings-subsection-divider" />
               <SettingToggle
                 label="启用本地 Agent（Beta）"
-                description="调用本机 Claude Code、Codex 或 OpenCode，在隔离 Git worktree 中执行任务"
+                description="调用本机 Claude Code、Codex、OpenCode 或 Pi，在隔离 Git worktree 中执行任务"
                 checked={localSettings.agent.enabled}
                 onChange={(checked) => setLocalSettings({
                   ...localSettings,
@@ -1385,7 +1386,7 @@ export function SettingsPanel() {
                   {(Object.keys(localSettings.agent.backends) as AgentBackendId[]).map((backendId) => {
                     const config = localSettings.agent.backends[backendId];
                     const status = agentStatuses.find((item) => item.id === backendId);
-                    const label = backendId === 'claude_code' ? 'Claude Code' : backendId === 'codex' ? 'Codex' : 'OpenCode';
+                    const label = AGENT_BACKEND_OPTIONS.find((option) => option.value === backendId)?.label ?? backendId;
                     return (
                       <section className="agent-backend-settings" key={backendId}>
                         <header><strong>{label}</strong><span className={status?.compatible ? 'ready' : ''}>{status ? (status.compatible ? status.version || '可用' : status.diagnostic) : '尚未检测'}</span></header>
@@ -1406,7 +1407,10 @@ export function SettingsPanel() {
                         </div>
                         <div className="agent-backend-options">
                           <div className="setting-item"><label>模型覆盖</label><input type="text" value={config.model} onChange={(event) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, model: event.target.value } } } })} placeholder="使用 CLI 默认模型" /></div>
-                          <div className="setting-item"><label>{backendId === 'claude_code' ? 'Agent' : backendId === 'codex' ? 'Profile' : 'Agent 模式'}</label><input type="text" value={config.profile} onChange={(event) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, profile: event.target.value } } } })} placeholder="使用 CLI 默认配置" /></div>
+                          {/* Pi 没有 agent/profile 概念，隐藏该项以保持设置项与后端能力一致。 */}
+                          {backendId !== 'pi' && (
+                            <div className="setting-item"><label>{backendId === 'claude_code' ? 'Agent' : backendId === 'codex' ? 'Profile' : 'Agent 模式'}</label><input type="text" value={config.profile} onChange={(event) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, profile: event.target.value } } } })} placeholder="使用 CLI 默认配置" /></div>
+                          )}
                           {backendId !== 'opencode' && (
                             <div className="setting-item">
                               <label>推理强度</label>

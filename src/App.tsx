@@ -43,6 +43,7 @@ import { isImageFilePath } from './utils/imageSyntax';
 import './styles/main.css';
 import './styles/workbench.css';
 import { contentFontStack } from './utils/appearanceSettings';
+import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
 
 interface DragDropPayload {
   paths: string[];
@@ -50,36 +51,6 @@ interface DragDropPayload {
 }
 
 const DEFAULT_EDITOR_RATIO = 0.5;
-const SUPPORTED_THEMES = new Set(['vscode-light', 'vscode-dark']);
-let themeSwitchFrame: number | null = null;
-
-function resolveThemePreference(preference: string) {
-  if (preference === 'system') {
-    return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'vscode-dark' : 'vscode-light';
-  }
-  if (preference === 'dark') return 'vscode-dark';
-  if (preference === 'light') return 'vscode-light';
-  if (SUPPORTED_THEMES.has(preference)) return preference;
-  // 已下线主题（claude-*/notion-*）按明暗迁移到对应的新主题。
-  return preference.endsWith('-light') ? 'vscode-light' : 'vscode-dark';
-}
-
-function applyThemeToDocument(preference: string) {
-  const resolvedTheme = resolveThemePreference(preference);
-  const root = document.documentElement;
-
-  if (themeSwitchFrame !== null) window.cancelAnimationFrame(themeSwitchFrame);
-  root.classList.add('theme-switching');
-  root.setAttribute('data-theme', resolvedTheme);
-  root.style.colorScheme = resolvedTheme.endsWith('-dark') ? 'dark' : 'light';
-  window.dispatchEvent(new CustomEvent('zeditor-theme-change', { detail: resolvedTheme }));
-  themeSwitchFrame = window.requestAnimationFrame(() => {
-    root.classList.remove('theme-switching');
-    themeSwitchFrame = null;
-  });
-
-  return resolvedTheme;
-}
 
 function App() {
   const {
@@ -658,10 +629,7 @@ function App() {
 
   const toggleThemeVariant = useCallback(() => {
     const currentSettings = useAppStore.getState().settings;
-    const currentTheme = resolveThemePreference(currentSettings.appearance.theme);
-    const isDark = currentTheme.endsWith('-dark');
-    const family = currentTheme.replace(/-(?:light|dark)$/, '') || 'vscode';
-    const nextTheme = `${family}-${isDark ? 'light' : 'dark'}`;
+    const nextTheme = toggleThemeMode(currentSettings.appearance.theme);
     const nextSettings = {
       ...currentSettings,
       appearance: { ...currentSettings.appearance, theme: nextTheme },

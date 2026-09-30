@@ -1,6 +1,6 @@
 export type AIRuntime = 'api' | 'agent';
 
-export type AgentBackendId = 'claude_code' | 'codex' | 'opencode';
+export type AgentBackendId = 'claude_code' | 'codex' | 'opencode' | 'pi';
 export type AgentApprovalMode = 'tiered' | 'allow_all_session';
 export type AgentSessionStatus = 'idle' | 'running' | 'waiting_approval' | 'completed' | 'interrupted' | 'error';
 

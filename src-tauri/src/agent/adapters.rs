@@ -20,6 +20,7 @@ pub enum AdapterProtocol {
     ClaudeJson,
     CodexAppServer,
     OpenCodeJson,
+    PiRpc,
 }
 
 pub struct AdapterLaunchConfig<'a> {
@@ -135,6 +136,22 @@ pub fn build_launch(config: AdapterLaunchConfig<'_>) -> Result<AdapterLaunch, St
                 opencode_permissions(approval_mode, read_only).to_string(),
             );
             AdapterProtocol::OpenCodeJson
+        }
+        AgentBackendId::Pi => {
+            // RPC 模式：提示词与模型/推理等级都通过 stdin JSONL 命令下发，
+            // CLI 只负责把进程拉起来（见 mod.rs 的 pi 命令序列）。
+            command.args(["--mode", "rpc"]);
+            if let Some(value) = model.filter(|value| !value.is_empty()) {
+                command.args(["--model", value]);
+            }
+            // 非交互模式下 pi 用「项目信任」决定是否加载项目上下文文件、
+            // 扩展与技能。只读会话保持干净基线，其余加载项目资源。
+            command.arg(if read_only {
+                "--no-approve"
+            } else {
+                "--approve"
+            });
+            AdapterProtocol::PiRpc
         }
     };
     command.kill_on_drop(true);
@@ -271,6 +288,47 @@ pub fn codex_approval_response(request_id: &Value, decision: &str) -> Value {
     json!({"id": request_id, "result": {"decision": mapped}})
 }
 
+// ── Pi（pi --mode rpc）─────────────────────────────────────────────
+// 严格 JSONL：stdin 下发命令（可带 id），stdout 返回 response 与事件。
+
+/// 发起一次提问。pi 在流式输出中要求显式 `streamingBehavior`，而 Zeditor
+/// 每回合只发一条提示，因此无需携带该字段。
+pub fn pi_prompt(message: &str) -> Value {
+    json!({"type": "prompt", "message": message})
+}
+
+/// 查询会话状态：响应中的 `data.sessionFile` 用于后续回合恢复会话。
+pub fn pi_get_state() -> Value {
+    json!({"type": "get_state"})
+}
+
+pub fn pi_switch_session(session_path: &str) -> Value {
+    json!({"type": "switch_session", "sessionPath": session_path})
+}
+
+pub fn pi_set_thinking_level(level: &str) -> Value {
+    json!({"type": "set_thinking_level", "level": level})
+}
+
+pub fn pi_abort() -> Value {
+    json!({"type": "abort"})
+}
+
+/// 扩展 UI 请求的响应。`select` 用 `value`/`cancelled`，`confirm` 用
+/// `confirmed`，两者字段不同（见 Pi RPC 文档）。
+pub fn pi_ui_response(id: &str, method: &str, allowed: bool, allow_value: Option<&str>) -> Value {
+    match (method, allowed) {
+        ("confirm", allowed) => {
+            json!({"type": "extension_ui_response", "id": id, "confirmed": allowed})
+        }
+        ("select", true) => match allow_value {
+            Some(value) => json!({"type": "extension_ui_response", "id": id, "value": value}),
+            None => json!({"type": "extension_ui_response", "id": id, "cancelled": true}),
+        },
+        _ => json!({"type": "extension_ui_response", "id": id, "cancelled": true}),
+    }
+}
+
 pub fn extract_codex_thread_id(value: &Value) -> Option<String> {
     value
         .get("result")?
@@ -285,6 +343,7 @@ pub fn line_events(protocol: AdapterProtocol, value: &Value) -> Vec<RawAgentEven
         AdapterProtocol::ClaudeJson => claude_events(value),
         AdapterProtocol::CodexAppServer => codex_events(value),
         AdapterProtocol::OpenCodeJson => opencode_events(value),
+        AdapterProtocol::PiRpc => pi_events(value),
     }
 }
 
@@ -307,6 +366,10 @@ pub struct RawApproval {
     pub detail: String,
     pub command: Option<String>,
     pub cwd: Option<String>,
+    /// Pi 扩展 UI 对话框方法（`select` / `confirm`），其它后端为 None。
+    pub method: Option<String>,
+    /// Pi `select` 的可选项，用于把「允许」映射回具体选项。
+    pub options: Vec<String>,
 }
 
 fn event(kind: &'static str, content: impl Into<String>) -> RawAgentEvent {
@@ -515,6 +578,8 @@ fn codex_events(value: &Value) -> Vec<RawAgentEvent> {
                         .get("cwd")
                         .and_then(Value::as_str)
                         .map(str::to_string),
+                    method: None,
+                    options: Vec::new(),
                 }),
                 payload: Some(params),
                 turn_id,
@@ -641,6 +706,8 @@ fn opencode_events(value: &Value) -> Vec<RawAgentEvent> {
                     .and_then(Value::as_str)
                     .map(str::to_string),
                 cwd: None,
+                method: None,
+                options: Vec::new(),
             }),
             payload: Some(value.clone()),
             turn_id: None,
@@ -667,6 +734,180 @@ fn opencode_events(value: &Value) -> Vec<RawAgentEvent> {
         "error" | "session.error" => vec![event("error", value.to_string())],
         _ => Vec::new(),
     }
+}
+
+/// Pi（`pi --mode rpc`）的 stdout JSONL：response 与事件（事件不带 id）。
+fn pi_events(value: &Value) -> Vec<RawAgentEvent> {
+    let event_type = value
+        .get("type")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    match event_type {
+        "response" => pi_state_event(value).into_iter().collect(),
+        "message_update" => {
+            let assistant = value.get("assistantMessageEvent").unwrap_or(&Value::Null);
+            let delta = assistant
+                .get("delta")
+                .and_then(Value::as_str)
+                .filter(|text| !text.is_empty());
+            match assistant
+                .get("type")
+                .and_then(Value::as_str)
+                .unwrap_or_default()
+            {
+                "text_delta" => delta
+                    .map(|text| vec![event("message_delta", text)])
+                    .unwrap_or_default(),
+                "thinking_delta" => delta
+                    .map(|text| vec![event("reasoning_delta", text)])
+                    .unwrap_or_default(),
+                _ => Vec::new(),
+            }
+        }
+        // message_end 携带完整消息，但文本已由 text_delta 流式给出，
+        // 再发一次会在时间线里重复。
+        "tool_execution_start" | "tool_execution_end" => {
+            let started = event_type == "tool_execution_start";
+            vec![RawAgentEvent {
+                kind: if started {
+                    "tool_started"
+                } else {
+                    "tool_completed"
+                },
+                content: value
+                    .get(if started { "args" } else { "result" })
+                    .map(Value::to_string),
+                tool_name: value
+                    .get("toolName")
+                    .and_then(Value::as_str)
+                    .map(str::to_string),
+                approval: None,
+                payload: Some(value.clone()),
+                turn_id: None,
+                backend_session_id: None,
+            }]
+        }
+        "agent_start" => vec![event("status", "Pi 已开始处理")],
+        "agent_end" => vec![RawAgentEvent {
+            kind: "done",
+            content: None,
+            tool_name: None,
+            approval: None,
+            payload: Some(value.clone()),
+            turn_id: None,
+            backend_session_id: None,
+        }],
+        "compaction_start" => vec![event("status", "正在压缩上下文…")],
+        "auto_retry_start" => vec![event("status", localize_pi_retry(value))],
+        "extension_error" => vec![event(
+            "error",
+            value
+                .get("message")
+                .or_else(|| value.get("error"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .unwrap_or_else(|| value.to_string()),
+        )],
+        "extension_ui_request" => pi_ui_approval(value).into_iter().collect(),
+        _ => Vec::new(),
+    }
+}
+
+/// `get_state` 响应只用于提取会话文件（后续回合据此 `switch_session` 恢复），
+/// kind 置空后由 process_raw_event 跳过，不产生时间线条目。
+fn pi_state_event(value: &Value) -> Option<RawAgentEvent> {
+    if value.get("command").and_then(Value::as_str) != Some("get_state") {
+        return None;
+    }
+    let session_file = value
+        .pointer("/data/sessionFile")
+        .and_then(Value::as_str)
+        .filter(|path| !path.is_empty())?;
+    Some(RawAgentEvent {
+        kind: "",
+        content: None,
+        tool_name: None,
+        approval: None,
+        payload: None,
+        turn_id: None,
+        backend_session_id: Some(session_file.to_string()),
+    })
+}
+
+/// 扩展 UI 请求 → 审批卡片。仅接入阻塞式 `select` / `confirm`；其余方法
+/// （notify/setStatus/setWidget/setTitle 等）为即发即忘，无需响应。
+fn pi_ui_approval(value: &Value) -> Option<RawAgentEvent> {
+    let method = value
+        .get("method")
+        .and_then(Value::as_str)
+        .unwrap_or_default();
+    if !matches!(method, "select" | "confirm") {
+        return None;
+    }
+    let id = value
+        .get("id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.is_empty())?;
+    let options = value
+        .get("options")
+        .and_then(Value::as_array)
+        .map(|items| {
+            items
+                .iter()
+                .filter_map(|item| item.as_str().map(str::to_string))
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    let detail = value
+        .get("message")
+        .and_then(Value::as_str)
+        .map(str::to_string)
+        .unwrap_or_else(|| options.join(" / "));
+    Some(RawAgentEvent {
+        kind: "approval_requested",
+        content: None,
+        tool_name: None,
+        approval: Some(RawApproval {
+            backend_request_id: json!(id),
+            kind: "other".into(),
+            title: value
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("Pi 扩展请求")
+                .to_string(),
+            detail,
+            command: None,
+            cwd: None,
+            method: Some(method.to_string()),
+            options,
+        }),
+        payload: Some(value.clone()),
+        turn_id: None,
+        backend_session_id: None,
+    })
+}
+
+fn localize_pi_retry(value: &Value) -> String {
+    let attempt = value.get("attempt").and_then(Value::as_u64);
+    let max = value.get("maxAttempts").and_then(Value::as_u64);
+    match (attempt, max) {
+        (Some(attempt), Some(max)) => format!("连接暂时中断，正在重试（{attempt}/{max}）"),
+        _ => "连接暂时中断，正在重试".into(),
+    }
+}
+
+/// `select` 的「允许」需要回填具体选项文本：优先匹配语义上的许可选项，
+/// 无法识别时回退到第一项。
+pub fn pi_allow_option(options: &[String]) -> Option<String> {
+    const ALLOW_HINTS: [&str; 6] = ["allow", "approve", "yes", "ok", "允许", "批准"];
+    options
+        .iter()
+        .find(|option| {
+            let lowered = option.to_ascii_lowercase();
+            ALLOW_HINTS.iter().any(|hint| lowered.contains(hint))
+        })
+        .or_else(|| options.first())
+        .cloned()
 }
 
 pub fn backend_overrides(

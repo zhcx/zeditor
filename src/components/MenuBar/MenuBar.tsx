@@ -10,6 +10,7 @@ import { applyExportTemplate, loadExportTemplate } from '../Export/exportTemplat
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { resolveSaveBaseName } from '../../utils/saveName';
 import type { TableAction } from '../../utils/markdownTable';
+import { THEMES, resolveThemePreference } from '../../themes/apply';
 
 // 导出对话框与语法手册只在对应菜单项打开时才需要，按需加载以缩小入口 chunk。
 const PdfExportDialog = lazy(() => import('../Export/PdfExportDialog').then(m => ({ default: m.PdfExportDialog })));
@@ -90,6 +91,21 @@ const md = new MarkdownIt({
 });
 
 const APP_NAME = 'Zeditor';
+
+// F11 全屏切换：桌面端切换 Tauri 窗口全屏，Web 构建回退到浏览器全屏 API。
+async function toggleAppFullscreen() {
+  if ('__TAURI_INTERNALS__' in window) {
+    const { getCurrentWindow } = await import('@tauri-apps/api/window');
+    const appWindow = getCurrentWindow();
+    await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
+    return;
+  }
+  if (document.fullscreenElement) {
+    await document.exitFullscreen();
+    return;
+  }
+  await document.documentElement.requestFullscreen();
+}
 
 function HelpModal({ type, updateInfo, updateError, downloadProgress, downloadDone, onDownloadAndInstall, onClose }: HelpModalProps) {
   const content = {
@@ -179,7 +195,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.5.5**
+**Zeditor v0.5.6**
 
 一款现代化的 Markdown 编辑器
 
@@ -188,7 +204,7 @@ graph TD
 - 沉浸阅读 / 沉浸写作 / AI Chatbox
 - 多标签页编辑，可调节布局
 - 数学公式（KaTeX）、Mermaid 图表、代码高亮
-- 多主题：浅色 / 深色（简约现代配色）
+- 多主题：12 套主题（6 浅色 + 6 深色，含 VS Code / Gruvbox / Nord / Dracula / Solarized 等）
 - 文件夹浏览、最近文档、拖拽打开
 - 多图床支持：Cloudinary、PicGo、S3、本地存储
 - AI 智能助手：对话面板、校对、重写、翻译、摘要、大纲
@@ -198,10 +214,10 @@ graph TD
 - GitHub Release 自动检查更新
 
 **本版本更新**
-- **链接检查**：视图菜单「检查 Markdown」一键扫描文档中失效的本地链接与图片，结果面板列出并支持 F2 / Shift+F2 在问题间跳转
-- **内联弹窗**：点击链接、图片、公式、脚注或 Wiki 链接即在原位弹出编辑窗；Ctrl+K 编辑链接、Ctrl+点击直接打开，公式带 KaTeX 实时预览
-- **工作流查看器**：打开 .github/workflows 下的 YAML 渲染为可交互的 job 依赖图，支持诊断与结构化编辑
-- **智能 Tab 导航**：Tab 可在括号、引号、行内格式与链接字段之间穿梭，支持中日韩括号与多光标
+- **Agent 交互响应性能优化**：用户输入到首个反馈显著加快——隔离工作区准备与 CLI 探测并行、仓库全量文件哈希分片并行，耗时步骤前即时显示进展提示；流式输出按帧合并渲染、Markdown 按节奏追赶，长回答期间输入框保持流畅
+- **窄窗口 Agent 工具栏换行**：「+ / @引用 / 审批 / 模型 / 推理强度 / 发送」以可读最小宽度换行，不再因控件被挤扁而文字重叠
+- **侧栏默认宽度修正**：新会话默认宽度 220px → 250px，资源管理器标题完整可见
+- **主题子菜单溢出修复**：视图 → 主题列表靠近视口底部时自动向上翻转，12 套主题不再被裁切
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it
@@ -406,18 +422,8 @@ export function MenuBar() {
     getActiveTab
   } = useAppStore();
   const mode = useAppStore((state) => state.mode);
-  // 主题偏好解析与 App.tsx 的 resolveThemePreference 同规则：system 跟随
-  // 系统，旧值/别名归一到 vscode-light / vscode-dark，用于菜单当前态勾选。
-  const resolvedTheme = (() => {
-    const preference = settings.appearance.theme;
-    if (preference === 'system') {
-      return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'vscode-dark' : 'vscode-light';
-    }
-    if (preference === 'dark') return 'vscode-dark';
-    if (preference === 'light') return 'vscode-light';
-    return preference;
-  })();
-  const isDarkThemeActive = resolvedTheme.endsWith('dark');
+  // 主题偏好解析与 themes/apply 的 resolveThemePreference 同规则，用于菜单当前态勾选。
+  const resolvedTheme = resolveThemePreference(settings.appearance.theme);
 
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -589,6 +595,74 @@ export function MenuBar() {
       await message(`保存失败：${String(error)}`, {title:'无法保存文件',kind:'error'});
     }
     setActiveMenu(null);
+  };
+
+  // 文件与视图快捷键：菜单与「帮助 → 快捷键说明」标注的 Ctrl/Cmd+N/O/S、
+  // Ctrl/Cmd+Shift+S、F11。应用使用 WebView 内自绘菜单栏，Tauri 原生菜单
+  // 未注册加速键，因此这里统一补上 window 级监听。ref 持有最新处理器，
+  // 避免监听器随每次渲染重复注册。
+  const fileShortcutRef = useRef({
+    newFile: handleNewFile,
+    openFile: handleOpenFile,
+    saveFile: handleSaveFile,
+    saveAs: handleSaveAs,
+  });
+  useEffect(() => {
+    fileShortcutRef.current = {
+      newFile: handleNewFile,
+      openFile: handleOpenFile,
+      saveFile: handleSaveFile,
+      saveAs: handleSaveAs,
+    };
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
+      if (event.key === 'F11') {
+        event.preventDefault();
+        void toggleAppFullscreen();
+        return;
+      }
+      const primary = event.ctrlKey || event.metaKey;
+      if (!primary || event.altKey) return;
+      const key = event.key.toLowerCase();
+      const handlers = fileShortcutRef.current;
+      if (event.shiftKey) {
+        if (key === 's') {
+          event.preventDefault();
+          void handlers.saveAs();
+        }
+        return;
+      }
+      if (key === 'n') {
+        event.preventDefault();
+        handlers.newFile();
+      } else if (key === 'o') {
+        event.preventDefault();
+        void handlers.openFile();
+      } else if (key === 's') {
+        event.preventDefault();
+        void handlers.saveFile();
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
+
+  // 子菜单高度估算（每项最小 32px + 间距，再加面板内边距），
+  // 用于判断向下弹出是否会超出视口底部。
+  const estimateSubmenuHeight = (itemCount: number) => itemCount * 34 + 24;
+
+  // 鼠标进入子菜单触发行时测量视口：下方放不下且上方足够时，
+  // 给子菜单加 submenu-up 类改为向上弹出（如「视图 → 主题」共 12 项）。
+  const handleSubmenuEnter = (wrapper: HTMLDivElement, itemCount: number) => {
+    const dropdown = wrapper.querySelector<HTMLElement>('.submenu-dropdown');
+    if (!dropdown) return;
+    const rect = wrapper.getBoundingClientRect();
+    const height = estimateSubmenuHeight(itemCount);
+    const overflowBelow = rect.bottom + height - 8 > window.innerHeight;
+    const fitsAbove = rect.bottom + 8 >= height;
+    dropdown.classList.toggle('submenu-up', overflowBelow && fitsAbove);
   };
 
   const getExportFilename = (format: string) => {
@@ -796,14 +870,13 @@ export function MenuBar() {
         { divider: true, label: '' },
         {
           label: '主题',
-          children: [
-            { label: '深色主题', checked: isDarkThemeActive, action: () => {
-              setSettings({ ...settings, appearance: { ...settings.appearance, theme: 'vscode-dark' } });
-            }},
-            { label: '浅色主题', checked: !isDarkThemeActive, action: () => {
-              setSettings({ ...settings, appearance: { ...settings.appearance, theme: 'vscode-light' } });
-            }},
-          ],
+          children: THEMES.map((theme) => ({
+            label: `${theme.label}（${theme.labelEn}）`,
+            checked: resolvedTheme === theme.id,
+            action: () => {
+              setSettings({ ...settings, appearance: { ...settings.appearance, theme: theme.id } });
+            },
+          })),
         },
         { divider: true, label: '' },
         { label: '设置', action: () => setSettingsOpen(true) },
@@ -903,27 +976,33 @@ export function MenuBar() {
                     item.divider ? (
                       <div key={index} className="menu-divider" />
                     ) : item.children ? (
-                      <div key={index} className="menu-option-wrapper">
+                      <div
+                        key={index}
+                        className="menu-option-wrapper"
+                        onMouseEnter={(event) => handleSubmenuEnter(event.currentTarget, item.children?.length ?? 0)}
+                      >
                         <button className="menu-option submenu-trigger" type="button">
                           {renderOptionLabel(item)}
                           <span className="submenu-arrow">›</span>
                         </button>
                         <div className="submenu-dropdown">
-                          {item.children.map((child, childIndex) => (
-                            child.divider ? (
-                              <div key={childIndex} className="menu-divider" />
-                            ) : (
-                              <button
-                                key={childIndex}
-                                className={'menu-option' + (child.checked ? ' is-checked' : '')}
-                                onClick={() => runMenuItem(child)}
-                                aria-checked={child.checked ?? undefined}
-                              >
-                                {renderOptionLabel(child)}
-                                {child.shortcut && <span className="shortcut">{child.shortcut}</span>}
-                              </button>
-                            )
-                          ))}
+                          <div className="submenu-scroll">
+                            {item.children.map((child, childIndex) => (
+                              child.divider ? (
+                                <div key={childIndex} className="menu-divider" />
+                              ) : (
+                                <button
+                                  key={childIndex}
+                                  className={'menu-option' + (child.checked ? ' is-checked' : '')}
+                                  onClick={() => runMenuItem(child)}
+                                  aria-checked={child.checked ?? undefined}
+                                >
+                                  {renderOptionLabel(child)}
+                                  {child.shortcut && <span className="shortcut">{child.shortcut}</span>}
+                                </button>
+                              )
+                            ))}
+                          </div>
                         </div>
                       </div>
                     ) : (

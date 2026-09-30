@@ -24,7 +24,119 @@ pub async fn list_models(
         AgentBackendId::Codex => list_codex_models(executable, profile, workspace_root).await,
         AgentBackendId::ClaudeCode => list_claude_models(executable, workspace_root).await,
         AgentBackendId::Opencode => list_opencode_models(executable, workspace_root).await,
+        AgentBackendId::Pi => list_pi_models(executable, workspace_root).await,
     }
+}
+
+/// pi 没有模型列表子命令，改用 RPC 的 `get_available_models` 查询。
+async fn list_pi_models(
+    executable: &Path,
+    workspace_root: Option<&Path>,
+) -> Result<AgentModelCatalog, String> {
+    let mut command = process::tokio_executable_command(executable)?;
+    command
+        .args(["--mode", "rpc"])
+        .stdin(Stdio::piped())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::null())
+        .kill_on_drop(true);
+    if let Some(root) = workspace_root.filter(|root| root.is_dir()) {
+        command.current_dir(root);
+    }
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("启动 Pi 失败：{error}"))?;
+    let mut stdin = child.stdin.take().ok_or("无法写入 Pi")?;
+    let stdout = child.stdout.take().ok_or("无法读取 Pi 输出")?;
+    stdin
+        .write_all(format!("{}\n", json!({"id": 1, "type": "get_available_models"})).as_bytes())
+        .await
+        .map_err(|error| error.to_string())?;
+    stdin.flush().await.map_err(|error| error.to_string())?;
+
+    let result = tokio::time::timeout(Duration::from_secs(20), async {
+        let mut lines = BufReader::new(stdout).lines();
+        while let Some(line) = lines.next_line().await.map_err(|error| error.to_string())? {
+            let Ok(value) = serde_json::from_str::<Value>(&line) else {
+                continue;
+            };
+            if value.get("id") != Some(&json!(1))
+                || value.get("type").and_then(Value::as_str) != Some("response")
+            {
+                continue;
+            }
+            if value.get("success").and_then(Value::as_bool) == Some(false) {
+                return Err(value
+                    .get("error")
+                    .and_then(Value::as_str)
+                    .unwrap_or("Pi 模型查询失败")
+                    .to_string());
+            }
+            return parse_pi_catalog(value.pointer("/data/models").unwrap_or(&Value::Null));
+        }
+        Err("Pi 没有返回模型列表".into())
+    })
+    .await
+    .map_err(|_| "读取 Pi 模型列表超时".to_string())?;
+    let _ = child.kill().await;
+    result
+}
+
+fn parse_pi_catalog(models: &Value) -> Result<AgentModelCatalog, String> {
+    let entries = models.as_array().ok_or("Pi 返回了无法识别的模型列表")?;
+    let models = entries
+        .iter()
+        .filter_map(|entry| {
+            let id = entry.get("id").and_then(Value::as_str)?;
+            let provider = entry
+                .get("provider")
+                .and_then(Value::as_str)
+                .unwrap_or_default();
+            Some(AgentModelOption {
+                // pi 的 --model 接受 provider/id，这里沿用同一形式作为标识。
+                id: if provider.is_empty() {
+                    id.to_string()
+                } else {
+                    format!("{provider}/{id}")
+                },
+                display_name: entry
+                    .get("name")
+                    .and_then(Value::as_str)
+                    .unwrap_or(id)
+                    .to_string(),
+                description: entry
+                    .get("api")
+                    .and_then(Value::as_str)
+                    .map(|api| format!("{provider} · {api}"))
+                    .unwrap_or_else(|| provider.to_string()),
+                is_default: false,
+                default_reasoning_effort: None,
+                supported_reasoning_efforts: if entry
+                    .get("reasoning")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false)
+                {
+                    // pi 的思考等级：off/minimal/low/medium/high/xhigh；
+                    // 这里只暴露常用档位，与其它后端的选择器保持一致。
+                    ["low", "medium", "high", "xhigh"]
+                        .iter()
+                        .map(|item| item.to_string())
+                        .collect()
+                } else {
+                    Vec::new()
+                },
+            })
+        })
+        .collect::<Vec<_>>();
+    Ok(AgentModelCatalog {
+        backend: AgentBackendId::Pi,
+        current_model: None,
+        diagnostic: models
+            .is_empty()
+            .then(|| "Pi 没有返回可用模型，请先在 pi 中登录并配置 provider。".to_string()),
+        models,
+        source: "Pi RPC get_available_models".into(),
+    })
 }
 
 async fn list_codex_models(
@@ -328,7 +440,8 @@ fn configured_model(backend: AgentBackendId, workspace_root: Option<&Path>) -> O
                 );
             }
         }
-        AgentBackendId::Codex => return None,
+        // Codex 从 app-server 读取，Pi 从 RPC 的 get_state 读取，都不依赖配置文件。
+        AgentBackendId::Codex | AgentBackendId::Pi => return None,
     }
     paths.into_iter().find_map(|path| {
         let value = serde_json::from_slice::<Value>(&fs::read(path).ok()?).ok()?;
