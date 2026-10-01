@@ -51,6 +51,10 @@ test-output/
 docs/superpowers/
 *.png.bak
 
+# VitePress docs build artifacts
+docs/.vitepress/cache
+docs/.vitepress/dist
+
 # Python virtual env
 converter/.venv/
 __pycache__/

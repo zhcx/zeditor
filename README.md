@@ -10,6 +10,10 @@
 [![License](https://img.shields.io/badge/license-MIT-blue?style=flat-square)](https://github.com/zhcx/zeditor/blob/main/LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20macOS%20%7C%20Linux-lightgrey?style=flat-square)](https://github.com/zhcx/zeditor/releases)
 
+### 📖 [点击进入使用指南](https://zhcx.github.io/zeditor/)
+
+**完整的图文使用教程**：安装上手 · 编辑与格式 · 图表渲染 · AI 助手 · 本地 Agent · MCP 集成 · 文档转换 · 多格式导出 · 云备份 · 快捷键与故障排除
+
 <img src="docs/banner.png" alt="Zeditor" width="900">
 
 </div>
