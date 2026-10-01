@@ -10,7 +10,6 @@ export default defineConfig({
   base: BASE,
   srcDir: '.',
   srcExclude: ['banner.png', '**/releases/**'],
-  ignoreDeadLinks: true,
   lastUpdated: true,
 
   head: [

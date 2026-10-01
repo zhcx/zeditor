@@ -48,4 +48,4 @@ Get-AuthenticodeSignature .\Zeditor_0.3.7_x64-setup.exe |
   Format-List Status,SignerCertificate,TimeStamperCertificate
 ```
 
-For a SignPath-signed build, the result must be `Valid`, the signer subject must contain `SignPath Foundation`, and a timestamp certificate must be present. See the repository's [Code Signing Policy](../CODE_SIGNING_POLICY.md) for governance and incident handling.
+For a SignPath-signed build, the result must be `Valid`, the signer subject must contain `SignPath Foundation`, and a timestamp certificate must be present. See the repository's [Code Signing Policy](https://github.com/zhcx/zeditor/blob/main/CODE_SIGNING_POLICY.md) for governance and incident handling.
