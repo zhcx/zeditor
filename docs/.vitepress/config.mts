@@ -27,7 +27,7 @@ export default defineConfig({
       { text: '参考', link: '/reference/shortcuts', activeMatch: '/reference/' },
       { text: '下载', link: `https://github.com/${REPO}/releases/latest` },
       {
-        text: 'v0.5.6',
+        text: 'v0.5.7',
         items: [
           { text: '更新日志', link: `https://github.com/${REPO}/blob/main/CHANGELOG.md` },
           { text: '发布说明', link: `https://github.com/${REPO}/releases` }

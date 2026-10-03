@@ -179,32 +179,35 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.5.6 更新
+## v0.5.7 更新
 
 ### 更新日志
 
-- **Agent 交互响应性能优化**：用户输入到首个反馈显著加快——启动隔离工作区与 CLI 探测并行执行、仓库全量文件哈希分片并行；耗时步骤前即时显示进展提示（「正在准备隔离工作区…」「正在启动 …」），告别提交后数秒无响应。流式输出改为按帧合并渲染，`AgentMarkdown` 按固定节奏追赶，长回答期间输入框与滚动保持流畅。
-- **窄窗口 Agent 输入框工具栏换行**：未最大化窗口下「+ / @引用 / 审批 / 模型 / 推理强度 / 发送」以可读最小宽度换行，不再因控件被挤扁而文字重叠。
-- **侧栏默认宽度修正**：新会话默认宽度 220px → 250px，资源管理器标题完整可见。
-- **主题子菜单溢出修复**：视图 → 主题列表靠近视口底部时自动向上翻转，12 套主题不再被裁切。
+- **AI 服务商选择修正**：AI 对话框不再默认显示从未配置密钥的 OpenAI，改为落到真正生效的服务商；只配置一个服务商时隐藏下拉菜单、只读显示其名称，配置多个时才提供下拉选择。配套修复「拿 A 服务商的密钥去打 B 服务商默认端点」导致请求全部失败的问题。
+- **校对失败不再被误报为「未发现问题」**：分块失败时透出真实原因（如 `API错误 (401)` / `429`），专为限流设计的顺序回退兜底恢复生效；部分分块成功时直接返回已有结果，不再要求重跑整篇。
+- **校对速度优化**：并发上限 4 → 8（7 块文档从 2 波降到 1 波），连接池复用避免反复 TLS 握手，顺序回退仅在失败后等待；并修复中文分块因 `max_tokens` 估算偏低被静默截断、白跑一整轮生成的问题。
+- **失效系统代理自动绕行**：系统代理未运行时（Clash / V2Ray 退出后环境变量残留），AI 请求会自动切换直连并给出可诊断报错，不再整篇失败于一句 `error sending request`。
+- **本地 Agent 总开关与每后端启用停用**：新增「AI 未配置时回退本地 AI Agent」总开关；Claude Code / Codex / OpenCode / Pi 可各自停用；AI 助手关闭时聊天栏只显示 Agent 运行时；启动预热使首次调用零等待。
+- **界面：日语 / 韩语支持**：语言库新增日本語 / 한국어，系统语言自动检测，菜单栏「功能」新增语言子菜单，切换即时生效。
+- **表格列宽拖动修复**：修正列数计算错误导致拖不到真实列的问题，每列一个右边界手柄，最右侧边框也能拖动。
 
-### v0.5.6 平台安装包对照
+### v0.5.7 平台安装包对照
 
-> 以下链接指向 v0.5.6 Release 资产；安装包由 GitHub Actions 根据 v0.5.6 标签源码构建。
+> 以下链接指向 v0.5.7 Release 资产；安装包由 GitHub Actions 根据 v0.5.7 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor-0.5.6-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.6/Zeditor_0.5.6_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor-0.5.7-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.6.md`](docs/releases/v0.5.6.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.7.md`](docs/releases/v0.5.7.md)。
 
 ## Contributors
 

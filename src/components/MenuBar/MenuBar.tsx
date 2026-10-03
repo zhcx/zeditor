@@ -196,7 +196,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.5.6**
+**Zeditor v0.5.7**
 
 一款现代化的 Markdown 编辑器
 
