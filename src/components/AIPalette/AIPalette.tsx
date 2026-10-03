@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../stores/appStore';
-import { useAIStore, isAIConfigured } from '../../stores/aiStore';
+import { useAIStore } from '../../stores/aiStore';
 import {
   BUILTIN_GENIES,
   extractGenieTarget,
@@ -167,11 +167,8 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
       setNotice('编辑器未就绪');
       return;
     }
-    // 提前检查 AI 配置：未配置时保留面板并提示，而不是关闭后静默失败。
-    if (!isAIConfigured(useAppStore.getState().settings.ai)) {
-      setNotice('AI 未就绪：请先在「设置 → AI 助手」中启用并配置（Ollama 本地模型无需密钥）');
-      return;
-    }
+    // AI 配置不再作为前置拦截：AI 助手未配置时后端自动落到本地 Agent 后备，
+    // 两者都不可用才由 runGenie 返回错误提示。
     // 生效范围：精灵自身范围优先；选区精灵在无选区时回退到段落。
     const effectiveScope = genie.scope === 'selection' && editorView.state.selection.main.empty
       ? 'block'
@@ -188,10 +185,6 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
   const submitFreeform = useCallback((prompt: string) => {
     if (!editorView) {
       setNotice('编辑器未就绪');
-      return;
-    }
-    if (!isAIConfigured(useAppStore.getState().settings.ai)) {
-      setNotice('AI 未就绪：请先在「设置 → AI 助手」中启用并配置（Ollama 本地模型无需密钥）');
       return;
     }
     const target = extractGenieTarget(editorView, scope);

@@ -271,6 +271,12 @@ pub struct AISettings {
     pub provider_api_keys: String,
     #[serde(default)]
     pub provider_profiles: String,
+    /// 校对引擎：true 时强制走本机 AI Agent（单次调用整篇），不走 AI 助手 API。
+    #[serde(default)]
+    pub proofread_use_agent: bool,
+    /// 伴写引擎：true 时强制走本机 AI Agent，不走 AI 助手 API。
+    #[serde(default)]
+    pub companion_use_agent: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,6 +384,8 @@ impl Default for Settings {
                 custom_style_prompt: String::new(),
                 provider_api_keys: "{}".into(),
                 provider_profiles: "{}".into(),
+                proofread_use_agent: false,
+                companion_use_agent: false,
             },
             agent: AgentSettings::default(),
             web_search: WebSearchSettings {

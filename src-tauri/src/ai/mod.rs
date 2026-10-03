@@ -30,8 +30,11 @@ async fn run_ai_action_safely(
     let action_for_log = action.clone();
     let handle = tokio::task::spawn(async move {
         match action.as_str() {
-            "proofread" => client::proofread(&content, &settings).await,
-            "companion" => client::companion(&content, context.as_deref(), &settings).await,
+            "proofread" => client::proofread(&content, &settings, settings.proofread_use_agent).await,
+            "companion" => {
+                client::companion(&content, context.as_deref(), &settings, settings.companion_use_agent)
+                    .await
+            }
             "rewrite" => client::rewrite(&content, &settings).await,
             "translate" => client::translate(&content, context.as_deref(), &settings).await,
             "summarize" => client::summarize(&content, &settings).await,
@@ -95,14 +98,9 @@ pub async fn ai_request(
     doc_title: Option<String>,
     enable_thinking: Option<bool>,
 ) -> Result<AIResponse, String> {
-    if !settings.enabled {
-        return Err("AI功能未启用".to_string());
-    }
-
-    if settings.api_key.is_empty() && provider_requires_key(&settings) {
-        return Err("请先配置API密钥".to_string());
-    }
-
+    // 这里不再因「未启用 / 缺少密钥」直接报错：call_api_with_messages 会把
+    // 同一动作交给本地 Agent 后备（agent::bridge）执行，全部失败时才返回
+    // 可读的组合错误。AI 助手与本地 Agent 因此互为可用路径。
     run_ai_action_safely(
         action,
         content,
@@ -131,12 +129,14 @@ pub async fn ai_chat_streaming(
     request_id: String,
     window: WebviewWindow,
 ) -> Result<(), String> {
+    // 聊天是交互流式场景，不桥接 Agent（无打字机体验）；未配置时引导用户
+    // 切换到聊天面板内置的 Agent 运行时（RuntimeTabs）。
     if !settings.enabled {
-        return Err("AI功能未启用".to_string());
+        return Err("AI 助手未启用。请在设置中配置，或点击面板顶部的「Agent」切换到本地 Agent 运行时".to_string());
     }
 
     if settings.api_key.is_empty() && provider_requires_key(&settings) {
-        return Err("请先配置API密钥".to_string());
+        return Err("请先配置 API 密钥，或点击面板顶部的「Agent」切换到本地 Agent 运行时".to_string());
     }
 
     // chat_streaming 也用 spawn 隔离，防止 panic 传播

@@ -248,6 +248,7 @@ fn main() {
             ai::genies::list_custom_genies,
             ai::genies::open_genies_folder,
             agent::agent_detect_backends,
+            agent::agent_probe_backend,
             agent::agent_list_models,
             agent::agent_list_sessions,
             agent::agent_get_session_events,

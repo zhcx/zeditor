@@ -232,6 +232,30 @@ async fn call_api(
     .await
 }
 
+/// 把消息序列渲染成单一提示词，供本地 Agent 桥接使用：
+/// 系统指令在前，消息按角色标注顺序拼接。
+fn render_prompt(messages: &[ChatMessage], system_prompt: Option<&str>) -> String {
+    let mut prompt = String::new();
+    if let Some(system) = system_prompt {
+        prompt.push_str(system);
+        prompt.push_str("\n\n");
+    }
+    for message in messages {
+        match message.role.as_str() {
+            "assistant" => {
+                prompt.push_str("（你此前的回复：）\n");
+                prompt.push_str(&message.content);
+                prompt.push_str("\n\n");
+            }
+            _ => {
+                prompt.push_str(&message.content);
+                prompt.push_str("\n\n");
+            }
+        }
+    }
+    prompt.trim_end().to_string()
+}
+
 async fn call_api_with_messages(
     messages: Vec<ChatMessage>,
     settings: &AISettings,
@@ -240,6 +264,14 @@ async fn call_api_with_messages(
     temperature: Option<f32>,
     enable_thinking: bool,
 ) -> Result<String, String> {
+    // AI 助手未配置（未启用或缺少密钥）时，把同一份提示词交给本机 Agent CLI
+    // 一次性完成（见 agent::bridge）：伴写、校对、翻译等编辑类功能因此不再
+    // 单独依赖 AI 助手配置。温度/长度参数由后端 CLI 自行决定。
+    if !settings.enabled || (settings.api_key.is_empty() && settings.provider != "ollama") {
+        return crate::agent::bridge::complete(&render_prompt(&messages, system_prompt)).await
+            .map_err(|error| format!("AI 助手未配置，本地 Agent 后备不可用：{error}"));
+    }
+
     let client = get_client()?;
     let endpoint = get_api_endpoint(settings);
     let temperature = temperature.unwrap_or(settings.temperature);
@@ -463,7 +495,30 @@ async fn call_anthropic_with_messages(
     Err("Anthropic API未返回有效文本".to_string())
 }
 
-pub async fn proofread(content: &str, settings: &AISettings) -> Result<AIResponse, String> {
+/// AI 助手是否可直接调用（与 call_api_with_messages 的判定保持一致）。
+fn api_ready(settings: &AISettings) -> bool {
+    settings.enabled && (!settings.api_key.is_empty() || settings.provider == "ollama")
+}
+
+pub async fn proofread(
+    content: &str,
+    settings: &AISettings,
+    force_agent: bool,
+) -> Result<AIResponse, String> {
+    // 本地 Agent 引擎：一次调用覆盖整篇。分块是为 API 单次长度与延迟设计的，
+    // Agent 走管道没有长度限制；若沿用分块，每个分块都会冷启动一次 CLI 进程，
+    // 稍长的文档会退化成「正在校对全文」长时间不动。
+    if force_agent || !api_ready(settings) {
+        let prompt = get_prompt(PromptAction::Proofread, content, None, settings);
+        let result = crate::agent::bridge::complete(&prompt).await?;
+        let items = parse_proofread_result(&result)?;
+        return Ok(AIResponse {
+            success: true,
+            data: serde_json::Value::Array(items),
+            message: None,
+        });
+    }
+
     let chunks = split_proofread_chunks(content);
     let data: serde_json::Value = if chunks.len() <= 1 {
         let result = match proofread_chunk(content, settings).await {
@@ -905,9 +960,15 @@ pub async fn companion(
     content: &str,
     context: Option<&str>,
     settings: &AISettings,
+    force_agent: bool,
 ) -> Result<AIResponse, String> {
     let prompt = get_prompt(PromptAction::Companion, content, context, settings);
-    let result = call_api(prompt, settings, Some(800), None).await?;
+    // 本地 Agent 引擎（开关强制，或 AI 助手未配置时的自动回退）。
+    let result = if force_agent || !api_ready(settings) {
+        crate::agent::bridge::complete(&prompt).await?
+    } else {
+        call_api(prompt, settings, Some(800), None).await?
+    };
 
     let suggestions = parse_companion_suggestions(&result);
 
@@ -1601,4 +1662,68 @@ pub async fn fetch_models(api_key: &str, api_endpoint: &str) -> Result<Vec<Strin
     }
 
     Ok(models)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::AISettings;
+
+    fn agent_settings() -> AISettings {
+        AISettings {
+            enabled: false,
+            provider: "openai".into(),
+            api_key: String::new(),
+            api_endpoint: String::new(),
+            model: String::new(),
+            temperature: 0.7,
+            auto_suggest: false,
+            suggest_delay: 2000,
+            writing_style: "formal".into(),
+            custom_style_prompt: String::new(),
+            provider_api_keys: "{}".into(),
+            provider_profiles: "{}".into(),
+            proofread_use_agent: true,
+            companion_use_agent: false,
+        }
+    }
+
+    #[test]
+    fn api_ready_requires_enabled_and_key_or_local_provider() {
+        let mut settings = agent_settings();
+        assert!(!api_ready(&settings));
+        settings.provider = "ollama".into();
+        settings.enabled = true;
+        assert!(api_ready(&settings));
+        settings.provider = "openai".into();
+        assert!(!api_ready(&settings));
+        settings.api_key = "sk-test".into();
+        assert!(api_ready(&settings));
+    }
+
+    #[test]
+    fn proofread_prompt_covers_full_content_when_agent_forced() {
+        // Agent 引擎单次调用的 prompt 必须包含整篇内容（不按分块阈值截断）。
+        let mut settings = agent_settings();
+        settings.proofread_use_agent = true;
+        let content = "长文本内容标记".to_string() + &"补充内容。".repeat(2000);
+        let prompt = get_prompt(PromptAction::Proofread, &content, None, &settings);
+        assert!(prompt.contains("长文本内容标记"));
+        assert!(prompt.contains(&"补充内容。".repeat(50)));
+    }
+
+    /// 真实调用本地 Agent 校对（消耗少量模型额度）：超过 API 分块阈值的长文
+    /// 应单次完成，而不是按 3200 字符分块触发多次 CLI 冷启动。
+    /// 运行：cargo test proofread_via_agent -- --include-ignored
+    #[tokio::test]
+    #[ignore]
+    async fn proofread_via_agent_handles_long_text_in_one_turn() {
+        let content = "这是一段用于测试的文本。\n\n".repeat(400);
+        assert!(content.encode_utf16().count() > 3200, "fixture 应超过分块阈值");
+        let started = std::time::Instant::now();
+        let response = proofread(&content, &agent_settings(), true).await.unwrap();
+        eprintln!("agent proofread took {:?}", started.elapsed());
+        assert!(response.success);
+        assert!(response.data.is_array());
+    }
 }

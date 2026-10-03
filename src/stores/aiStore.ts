@@ -451,17 +451,11 @@ export const useAIStore = create<AIState>((set, get) => ({
 
     const settings = useAppStore.getState().settings;
 
-    // 校对模式：开启「使用 AI 校对」且 AI 可用时走 AI；其余情况退化为内置
-    // Markdown 静态校对（断链、未闭合围栏、跳级标题等正确性检查）。
+    // 校对模式：开启「使用 AI 校对」时走 AI；AI 助手未配置时后端会自动
+    // 落到本地 Agent 后备（agent bridge），两者都不可用才返回可读错误。
+    // 其余情况退化为内置 Markdown 静态校对（断链、未闭合围栏、跳级标题等）。
     const aiRequested = settings.ai.proofread_with_ai !== false;
     const aiReady = isAIConfigured(settings.ai);
-    if (aiRequested && !aiReady) {
-      set({
-        status: 'error',
-        statusMessage: 'AI 校对未就绪：请在「设置 → AI 助手」中启用 AI 并配置 API 密钥；或关闭「使用 AI 校对」，改用内置 Markdown 校对。',
-      });
-      return;
-    }
 
     const trimmedContent = content.trim();
     if (!trimmedContent) {
@@ -472,7 +466,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     const trimStartOffset = content.indexOf(trimmedContent);
     const resultOffset = baseOffset + Math.max(0, trimStartOffset);
 
-    if (!aiReady) {
+    if (!aiReady && !aiRequested) {
       set({
         status: 'proofreading',
         statusMessage: baseOffset > 0 ? '正在检查选中文本...' : '正在检查 Markdown 语法...',
@@ -508,9 +502,14 @@ export const useAIStore = create<AIState>((set, get) => ({
       return;
     }
 
+    // 状态文案明确当前引擎：本地 Agent 开关开启、或 AI 助手未配置（自动回退）
+    // 时显示「本地 Agent」，便于用户确认具体调用了哪个功能。
+    const proofreadViaAgent = settings.ai.proofread_use_agent === true || !aiReady;
     set({
       status: 'proofreading',
-      statusMessage: baseOffset > 0 ? '正在校对选中文本...' : '正在校对全文...',
+      statusMessage: baseOffset > 0
+        ? (proofreadViaAgent ? '正在通过本地 AI Agent 校对选中文本...' : '正在校对选中文本...')
+        : (proofreadViaAgent ? '正在通过本地 AI Agent 校对全文...' : '正在校对全文...'),
     });
 
     // 带重试的校对请求
@@ -620,15 +619,7 @@ export const useAIStore = create<AIState>((set, get) => ({
     const requestSeq = ++companionRequestSeq;
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled) {
-      set({ status: 'error', statusMessage: 'AI功能未启用', companionSuggestions: [] });
-      return;
-    }
-
-    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
-      set({ status: 'error', statusMessage: '请先配置API密钥', companionSuggestions: [] });
-      return;
-    }
+    // AI 助手未配置时后端自动落到本地 Agent 后备，不再在这里拦截。
 
     const trimmedContent = content.trim();
     if (!trimmedContent) {
@@ -648,9 +639,12 @@ export const useAIStore = create<AIState>((set, get) => ({
       return;
     }
 
+    // 状态文案明确当前引擎（同校对）：便于确认走的是 AI 助手还是本地 Agent。
+    const companionViaAgent = settings.ai.companion_use_agent === true
+      || !isAIConfigured(settings.ai);
     set({
       status: 'companion',
-      statusMessage: '正在生成伴写建议...',
+      statusMessage: companionViaAgent ? '正在通过本地 AI Agent 生成伴写建议...' : '正在生成伴写建议...',
       companionSuggestions: [],
     });
 
@@ -665,7 +659,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         success: boolean;
         data: { suggestions: string[] };
         message?: string;
-      }>('ai_request', requestData, 60000);
+      }>('ai_request', requestData, 300000);
       if (requestSeq !== companionRequestSeq) return;
 
       if (response.success && response.data?.suggestions) {
@@ -692,15 +686,6 @@ export const useAIStore = create<AIState>((set, get) => ({
     const snapshot = {activeTabId:useAppStore.getState().activeTabId,content:useAppStore.getState().content};
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled) {
-      return text;
-    }
-
-    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
-      set({ status: 'error', statusMessage: '请先配置API密钥' });
-      return text;
-    }
-
     set({ status: 'loading', statusMessage: '正在重写...' });
 
     try {
@@ -713,7 +698,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         success: boolean;
         data: { rewritten: string };
         message?: string;
-      }>('ai_request', requestData, 60000);
+      }>('ai_request', requestData, 300000);
 
       if (!sameDocument(snapshot, useAppStore.getState())) {
         set({status:'error',statusMessage:'文档已变化，请重新生成 AI 结果'});
@@ -736,15 +721,6 @@ export const useAIStore = create<AIState>((set, get) => ({
     const snapshot = {activeTabId:useAppStore.getState().activeTabId,content:useAppStore.getState().content};
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled) {
-      return text;
-    }
-
-    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
-      set({ status: 'error', statusMessage: '请先配置API密钥' });
-      return text;
-    }
-
     set({ status: 'loading', statusMessage: '正在翻译...' });
 
     try {
@@ -758,7 +734,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         success: boolean;
         data: { translated: string };
         message?: string;
-      }>('ai_request', requestData, 60000);
+      }>('ai_request', requestData, 300000);
 
       if (!sameDocument(snapshot, useAppStore.getState())) {
         set({status:'error',statusMessage:'文档已变化，请重新生成 AI 结果'});
@@ -782,15 +758,6 @@ export const useAIStore = create<AIState>((set, get) => ({
     const snapshot = {activeTabId:useAppStore.getState().activeTabId,content:useAppStore.getState().content};
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled) {
-      return '';
-    }
-
-    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
-      set({ status: 'error', statusMessage: '请先配置API密钥' });
-      return '';
-    }
-
     set({ status: 'loading', statusMessage: '正在生成摘要...' });
 
     try {
@@ -803,7 +770,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         success: boolean;
         data: { summary: string };
         message?: string;
-      }>('ai_request', requestData, 60000);
+      }>('ai_request', requestData, 300000);
 
       if (!sameDocument(snapshot, useAppStore.getState())) {
         set({status:'error',statusMessage:'文档已变化，请重新生成 AI 结果'});
@@ -826,15 +793,6 @@ export const useAIStore = create<AIState>((set, get) => ({
     const snapshot = {activeTabId:useAppStore.getState().activeTabId,content:useAppStore.getState().content};
     const settings = useAppStore.getState().settings;
 
-    if (!settings.ai.enabled) {
-      return '';
-    }
-
-    if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
-      set({ status: 'error', statusMessage: '请先配置API密钥' });
-      return '';
-    }
-
     set({ status: 'loading', statusMessage: '正在生成大纲...' });
 
     try {
@@ -847,7 +805,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         success: boolean;
         data: { outline: string };
         message?: string;
-      }>('ai_request', requestData, 60000);
+      }>('ai_request', requestData, 300000);
 
       if (!sameDocument(snapshot, useAppStore.getState())) {
         set({status:'error',statusMessage:'文档已变化，请重新生成 AI 结果'});
@@ -866,14 +824,10 @@ export const useAIStore = create<AIState>((set, get) => ({
     }
   },
 
-  // 根据光标前文续写正文。返回空字符串表示未生成（未启用 AI、
-  // 缺少密钥或请求失败——失败状态已写入 statusMessage）。
+  // 根据光标前文续写正文。返回空字符串表示未生成（请求失败——
+  // 失败状态已写入 statusMessage）。
   continueWriting: async (beforeText) => {
     const settings = useAppStore.getState().settings;
-
-    if (!settings.ai.enabled || (!settings.ai.api_key && providerNeedsKey(settings.ai.provider))) {
-      return '';
-    }
 
     set({ status: 'loading', statusMessage: '正在续写...' });
 
@@ -895,7 +849,7 @@ ${beforeText.slice(-2000)}`,
         success: boolean;
         data: { response?: string };
         message?: string;
-      }>('ai_request', requestData, 60000);
+      }>('ai_request', requestData, 300000);
 
       set({ status: 'idle', statusMessage: '' });
 
@@ -908,13 +862,9 @@ ${beforeText.slice(-2000)}`,
     }
   },
 
-  // 编辑器内的通用单轮问答/写作：返回模型正文，失败或未启用时返回空串。
+  // 编辑器内的通用单轮问答/写作：返回模型正文，失败时返回空串。
   chatForEditor: async (userMessage, source) => {
     const settings = useAppStore.getState().settings;
-
-    if (!settings.ai.enabled || (!settings.ai.api_key && providerNeedsKey(settings.ai.provider))) {
-      return '';
-    }
 
     set({ status: 'loading', statusMessage: 'AI 正在生成...' });
 
@@ -930,7 +880,7 @@ ${beforeText.slice(-2000)}`,
         action: 'chat',
         content: `${userMessage}${contextBlock}`,
         settings: settings.ai,
-      }, 60000);
+      }, 300000);
 
       set({ status: 'idle', statusMessage: '' });
       return response.success ? response.data?.response?.trim() || '' : '';
@@ -981,15 +931,7 @@ ${beforeText.slice(-2000)}`,
     const appState = useAppStore.getState();
     const ai = appState.settings.ai;
 
-    if (!isAIConfigured(ai)) {
-      set({
-        status: 'error',
-        statusMessage: ai.enabled
-          ? '请先在「设置 → AI 助手」中配置 API 密钥'
-          : '请先在「设置 → AI 助手」中启用 AI',
-      });
-      return;
-    }
+    // AI 助手未配置时后端自动落到本地 Agent 后备，不再在这里拦截。
 
     const text = target.text.trim();
     if (!text) {
@@ -1213,12 +1155,12 @@ ${beforeText.slice(-2000)}`,
     }
 
     if (!settings.ai.enabled) {
-      set({ status: 'error', statusMessage: 'AI功能未启用' });
+      set({ status: 'error', statusMessage: 'AI 助手未启用。请在设置中配置，或点击面板顶部的「Agent」切换到本地 Agent 运行时' });
       return;
     }
 
     if (!settings.ai.api_key && providerNeedsKey(settings.ai.provider)) {
-      set({ status: 'error', statusMessage: '请先配置API密钥' });
+      set({ status: 'error', statusMessage: '请先配置 API 密钥，或点击面板顶部的「Agent」切换到本地 Agent 运行时' });
       return;
     }
 

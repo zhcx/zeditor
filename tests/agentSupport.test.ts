@@ -78,6 +78,20 @@ test('Agent streaming coalesces events per frame and throttles markdown re-rende
   assert.match(panel, /const timelineBlocks = useMemo\(\(\) => buildTimelineBlocks\(timeline\), \[timeline\]\)/);
 });
 
+test('Agent backend select only lists installed and compatible CLIs', () => {
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+
+  // 下拉选项由可用后端生成：未安装 / 未启用（探测不兼容）的后端不出现。
+  assert.match(panel, /const availableBackends = useMemo\(/);
+  assert.match(panel, /\.filter\(\(id\) => backends\.find\(\(item\) => item\.id === id\)\?\.compatible\)/);
+  assert.match(panel, /options=\{availableBackends\.map\(\(id\) => \(\{/);
+  // 选中的后端不可用时回退到第一个可用项（派生值，无额外渲染副作用）。
+  assert.match(panel, /const effectiveBackend = availableBackends\.includes\(backend\)/);
+  // 一个可用后端都没有时禁用下拉并给出说明，而不是呈现空菜单。
+  assert.match(panel, /disabled=\{availableBackends\.length === 0\}/);
+  assert.match(panel, /未检测到可用的 Agent/);
+});
+
 test('Agent startup reports progress before slow preparation steps', () => {
   const rust = read('src-tauri/src/agent/mod.rs');
   const panel = read('src/components/Chatbot/AgentPanel.tsx');

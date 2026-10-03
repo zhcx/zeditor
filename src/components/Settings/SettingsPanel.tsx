@@ -1359,6 +1359,26 @@ export function SettingsPanel() {
                   )}
                 </>
               )}
+              {/* 校对 / 伴写的执行引擎：无论 AI 助手是否启用都可选择，
+                  便于确认具体走 AI 助手 API 还是本机 AI Agent。 */}
+              <SettingToggle
+                label="校对通过本地 AI Agent"
+                description="开启后「校对」交给本机 AI Agent（Pi / Claude Code 等）单次执行整篇；关闭后优先走 AI 助手 API，未配置 API 时自动回退本地 Agent"
+                checked={localSettings.ai.proofread_use_agent === true}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  ai: { ...localSettings.ai, proofread_use_agent: checked },
+                })}
+              />
+              <SettingToggle
+                label="伴写通过本地 AI Agent"
+                description="开启后 AI 伴写与续写交给本机 AI Agent 执行；关闭后优先走 AI 助手 API，未配置 API 时自动回退本地 Agent"
+                checked={localSettings.ai.companion_use_agent === true}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  ai: { ...localSettings.ai, companion_use_agent: checked },
+                })}
+              />
               <div className="settings-subsection-divider" />
               <SettingToggle
                 label="启用本地 Agent（Beta）"
