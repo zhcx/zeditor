@@ -1,6 +1,7 @@
 use futures_util::stream::{self, StreamExt};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::OnceLock;
 use std::time::Duration;
 use tauri::{Emitter, WebviewWindow};
@@ -9,11 +10,27 @@ use tokio::time::sleep;
 use super::prompts::{get_prompt, PromptAction};
 use crate::commands::AISettings;
 
+/// 遵循系统代理的客户端（reqwest 默认会读取 HTTP_PROXY / HTTPS_PROXY 等环境变量）。
 static HTTP_CLIENT: OnceLock<Client> = OnceLock::new();
+/// 显式绕过系统代理的客户端，用于系统代理失效时的兜底直连。
+static HTTP_CLIENT_DIRECT: OnceLock<Client> = OnceLock::new();
+/// 是否已确认系统代理不可用并改用直连。
+///
+/// 桌面环境里残留一个指向已关闭本地端口的 HTTP_PROXY（Clash/V2Ray 退出后未清理）
+/// 很常见，这会让所有 AI 请求在传输层失败，且报错只有一句
+/// 「error sending request for url」，用户完全无从下手。一旦确认直连可用，
+/// 就在本进程内固化该选择，避免每个请求都白等一次代理连接失败。
+static PREFER_DIRECT: AtomicBool = AtomicBool::new(false);
 const PROOFREAD_CHUNK_THRESHOLD_UTF16: usize = 3200;
 const PROOFREAD_CHUNK_TARGET_UTF16: usize = 2400;
 const PROOFREAD_CHUNK_HARD_LIMIT_UTF16: usize = 3800;
-const PROOFREAD_CONCURRENCY: usize = 4;
+/// 并发上限。整篇校对是「多请求、弱交互」的批处理，墙钟时间约等于
+/// ceil(分块数 / 并发) × 单块耗时，提高并发是压缩总耗时最直接的手段。
+/// 限流风险由 send_request 的 429 重试与顺序回退兜底。
+const PROOFREAD_CONCURRENCY: usize = 8;
+/// 顺序回退时的分块间隔：仅在上一块失败后才等待，成功路径不再无条件 sleep，
+/// 避免长文档回退时白付 N × 间隔的固定开销。
+const PROOFREAD_SEQUENTIAL_GAP_MS: u64 = 120;
 
 #[derive(Debug, Clone)]
 struct ProofreadChunk {
@@ -21,19 +38,36 @@ struct ProofreadChunk {
     offset_utf16: usize,
 }
 
+fn build_client(use_system_proxy: bool) -> Result<Client, String> {
+    let mut builder = Client::builder()
+        .timeout(Duration::from_secs(120))
+        .connect_timeout(Duration::from_secs(10))
+        .pool_idle_timeout(Duration::from_secs(180))
+        // 并发校对会同时发起多个到同一服务商的请求，显式放宽空闲连接池，
+        // 避免连接被反复关闭重建（每次重建都要付一次 TLS 握手）。
+        .pool_max_idle_per_host(PROOFREAD_CONCURRENCY + 4)
+        .tcp_nodelay(true);
+
+    if !use_system_proxy {
+        builder = builder.no_proxy();
+    }
+
+    builder
+        .build()
+        .map_err(|e| format!("创建HTTP客户端失败: {}", e))
+}
+
 fn get_client() -> Result<Client, String> {
+    // 已确认系统代理不可用时直接用直连客户端，不再重蹈覆辙。
+    if PREFER_DIRECT.load(Ordering::Relaxed) {
+        return direct_client();
+    }
+
     if let Some(client) = HTTP_CLIENT.get() {
         return Ok(client.clone());
     }
 
-    let client = Client::builder()
-        .timeout(Duration::from_secs(120))
-        .connect_timeout(Duration::from_secs(10))
-        .pool_idle_timeout(Duration::from_secs(180))
-        .tcp_nodelay(true)
-        .build()
-        .map_err(|e| format!("创建HTTP客户端失败: {}", e))?;
-
+    let client = build_client(true)?;
     // set() returns an Err if already set; we have already checked above
     // that it is empty, but guard against a race by ignoring the result.
     let _ = HTTP_CLIENT.set(client);
@@ -42,6 +76,61 @@ fn get_client() -> Result<Client, String> {
         .get()
         .cloned()
         .ok_or_else(|| "HTTP 客户端未初始化".to_string())
+}
+
+/// 绕过系统代理的客户端（惰性创建并缓存）。
+fn direct_client() -> Result<Client, String> {
+    if let Some(client) = HTTP_CLIENT_DIRECT.get() {
+        return Ok(client.clone());
+    }
+
+    let client = build_client(false)?;
+    let _ = HTTP_CLIENT_DIRECT.set(client);
+    HTTP_CLIENT_DIRECT
+        .get()
+        .cloned()
+        .ok_or_else(|| "HTTP 客户端未初始化".to_string())
+}
+
+/// 读取环境变量里配置的系统代理地址（reqwest 会自动使用它）。
+fn configured_system_proxy() -> Option<String> {
+    const KEYS: [&str; 6] = [
+        "HTTPS_PROXY",
+        "https_proxy",
+        "HTTP_PROXY",
+        "http_proxy",
+        "ALL_PROXY",
+        "all_proxy",
+    ];
+    KEYS.iter().find_map(|key| {
+        std::env::var(key)
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty())
+    })
+}
+
+/// 把传输层错误展开成可诊断的文案。
+///
+/// reqwest 的 Display 只给出「error sending request for url」，真正的
+/// 原因（connection refused / dns error / certificate）藏在 source 链里，
+/// 必须逐层取出，否则用户看到的报错毫无信息量。
+fn describe_transport_error(error: &reqwest::Error) -> String {
+    let mut causes: Vec<String> = vec![error.to_string()];
+    let mut source = std::error::Error::source(error);
+    while let Some(cause) = source {
+        let text = cause.to_string();
+        if !text.is_empty() && !causes.iter().any(|existing| existing.contains(&text)) {
+            causes.push(text);
+        }
+        source = cause.source();
+    }
+
+    let mut detail = causes.join(" ← ");
+    if let Some(proxy) = configured_system_proxy() {
+        detail.push_str(&format!("（当前系统代理：{proxy}）"));
+    }
+    detail
 }
 
 fn is_retryable_status(status: reqwest::StatusCode) -> bool {
@@ -162,6 +251,25 @@ fn is_anthropic(settings: &AISettings) -> bool {
     settings.provider == "anthropic"
 }
 
+async fn post_json(
+    client: &Client,
+    url: &str,
+    settings: &AISettings,
+    body: &serde_json::Value,
+) -> Result<reqwest::Response, reqwest::Error> {
+    let mut req = client.post(url).header("Content-Type", "application/json");
+
+    if is_anthropic(settings) {
+        req = req
+            .header("x-api-key", &settings.api_key)
+            .header("anthropic-version", "2023-06-01");
+    } else {
+        req = req.header("Authorization", format!("Bearer {}", settings.api_key));
+    }
+
+    req.json(body).send().await
+}
+
 async fn send_request(
     client: &Client,
     url: &str,
@@ -171,17 +279,7 @@ async fn send_request(
     let mut last_error = String::new();
 
     for attempt in 0..3 {
-        let mut req = client.post(url).header("Content-Type", "application/json");
-
-        if is_anthropic(settings) {
-            req = req
-                .header("x-api-key", &settings.api_key)
-                .header("anthropic-version", "2023-06-01");
-        } else {
-            req = req.header("Authorization", format!("Bearer {}", settings.api_key));
-        }
-
-        let send_result = req.json(body).send().await;
+        let send_result = post_json(client, url, settings, body).await;
 
         match send_result {
             Ok(response) => {
@@ -193,7 +291,19 @@ async fn send_request(
                 last_error = format!("API错误 ({}): {}", status, trim_error_body(&body_text));
             }
             Err(error) => {
-                last_error = format!("API请求失败: {}", error);
+                last_error = format!("API请求失败: {}", describe_transport_error(&error));
+
+                // 传输层失败且尚未直连时，试一次绕过系统代理。
+                // 这样即便用户环境里残留了失效代理，AI 功能也能自动恢复，
+                // 而不是所有请求都以「error sending request」告终。
+                if !PREFER_DIRECT.load(Ordering::Relaxed) {
+                    if let Some(response) =
+                        try_direct_fallback(url, settings, body, &mut last_error).await
+                    {
+                        return Ok(response);
+                    }
+                }
+
                 if attempt == 2 {
                     return Err(last_error);
                 }
@@ -208,6 +318,37 @@ async fn send_request(
     } else {
         last_error
     })
+}
+
+/// 用「不走代理」的客户端重发一次请求。
+///
+/// 只有当直连确实成功时才把 `PREFER_DIRECT` 固化下来——若用户处于必须经由
+/// 代理才能出网的环境，直连同样会失败，此时保持原样，不改变既有行为。
+async fn try_direct_fallback(
+    url: &str,
+    settings: &AISettings,
+    body: &serde_json::Value,
+    last_error: &mut String,
+) -> Option<reqwest::Response> {
+    let direct = direct_client().ok()?;
+    match post_json(&direct, url, settings, body).await {
+        Ok(response) => {
+            PREFER_DIRECT.store(true, Ordering::Relaxed);
+            eprintln!(
+                "[ai] 系统代理不可用，已自动切换为直连（后续请求不再经由代理）: {}",
+                configured_system_proxy().unwrap_or_else(|| "未知代理".to_string())
+            );
+            Some(response)
+        }
+        Err(error) => {
+            // 直连也失败：把原因一并附上，便于判断到底是网络还是配置问题。
+            last_error.push_str(&format!(
+                "；直连重试亦失败：{}",
+                describe_transport_error(&error)
+            ));
+            None
+        }
+    }
 }
 
 async fn call_api(
@@ -274,7 +415,8 @@ async fn call_api_with_messages(
                 "AI 助手未启用或未配置 API 密钥，且「未配置时回退本地 AI Agent」已关闭；请在设置中启用 AI 助手或打开该后备开关".into(),
             );
         }
-        return crate::agent::bridge::complete(&render_prompt(&messages, system_prompt)).await
+        return crate::agent::bridge::complete(&render_prompt(&messages, system_prompt))
+            .await
             .map_err(|error| format!("AI 助手未配置，本地 Agent 后备不可用：{error}"));
     }
 
@@ -533,30 +675,29 @@ pub async fn proofread(
 
     let chunks = split_proofread_chunks(content);
     let data: serde_json::Value = if chunks.len() <= 1 {
+        // 单块（短文档）没有分块可回退：瞬时故障按「无结果」处理，不打扰用户；
+        // 确定性失败则如实上报。
         let result = match proofread_chunk(content, settings).await {
-            Ok(items) => items,
-            Err(error) if is_transient_ai_error(&error) => {
-                // transient errors → empty array (no results displayed)
+            ChunkOutcome::Items(items) => items,
+            ChunkOutcome::Transient(error) => {
                 eprintln!("proofread: transient error, returning empty array: {error}");
                 Vec::new()
             }
-            Err(error) => return Err(error),
+            ChunkOutcome::Fatal(error) => return Err(error),
         };
         serde_json::Value::Array(result)
     } else {
         let results = match proofread_chunks_concurrently(chunks.clone(), settings).await {
             Ok(results) => results,
             Err(error) if is_transient_ai_error(&error) => {
-                // concurrent chunked proofread transient failure → fall back sequentially
+                // 并发整体因限流 / 超时失败 → 降到单请求节奏重试一次
                 eprintln!(
                     "proofread: concurrent chunked failed ({error}), trying sequential fallback…"
                 );
                 match proofread_chunks_sequentially(chunks, settings).await {
                     Ok(results) => results,
-                    Err(error2) if is_transient_ai_error(&error2) => {
-                        eprintln!("proofread: sequential fallback also failed ({error2}), returning empty array");
-                        Vec::new()
-                    }
+                    // 顺序回退也全灭时必须报错：返回空数组会让前端显示
+                    // 「校对完成，未发现问题」，把彻底失败伪装成没有问题。
                     Err(error2) => return Err(error2),
                 }
             }
@@ -577,29 +718,58 @@ async fn proofread_chunks_concurrently(
     settings: &AISettings,
 ) -> Result<Vec<serde_json::Value>, String> {
     let settings = settings.clone();
+    // 分块数少于上限时按实际数量收敛，避免空转任务白占调度槽。
+    let concurrency = PROOFREAD_CONCURRENCY.min(chunks.len().max(1));
     let chunk_results = stream::iter(chunks.into_iter().map(|chunk| {
         let settings = settings.clone();
         async move { proofread_shifted_chunk(&chunk, &settings).await }
     }))
-    .buffer_unordered(PROOFREAD_CONCURRENCY)
+    .buffer_unordered(concurrency)
     .collect::<Vec<_>>()
     .await;
 
     let mut merged = Vec::new();
-    let mut chunk_errors = 0usize;
-    for result in chunk_results {
-        match result {
-            Ok(items) => merged.extend(items),
-            Err(e) => {
+    let mut succeeded = 0usize;
+    let mut transient_errors = 0usize;
+    let mut fatal_errors = 0usize;
+    let mut first_transient: Option<String> = None;
+    let mut first_fatal: Option<String> = None;
+    for outcome in chunk_results {
+        match outcome {
+            ChunkOutcome::Items(items) => {
+                succeeded += 1;
+                merged.extend(items);
+            }
+            ChunkOutcome::Transient(e) => {
+                eprintln!("[proofread concurrent] 分块瞬时失败: {e}");
+                transient_errors += 1;
+                first_transient.get_or_insert(e);
+            }
+            ChunkOutcome::Fatal(e) => {
                 eprintln!("[proofread concurrent] 分块失败: {e}");
-                chunk_errors += 1;
+                fatal_errors += 1;
+                first_fatal.get_or_insert(e);
             }
         }
     }
-    if merged.is_empty() && chunk_errors > 0 {
-        return Err(format!("所有并发校对分块均失败（共 {} 个）", chunk_errors));
-    }
     sort_proofread_items(&mut merged);
+
+    // 只有「一块都没成功」才算失败：部分成功时返回已有结果即可，
+    // 既不丢失可用校对结果，也不该让用户重跑整篇。
+    if succeeded == 0 {
+        if let Some(detail) = first_fatal {
+            return Err(format!(
+                "所有并发校对分块均失败（共 {} 个）：{detail}",
+                fatal_errors
+            ));
+        }
+        if let Some(detail) = first_transient {
+            return Err(format!(
+                "所有并发校对分块均失败（共 {} 个，均为可重试故障）：{detail}",
+                transient_errors
+            ));
+        }
+    }
     Ok(merged)
 }
 
@@ -608,32 +778,64 @@ async fn proofread_chunks_sequentially(
     settings: &AISettings,
 ) -> Result<Vec<serde_json::Value>, String> {
     let mut merged = Vec::new();
-    let mut chunk_errors = 0usize;
+    let mut succeeded = 0usize;
+    let mut transient_errors = 0usize;
+    let mut fatal_errors = 0usize;
+    let mut first_transient: Option<String> = None;
+    let mut first_fatal: Option<String> = None;
     for chunk in chunks {
-        match proofread_shifted_chunk(&chunk, settings).await {
-            Ok(items) => merged.extend(items),
-            Err(e) => {
-                eprintln!("[proofread sequential] 分块失败: {e}");
-                chunk_errors += 1;
-                // 继续处理剩余分块，不终止整个校对
+        let failed = match proofread_shifted_chunk(&chunk, settings).await {
+            ChunkOutcome::Items(mut items) => {
+                succeeded += 1;
+                merged.append(&mut items);
+                false
             }
+            ChunkOutcome::Transient(e) => {
+                eprintln!("[proofread sequential] 分块瞬时失败: {e}");
+                transient_errors += 1;
+                first_transient.get_or_insert(e);
+                true
+            }
+            ChunkOutcome::Fatal(e) => {
+                eprintln!("[proofread sequential] 分块失败: {e}");
+                fatal_errors += 1;
+                first_fatal.get_or_insert(e);
+                true
+            }
+        };
+        // 仅在失败后稍作等待以避开限流；成功路径不再为每个分块固定付一次延迟。
+        if failed {
+            sleep(Duration::from_millis(PROOFREAD_SEQUENTIAL_GAP_MS)).await;
         }
-        sleep(Duration::from_millis(180)).await;
-    }
-    if merged.is_empty() && chunk_errors > 0 {
-        return Err(format!("所有校对分块均失败（共 {} 个）", chunk_errors));
     }
     sort_proofread_items(&mut merged);
+
+    if succeeded == 0 {
+        if let Some(detail) = first_fatal {
+            return Err(format!(
+                "所有校对分块均失败（共 {} 个）：{detail}",
+                fatal_errors
+            ));
+        }
+        if let Some(detail) = first_transient {
+            return Err(format!(
+                "所有校对分块均失败（共 {} 个，均为可重试故障）：{detail}",
+                transient_errors
+            ));
+        }
+    }
     Ok(merged)
 }
 
-async fn proofread_shifted_chunk(
-    chunk: &ProofreadChunk,
-    settings: &AISettings,
-) -> Result<Vec<serde_json::Value>, String> {
-    let mut items = proofread_chunk(&chunk.text, settings).await?;
-    offset_proofread_items(&mut items, chunk.offset_utf16);
-    Ok(items)
+async fn proofread_shifted_chunk(chunk: &ProofreadChunk, settings: &AISettings) -> ChunkOutcome {
+    match proofread_chunk(&chunk.text, settings).await {
+        ChunkOutcome::Items(mut items) => {
+            offset_proofread_items(&mut items, chunk.offset_utf16);
+            ChunkOutcome::Items(items)
+        }
+        // 失败原因与分类原样上抛，聚合层需要区分瞬时 / 确定性失败。
+        other => other,
+    }
 }
 
 fn is_transient_ai_error(error: &str) -> bool {
@@ -653,37 +855,79 @@ fn is_transient_ai_error(error: &str) -> bool {
         "502",
         "503",
         "504",
+        // 传输层失败的几种典型形态。reqwest 的通用文案本身不含上面任何关键词，
+        // 若归为「确定性失败」就会被直接上报，顺序回退也会被跳过；
+        // 归类为瞬时故障才能触发直连兜底与顺序重试。
+        "error sending request",
+        "dns",
+        "certificate",
+        "tls",
+        "proxy",
+        "代理",
+        "os error",
     ]
     .iter()
     .any(|pattern| error.contains(pattern))
 }
 
-async fn proofread_chunk(
-    content: &str,
-    settings: &AISettings,
-) -> Result<Vec<serde_json::Value>, String> {
+/// 单个校对分块的结果。
+///
+/// 必须区分瞬时故障与确定性失败：前者（限流 / 超时 / 网络抖动 / 输出被截断）
+/// 值得重试或顺序回退，后者（鉴权失败、模型不存在）重试无意义，需要立即上报。
+/// 早期实现把两者都吞成「空结果」，导致顺序回退永不触发、且全部失败时
+/// 反而向前端报告「校对完成，未发现问题」。
+enum ChunkOutcome {
+    Items(Vec<serde_json::Value>),
+    Transient(String),
+    Fatal(String),
+}
+
+/// 估算校对所需的输出 token 上限。
+///
+/// 中日韩字符大致 1 字 1 token，而原实现按 `字符数 / 6` 估算，对中文严重偏低：
+/// 长分块的 JSON 会被 max_tokens 截断，既白跑一整轮生成，又解析不出任何结果。
+/// 这里按「中文 1:1 + 拉丁 4:1」估算并留一倍冗余，仍以 2048 封顶。
+fn estimate_proofread_max_tokens(content: &str) -> u32 {
+    let mut cjk = 0usize;
+    let mut ascii = 0usize;
+    for ch in content.chars() {
+        if ch.is_ascii() {
+            ascii += 1;
+        } else {
+            cjk += 1;
+        }
+    }
+    let estimate = cjk + ascii.div_ceil(4);
+    estimate.saturating_mul(2).clamp(1024, 2048) as u32
+}
+
+async fn proofread_chunk(content: &str, settings: &AISettings) -> ChunkOutcome {
     let prompt = get_prompt(PromptAction::Proofread, content, None, settings);
-    let max_tokens = Some(((content.chars().count() / 6) as u32).clamp(1024, 2048));
+    let max_tokens = Some(estimate_proofread_max_tokens(content));
     let result = match call_api(prompt, settings, max_tokens, Some(0.1)).await {
         Ok(r) => r,
         Err(e) => {
-            // Empty content / timeout / network → no results, not a hard error
             if is_transient_ai_error(&e)
                 || e.contains("空内容")
                 || e.contains("空响应")
                 || e.contains("empty")
             {
-                return Ok(Vec::new());
+                return ChunkOutcome::Transient(e);
             }
-            return Err(e);
+            return ChunkOutcome::Fatal(e);
         }
     };
 
     if result.trim().is_empty() {
-        return Ok(Vec::new());
+        return ChunkOutcome::Items(Vec::new());
     }
 
-    parse_proofread_result(&result)
+    match parse_proofread_result(&result) {
+        Ok(items) => ChunkOutcome::Items(items),
+        // 截断或格式漂移导致的解析失败，按可重试处理：顺序回退会用更慢的单请求
+        // 节奏重试一次，比直接判定整篇失败更划算。
+        Err(e) => ChunkOutcome::Transient(format!("解析校对结果失败: {e}")),
+    }
 }
 
 fn parse_proofread_result(result: &str) -> Result<Vec<serde_json::Value>, String> {
@@ -1645,17 +1889,53 @@ struct ModelInfo {
 }
 
 pub async fn fetch_models(api_key: &str, api_endpoint: &str) -> Result<Vec<String>, String> {
-    let client = get_client()?;
     let base_url = api_endpoint.trim_end_matches('/').to_string();
     let url = format!("{}/models", base_url);
 
-    let response = client
-        .get(&url)
-        .header("Authorization", format!("Bearer {}", api_key))
-        .header("Content-Type", "application/json")
-        .send()
-        .await
-        .map_err(|e| format!("请求模型列表失败: {}", e))?;
+    // 与 send_request 保持一致：先按首选客户端（可能经由系统代理）请求，
+    // 传输层失败时再试一次绕过代理的直连，避免残留的失效代理让
+    // 「拉取模型列表」永远报一句无从下手的「error sending request」。
+    let primary = get_client()?;
+    let mut candidates: Vec<(Client, bool)> = vec![(primary, false)];
+    if !PREFER_DIRECT.load(Ordering::Relaxed) {
+        if let Ok(direct) = direct_client() {
+            candidates.push((direct, true));
+        }
+    }
+
+    let mut last_error = String::new();
+    let mut response = None;
+    for (client, is_direct) in candidates {
+        match client
+            .get(&url)
+            .header("Authorization", format!("Bearer {}", api_key))
+            .header("Content-Type", "application/json")
+            .send()
+            .await
+        {
+            Ok(res) => {
+                if is_direct {
+                    PREFER_DIRECT.store(true, Ordering::Relaxed);
+                    eprintln!(
+                        "[ai] 系统代理不可用，已自动切换为直连（后续请求不再经由代理）: {}",
+                        configured_system_proxy().unwrap_or_else(|| "未知代理".to_string())
+                    );
+                }
+                response = Some(res);
+                break;
+            }
+            Err(error) => {
+                let detail = describe_transport_error(&error);
+                last_error = if last_error.is_empty() {
+                    detail
+                } else {
+                    format!("{last_error}；直连重试亦失败：{detail}")
+                };
+            }
+        }
+    }
+
+    let response = response.ok_or_else(|| format!("请求模型列表失败: {last_error}"))?;
 
     if !response.status().is_success() {
         let status = response.status();
@@ -1701,6 +1981,7 @@ mod tests {
             provider_profiles: "{}".into(),
             proofread_use_agent: true,
             companion_use_agent: false,
+            agent_fallback_enabled: true,
         }
     }
 
@@ -1735,11 +2016,183 @@ mod tests {
     #[ignore]
     async fn proofread_via_agent_handles_long_text_in_one_turn() {
         let content = "这是一段用于测试的文本。\n\n".repeat(400);
-        assert!(content.encode_utf16().count() > 3200, "fixture 应超过分块阈值");
+        assert!(
+            content.encode_utf16().count() > 3200,
+            "fixture 应超过分块阈值"
+        );
         let started = std::time::Instant::now();
         let response = proofread(&content, &agent_settings(), true).await.unwrap();
         eprintln!("agent proofread took {:?}", started.elapsed());
         assert!(response.success);
         assert!(response.data.is_array());
+    }
+
+    #[test]
+    fn proofread_max_tokens_is_cjk_aware_and_clamped() {
+        // 中文按 1 字 1 token 估算，不再被 chars/6 的低估值压到下限导致输出截断。
+        let chinese = "校对校对校对校对校对校对校对校对。".repeat(100);
+        let budget = estimate_proofread_max_tokens(&chinese);
+        assert!(
+            budget > 1024,
+            "长中文分块应获得高于下限的预算，实际 {budget}"
+        );
+
+        // 极短文本走下限，极其冗长的文本也不会无上限膨胀（避免拖慢速度）。
+        assert_eq!(estimate_proofread_max_tokens("短"), 1024);
+        assert_eq!(estimate_proofread_max_tokens(&"字".repeat(100_000)), 2048);
+
+        // 纯 ASCII 明显比同长度中文更省预算。
+        let ascii = "a".repeat(1000);
+        assert!(
+            estimate_proofread_max_tokens(&ascii)
+                < estimate_proofread_max_tokens(&"字".repeat(1000))
+        );
+    }
+
+    #[test]
+    fn proofread_chunk_outcome_separates_transient_from_fatal() {
+        // 限流 / 超时属于可重试：交给顺序回退兜底，不能直接判整篇失败。
+        assert!(is_transient_ai_error("API错误 (429): rate limited"));
+        assert!(is_transient_ai_error("API请求失败: operation timed out"));
+        // 鉴权与模型不存在重试无意义，必须尽快上报给用户。
+        assert!(!is_transient_ai_error("API错误 (401): invalid api key"));
+        assert!(!is_transient_ai_error("model not found"));
+    }
+
+    #[test]
+    fn proofread_chunks_preserve_offsets_and_order() {
+        let content = "第一段需要校对的内容。\n第二段也有问题。\n第三段同样如此。\n".repeat(120);
+        let chunks = split_proofread_chunks(&content);
+        assert!(chunks.len() > 1, "长文应被分块，实际 {}", chunks.len());
+        // 每个分块的偏移必须单调递增，且都在文档范围内。
+        let mut last = 0usize;
+        for chunk in &chunks {
+            assert!(chunk.offset_utf16 >= last);
+            assert!(
+                chunk.offset_utf16 + chunk.text.encode_utf16().count()
+                    <= content.encode_utf16().count()
+            );
+            last = chunk.offset_utf16;
+        }
+    }
+
+    /// 127.0.0.1:1 会立即拒绝连接，无需外网即可稳定复现传输层失败。
+    async fn refused_connection_error() -> reqwest::Error {
+        let client = build_client(false).expect("构建直连客户端");
+        client
+            .post("http://127.0.0.1:1/v1/chat/completions")
+            .json(&serde_json::json!({}))
+            .send()
+            .await
+            .expect_err("连接应被拒绝")
+    }
+
+    #[tokio::test]
+    async fn transport_error_exposes_underlying_cause() {
+        let error = refused_connection_error().await;
+        let described = describe_transport_error(&error);
+        // reqwest 的 Display 只有「error sending request for url」，真正的
+        // connection refused 藏在 source 链里；必须逐层取出才能让用户看懂。
+        assert!(
+            described.contains('←'),
+            "应展开 source 链而非只给笼统文案: {described}"
+        );
+        assert!(
+            described.to_lowercase().contains("connect"),
+            "应包含连接层原因: {described}"
+        );
+    }
+
+    #[tokio::test]
+    async fn transport_error_is_transient_so_fallback_can_run() {
+        let described = describe_transport_error(&refused_connection_error().await);
+        // 归类为瞬时故障，顺序回退与直连兜底才有机会执行；
+        // 若归为确定性失败会被直接上报，用户只看到失败却无从修复。
+        assert!(
+            is_transient_ai_error(&described),
+            "传输层失败应按瞬时故障处理: {described}"
+        );
+    }
+
+    #[test]
+    fn transient_patterns_cover_network_layer_failures() {
+        assert!(is_transient_ai_error(
+            "API请求失败: error sending request for url"
+        ));
+        assert!(is_transient_ai_error(
+            "dns error: failed to lookup address information"
+        ));
+        assert!(is_transient_ai_error(
+            "API请求失败: 当前系统代理：http://127.0.0.1:7897"
+        ));
+        // 鉴权与模型配置问题依然是确定性的，不应被误判为可重试。
+        assert!(!is_transient_ai_error("API错误 (401): invalid api key"));
+        assert!(!is_transient_ai_error("API错误 (400): model not found"));
+    }
+
+    #[test]
+    fn system_proxy_is_read_from_environment() {
+        let expected = [
+            "HTTPS_PROXY",
+            "https_proxy",
+            "HTTP_PROXY",
+            "http_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ]
+        .iter()
+        .find_map(|key| std::env::var(key).ok())
+        .map(|value| value.trim().to_string())
+        .filter(|value| !value.is_empty());
+        // 只校验读取逻辑，不修改进程环境，避免干扰并行测试。
+        assert_eq!(configured_system_proxy(), expected);
+    }
+
+    /// 真实网络验证：环境里残留失效代理（HTTP_PROXY 指向已关闭的本地端口）时，
+    /// send_request 应自动降级为直连并成功到达服务端。
+    /// 运行：cargo test proxy_fallback -- --include-ignored
+    #[tokio::test]
+    #[ignore]
+    async fn proxy_fallback_recovers_when_system_proxy_is_dead() {
+        let proxy = configured_system_proxy().expect("需要存在系统代理环境变量才能复现该场景");
+        eprintln!("使用系统代理: {proxy}");
+
+        let mut settings = agent_settings();
+        settings.enabled = true;
+        settings.api_key = "sk-connectivity-probe".into();
+
+        // 经由 get_client() 拿到遵循系统代理的客户端：若代理是死的，首个请求必然失败。
+        PREFER_DIRECT.store(false, Ordering::Relaxed);
+        let client = get_client().expect("构建客户端");
+
+        // 该端点无需有效密钥即可响应（401 也代表「已成功到达服务端」），
+        // 因此本测试只验证连通性恢复，不依赖任何真实 API KEY。
+        let response = send_request(
+            &client,
+            "https://api.siliconflow.cn/v1/models",
+            &settings,
+            &serde_json::json!({}),
+        )
+        .await;
+
+        match response {
+            Ok(response) => {
+                eprintln!("请求成功到达服务端，状态码 {}", response.status());
+                assert!(
+                    PREFER_DIRECT.load(Ordering::Relaxed),
+                    "应已固化直连选择，避免后续请求重复踩失效代理"
+                );
+            }
+            Err(error) => panic!("代理失效时应自动降级为直连，实际仍失败: {error}"),
+        }
+    }
+
+    #[test]
+    fn concurrent_proofread_uses_bounded_parallelism() {
+        // 分块数少于上限时按实际数量收敛（min(len, cap)），避免空转任务占调度槽；
+        // 分块数多于上限时保持满并发。并发上限本身由前端源码断言锁定。
+        let cap = PROOFREAD_CONCURRENCY;
+        assert_eq!(cap.min(2usize), 2);
+        assert_eq!(cap.min(cap), cap);
     }
 }

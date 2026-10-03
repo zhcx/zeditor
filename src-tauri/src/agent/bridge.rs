@@ -7,8 +7,7 @@
 //! 桥接只做文本变换，不允许碰文件。
 
 use super::{
-    adapters,
-    process,
+    adapters, process,
     types::{AgentApprovalMode, AgentBackendId},
 };
 use serde_json::Value;
@@ -53,7 +52,9 @@ fn backend_memory() -> (
 
 /// 持久化设置文件路径（应用启动时注入）：用于读取每个后端的启用/停用状态。
 static SETTINGS_PATH: OnceLock<PathBuf> = OnceLock::new();
-static DISABLED_CACHE: OnceLock<Mutex<Option<(std::time::Instant, Vec<AgentBackendId>)>>> = OnceLock::new();
+/// 停用状态缓存：(读取时刻, 被显式停用的后端列表)，带 TTL 供调用方判断是否需要重读。
+type DisabledCache = OnceLock<Mutex<Option<(std::time::Instant, Vec<AgentBackendId>)>>>;
+static DISABLED_CACHE: DisabledCache = OnceLock::new();
 
 pub fn init_settings_path(path: PathBuf) {
     let _ = SETTINGS_PATH.set(path);
@@ -88,7 +89,11 @@ fn disabled_backends() -> Vec<AgentBackendId> {
             Some(
                 ids.iter()
                     .filter(|(id, _)| {
-                        backends.get(*id).and_then(|config| config.get("enabled")).and_then(Value::as_bool) == Some(false)
+                        backends
+                            .get(*id)
+                            .and_then(|config| config.get("enabled"))
+                            .and_then(Value::as_bool)
+                            == Some(false)
                     })
                     .map(|(_, backend)| *backend)
                     .collect::<Vec<_>>(),
@@ -153,9 +158,10 @@ pub async fn probe_any(
             }
         };
         let probe_path = path.clone();
-        let result = tokio::task::spawn_blocking(move || super::ensure_backend_probed(&probe_path, id))
-            .await
-            .map_err(|error| error.to_string());
+        let result =
+            tokio::task::spawn_blocking(move || super::ensure_backend_probed(&probe_path, id))
+                .await
+                .map_err(|error| error.to_string());
         match result {
             Ok(Ok(())) => return Ok(id.label().to_string()),
             Ok(Err(error)) => last_error = error,
@@ -188,7 +194,8 @@ impl QuickCollector {
         for raw in adapters::line_events(protocol, value) {
             match raw.kind {
                 "message_delta" => {
-                    self.text.push_str(raw.content.as_deref().unwrap_or_default());
+                    self.text
+                        .push_str(raw.content.as_deref().unwrap_or_default());
                 }
                 "done" => {
                     self.finished = true;
@@ -197,8 +204,9 @@ impl QuickCollector {
                     }
                 }
                 "error" => {
-                    self.error
-                        .get_or_insert_with(|| raw.content.unwrap_or_else(|| "Agent 执行失败".into()));
+                    self.error.get_or_insert_with(|| {
+                        raw.content.unwrap_or_else(|| "Agent 执行失败".into())
+                    });
                 }
                 // 桥接任务只做文本变换：模型尝试调用工具说明任务失控，
                 // 立即中止，避免在只读范围之外产生副作用。
@@ -248,7 +256,11 @@ struct QuickTurn {
 
 /// 构建一次性调用命令。后端不适用（如提示词超长）时返回 `None`，由调用方
 /// 换下一个候选。
-fn build_quick_turn(backend: AgentBackendId, path: &Path, prompt: &str) -> Result<Option<QuickTurn>, String> {
+fn build_quick_turn(
+    backend: AgentBackendId,
+    path: &Path,
+    prompt: &str,
+) -> Result<Option<QuickTurn>, String> {
     let cwd = bridge_cwd();
     let mut command = process::tokio_executable_command(path)?;
     command
@@ -274,12 +286,20 @@ fn build_quick_turn(backend: AgentBackendId, path: &Path, prompt: &str) -> Resul
                 "plan",
             ]);
             command.arg(prompt);
-            (adapters::AdapterProtocol::ClaudeJson, PromptChannel::Argument, false)
+            (
+                adapters::AdapterProtocol::ClaudeJson,
+                PromptChannel::Argument,
+                false,
+            )
         }
         // Codex：app-server 常驻 stdin 协议。
         AgentBackendId::Codex => {
             command.args(["app-server", "--stdio"]);
-            (adapters::AdapterProtocol::CodexAppServer, PromptChannel::Codex, true)
+            (
+                adapters::AdapterProtocol::CodexAppServer,
+                PromptChannel::Codex,
+                true,
+            )
         }
         // OpenCode：`run --format json` 一次性执行，只读配置。
         AgentBackendId::Opencode => {
@@ -292,16 +312,33 @@ fn build_quick_turn(backend: AgentBackendId, path: &Path, prompt: &str) -> Resul
                 "OPENCODE_CONFIG_CONTENT",
                 adapters::opencode_permissions(AgentApprovalMode::Tiered, true).to_string(),
             );
-            (adapters::AdapterProtocol::OpenCodeJson, PromptChannel::Argument, false)
+            (
+                adapters::AdapterProtocol::OpenCodeJson,
+                PromptChannel::Argument,
+                false,
+            )
         }
         // Pi：RPC 模式，提示词经 stdin JSONL 下发，无长度限制。
         AgentBackendId::Pi => {
             command.args(["--mode", "rpc", "--no-approve"]);
-            (adapters::AdapterProtocol::PiRpc, PromptChannel::StdinJson, true)
+            (
+                adapters::AdapterProtocol::PiRpc,
+                PromptChannel::StdinJson,
+                true,
+            )
         }
     };
-    command.stdin(if needs_stdin { Stdio::piped() } else { Stdio::null() });
-    Ok(Some(QuickTurn { backend, protocol, command, channel }))
+    command.stdin(if needs_stdin {
+        Stdio::piped()
+    } else {
+        Stdio::null()
+    });
+    Ok(Some(QuickTurn {
+        backend,
+        protocol,
+        command,
+        channel,
+    }))
 }
 
 /// 用本机 Agent CLI 完成一次文本任务：按优先级找到可用后端 → 只读一次性
@@ -341,10 +378,11 @@ pub async fn complete(prompt: &str) -> Result<String, String> {
         // 首次使用某后端时做版本/能力探测（结果按 mtime 缓存；应用启动时的
         // 预热会让这里命中缓存零开销）。
         let probe_path = path.clone();
-        let probed = tokio::task::spawn_blocking(move || super::ensure_backend_probed(&probe_path, backend))
-            .await
-            .map_err(|error| error.to_string())
-            .and_then(|result| result);
+        let probed =
+            tokio::task::spawn_blocking(move || super::ensure_backend_probed(&probe_path, backend))
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result);
         if let Err(error) = probed {
             last_error = error;
             mark_bad_backend(backend);
@@ -406,7 +444,11 @@ async fn run_quick_turn(turn: &mut QuickTurn, prompt: &str) -> Result<String, St
         let stdin = stdin.as_mut().ok_or("无法写入 Agent 输入")?;
         write_stdin(stdin, &adapters::codex_initialize()).await?;
         write_stdin(stdin, &adapters::codex_initialized()).await?;
-        write_stdin(stdin, &adapters::codex_thread_start(bridge_cwd().as_path(), None)).await?;
+        write_stdin(
+            stdin,
+            &adapters::codex_thread_start(bridge_cwd().as_path(), None),
+        )
+        .await?;
     }
     if let PromptChannel::StdinJson = turn.channel {
         let stdin = stdin.as_mut().ok_or("无法写入 Agent 输入")?;
@@ -488,7 +530,10 @@ mod tests {
             adapters::AdapterProtocol::ClaudeJson,
             &serde_json::json!({ "type": "result", "is_error": false, "result": "完整回答" }),
         );
-        assert_eq!(collector.result(AgentBackendId::ClaudeCode).unwrap(), "完整回答");
+        assert_eq!(
+            collector.result(AgentBackendId::ClaudeCode).unwrap(),
+            "完整回答"
+        );
     }
 
     #[test]
@@ -508,7 +553,10 @@ mod tests {
                 "assistantMessageEvent": { "type": "text_delta", "delta": "片段二" }
             }),
         );
-        collector.feed(adapters::AdapterProtocol::PiRpc, &serde_json::json!({ "type": "agent_end" }));
+        collector.feed(
+            adapters::AdapterProtocol::PiRpc,
+            &serde_json::json!({ "type": "agent_end" }),
+        );
         let text = collector.result(AgentBackendId::Pi).unwrap();
         assert_eq!(text, "片段一片段二");
     }
@@ -531,7 +579,10 @@ mod tests {
             adapters::AdapterProtocol::CodexAppServer,
             &serde_json::json!({ "method": "turn/completed", "params": { "turn": { "status": "failed", "error": { "message": "模型不可用" } } } }),
         );
-        assert_eq!(collector.result(AgentBackendId::Codex).unwrap_err(), "模型不可用");
+        assert_eq!(
+            collector.result(AgentBackendId::Codex).unwrap_err(),
+            "模型不可用"
+        );
     }
 
     #[test]
@@ -545,7 +596,9 @@ mod tests {
     #[tokio::test]
     #[ignore]
     async fn bridge_completes_via_local_cli() {
-        let text = complete("请原样返回四个字：桥接成功。不要输出其他任何内容。").await.unwrap();
+        let text = complete("请原样返回四个字：桥接成功。不要输出其他任何内容。")
+            .await
+            .unwrap();
         assert!(text.contains("桥接成功"), "unexpected response: {text}");
     }
 }

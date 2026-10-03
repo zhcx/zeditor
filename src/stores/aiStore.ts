@@ -3,7 +3,7 @@ import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { useAppStore, providerNeedsKey, type AIProviderId } from './appStore';
-import { parseAIProviderProfiles } from '../utils/aiProviderProfiles';
+import { resolveAIRequestSettings } from '../utils/aiRequestSettings';
 import { lintMarkdown } from '../utils/markdownLint';
 import { findMissingLocalLinks } from '../services/linkCheck';
 import { extractGenieText, type GenieDefinition, type GenieTarget } from '../utils/aiGenies';
@@ -196,9 +196,12 @@ interface AIAppliedRound {
   appliedContent: string;
 }
 
-// 校对重试配置
-const PROOFREAD_MAX_RETRIES = 2;
-const PROOFREAD_RETRY_DELAY_MS = 1000;
+// 校对重试配置。
+// 后端对每个分块已有 3 次退避重试，并在整体因限流/超时失败时自动降级为顺序回退，
+// 因此前端这一层只是最后一道保险：重试次数过多会让「整篇重新跑一遍」的代价
+// 叠加到已经很长的失败路径上，反而拖慢反馈，故收敛为 1 次、间隔减半。
+const PROOFREAD_MAX_RETRIES = 1;
+const PROOFREAD_RETRY_DELAY_MS = 500;
 
 let companionRequestSeq = 0;
 const companionCache = new Map<string, string[]>();
@@ -524,7 +527,9 @@ export const useAIStore = create<AIState>((set, get) => ({
         const requestData = {
           action: 'proofread',
           content: trimmedContent,
-          settings: settings.ai,
+          // 后端只认顶层字段：把已配置服务商的档案摊平后下发，
+          // 避免「用某个服务商的密钥去打另一个服务商的默认端点」导致全部分块失败。
+          settings: resolveAIRequestSettings(settings.ai) ?? settings.ai,
         };
 
         const response = await invokeWithTimeout<{
@@ -653,7 +658,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         action: 'companion',
         content: trimmedContent,
         context: context || undefined,
-        settings: settings.ai,
+        settings: resolveAIRequestSettings(settings.ai) ?? settings.ai,
       };
       const response = await invokeWithTimeout<{
         success: boolean;
@@ -1042,22 +1047,10 @@ ${beforeText.slice(-2000)}`,
     // streaming path below, while browser testing receives a full reply.
     if (!('__TAURI_INTERNALS__' in window)) {
       const appSettings = useAppStore.getState().settings;
-      let browserSettings = appSettings.ai;
-      if (selection) {
-        const profiles = parseAIProviderProfiles(appSettings.ai.provider_profiles);
-        const profile = profiles[selection.provider] || (selection.provider === appSettings.ai.provider
-          ? { api_key: appSettings.ai.api_key, api_endpoint: appSettings.ai.api_endpoint, model: appSettings.ai.model }
-          : undefined);
-        if (profile) {
-          browserSettings = {
-            ...appSettings.ai,
-            provider: selection.provider,
-            api_key: profile.api_key,
-            api_endpoint: profile.api_endpoint,
-            model: selection.model || profile.model,
-          };
-        }
-      }
+      // 与桌面端走同一套凭据摊平逻辑，避免浏览器预览与桌面行为不一致。
+      const browserSettings = selection
+        ? resolveAIRequestSettings(appSettings.ai, selection) ?? appSettings.ai
+        : resolveAIRequestSettings(appSettings.ai) ?? appSettings.ai;
       const attachmentContent = attachments?.map((attachment) => {
         if (attachment.type === 'image' && attachment.dataUrl) return `![${attachment.name}](${attachment.dataUrl})`;
         if (attachment.type === 'text' && attachment.content) return `> **附件: ${attachment.name}**\n> \`\`\`\n${attachment.content}\n> \`\`\``;
@@ -1128,31 +1121,16 @@ ${beforeText.slice(-2000)}`,
     }
 
     const appSettings = useAppStore.getState().settings;
-    let settings = appSettings;
-    if (selection) {
-      const profiles = parseAIProviderProfiles(appSettings.ai.provider_profiles);
-      const profile = profiles[selection.provider] || (selection.provider === appSettings.ai.provider
-        ? {
-            api_key: appSettings.ai.api_key,
-            api_endpoint: appSettings.ai.api_endpoint,
-            model: appSettings.ai.model,
-          }
-        : undefined);
-      if (!profile) {
-        set({ status: 'error', statusMessage: '请先在设置中配置该 AI 服务商' });
-        return;
-      }
-      settings = {
-        ...appSettings,
-        ai: {
-          ...appSettings.ai,
-          provider: selection.provider,
-          api_key: profile.api_key,
-          api_endpoint: profile.api_endpoint,
-          model: selection.model || profile.model,
-        },
-      };
+    // 统一走 resolveAIRequestSettings：把该服务商的档案摊平到顶层字段，
+    // 保证 provider / api_key / api_endpoint / model 四者同源。
+    const resolvedAi = selection
+      ? resolveAIRequestSettings(appSettings.ai, selection)
+      : resolveAIRequestSettings(appSettings.ai) ?? appSettings.ai;
+    if (selection && !resolvedAi) {
+      set({ status: 'error', statusMessage: '请先在设置中配置该 AI 服务商' });
+      return;
     }
+    const settings = { ...appSettings, ai: resolvedAi ?? appSettings.ai };
 
     if (!settings.ai.enabled) {
       set({ status: 'error', statusMessage: 'AI 助手未启用。请在设置中配置，或点击面板顶部的「Agent」切换到本地 Agent 运行时' });
