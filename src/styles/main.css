@@ -11001,6 +11001,9 @@ html[data-theme] .preview-container,
 .agent-backend-settings header { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 8px; }
 .agent-backend-settings header span { max-width: 65%; color: var(--text-muted); font-size: 10px; overflow-wrap: anywhere; text-align: right; }
 .agent-backend-settings header span.ready { color: var(--success-color); }
+/* 后端启用/停用开关贴右侧；停用的配置区整体弱化。 */
+.agent-backend-settings header .settings-switch { flex-shrink: 0; }
+.agent-backend-settings.agent-backend-off .setting-item { opacity: 0.55; }
 .agent-backend-options { min-width: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
 .settings-main .agent-backend-settings .setting-item { min-width: 0; }
 .settings-main .agent-backend-settings .setting-item > :is(input, select) { min-width: 0; }

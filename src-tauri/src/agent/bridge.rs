@@ -51,10 +51,61 @@ fn backend_memory() -> (
     )
 }
 
-/// 按固定优先级列出本机已安装的 Agent CLI。`discover_executable` 自带
-/// 30 秒 TTL 缓存，重复调用不产生进程开销。
+/// 持久化设置文件路径（应用启动时注入）：用于读取每个后端的启用/停用状态。
+static SETTINGS_PATH: OnceLock<PathBuf> = OnceLock::new();
+static DISABLED_CACHE: OnceLock<Mutex<Option<(std::time::Instant, Vec<AgentBackendId>)>>> = OnceLock::new();
+
+pub fn init_settings_path(path: PathBuf) {
+    let _ = SETTINGS_PATH.set(path);
+}
+
+/// 读取持久化设置中被停用的后端（5 秒缓存；文件缺失或解析失败视为全部启用）。
+fn disabled_backends() -> Vec<AgentBackendId> {
+    let Some(path) = SETTINGS_PATH.get() else {
+        return Vec::new();
+    };
+    {
+        let cache = DISABLED_CACHE.get_or_init(|| Mutex::new(None));
+        if let Ok(guard) = cache.lock() {
+            if let Some((stamp, list)) = guard.as_ref() {
+                if stamp.elapsed() < Duration::from_secs(5) {
+                    return list.clone();
+                }
+            }
+        }
+    }
+    let ids = [
+        ("claude_code", AgentBackendId::ClaudeCode),
+        ("codex", AgentBackendId::Codex),
+        ("opencode", AgentBackendId::Opencode),
+        ("pi", AgentBackendId::Pi),
+    ];
+    let list = std::fs::read_to_string(path)
+        .ok()
+        .and_then(|text| serde_json::from_str::<Value>(&text).ok())
+        .and_then(|value| {
+            let backends = value.pointer("/agent/backends")?;
+            Some(
+                ids.iter()
+                    .filter(|(id, _)| {
+                        backends.get(*id).and_then(|config| config.get("enabled")).and_then(Value::as_bool) == Some(false)
+                    })
+                    .map(|(_, backend)| *backend)
+                    .collect::<Vec<_>>(),
+            )
+        })
+        .unwrap_or_default();
+    if let Ok(mut guard) = DISABLED_CACHE.get_or_init(|| Mutex::new(None)).lock() {
+        *guard = Some((std::time::Instant::now(), list.clone()));
+    }
+    list
+}
+
+/// 按固定优先级列出本机已安装且未停用的 Agent CLI。`discover_executable`
+/// 自带 30 秒 TTL 缓存，重复调用不产生进程开销。
 fn discover_quick_backends() -> Vec<(AgentBackendId, PathBuf)> {
     // Pi 是 Zeditor 的主推后端，放候选首位。
+    let disabled = disabled_backends();
     [
         AgentBackendId::Pi,
         AgentBackendId::ClaudeCode,
@@ -62,6 +113,7 @@ fn discover_quick_backends() -> Vec<(AgentBackendId, PathBuf)> {
         AgentBackendId::Opencode,
     ]
     .into_iter()
+    .filter(|backend| !disabled.contains(backend))
     .filter_map(|backend| {
         let path = process::discover_executable(backend.executable_name())?;
         Some((backend, path))

@@ -9,6 +9,8 @@ export interface AgentBackendConfig {
   model: string;
   profile: string;
   reasoning_effort: string;
+  /** 启用/停用该后端：undefined 视为启用；停用后不出现在 Agent 选择列表，也不参与本地 Agent 桥接。 */
+  enabled?: boolean;
 }
 
 export interface AgentSettings {

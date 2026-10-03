@@ -78,15 +78,19 @@ function ReasoningOptionIcon({ effort }: { effort: ReasoningEffort }) {
 }
 
 export function AIChatbotPanel() {
+  const aiEnabled = useAppStore((state) => state.settings.ai.enabled);
   const [runtime, setRuntime] = useState<AIRuntime>(() => {
     try { return localStorage.getItem('zeditor.ai-runtime') === 'agent' ? 'agent' : 'api'; }
     catch { return 'api'; }
   });
+  // AI 助手关闭时对话栏只保留 Agent 运行时（AI 对话标签随之隐藏）。
+  const effectiveRuntime: AIRuntime = aiEnabled ? runtime : 'agent';
   const handleRuntimeChange = (next: AIRuntime) => {
+    if (!aiEnabled && next !== 'agent') return;
     setRuntime(next);
     try { localStorage.setItem('zeditor.ai-runtime', next); } catch { /* ignored */ }
   };
-  return runtime === 'agent'
+  return effectiveRuntime === 'agent'
     ? <AgentPanel onRuntimeChange={handleRuntimeChange} />
     : <ApiChatPanel onRuntimeChange={handleRuntimeChange} />;
 }

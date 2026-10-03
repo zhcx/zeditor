@@ -266,8 +266,14 @@ async fn call_api_with_messages(
 ) -> Result<String, String> {
     // AI 助手未配置（未启用或缺少密钥）时，把同一份提示词交给本机 Agent CLI
     // 一次性完成（见 agent::bridge）：伴写、校对、翻译等编辑类功能因此不再
-    // 单独依赖 AI 助手配置。温度/长度参数由后端 CLI 自行决定。
+    // 单独依赖 AI 助手配置。后备总开关关闭时直接给出可读错误，不调用本机 CLI。
+    // 温度/长度参数由后端 CLI 自行决定。
     if !settings.enabled || (settings.api_key.is_empty() && settings.provider != "ollama") {
+        if !settings.agent_fallback_enabled {
+            return Err(
+                "AI 助手未启用或未配置 API 密钥，且「未配置时回退本地 AI Agent」已关闭；请在设置中启用 AI 助手或打开该后备开关".into(),
+            );
+        }
         return crate::agent::bridge::complete(&render_prompt(&messages, system_prompt)).await
             .map_err(|error| format!("AI 助手未配置，本地 Agent 后备不可用：{error}"));
     }
@@ -505,10 +511,11 @@ pub async fn proofread(
     settings: &AISettings,
     force_agent: bool,
 ) -> Result<AIResponse, String> {
-    // 本地 Agent 引擎：一次调用覆盖整篇。分块是为 API 单次长度与延迟设计的，
+    // 引擎选择：强制 Agent > AI 助手 API > 本地 Agent 后备（总开关控制）。
+    // 本地 Agent 引擎一次调用覆盖整篇。分块是为 API 单次长度与延迟设计的，
     // Agent 走管道没有长度限制；若沿用分块，每个分块都会冷启动一次 CLI 进程，
     // 稍长的文档会退化成「正在校对全文」长时间不动。
-    if force_agent || !api_ready(settings) {
+    if force_agent || (!api_ready(settings) && settings.agent_fallback_enabled) {
         let prompt = get_prompt(PromptAction::Proofread, content, None, settings);
         let result = crate::agent::bridge::complete(&prompt).await?;
         let items = parse_proofread_result(&result)?;
@@ -517,6 +524,11 @@ pub async fn proofread(
             data: serde_json::Value::Array(items),
             message: None,
         });
+    }
+    if !api_ready(settings) {
+        return Err(
+            "AI 助手未启用或未配置 API 密钥，且「未配置时回退本地 AI Agent」已关闭；请在设置中启用 AI 助手或打开该后备开关".into(),
+        );
     }
 
     let chunks = split_proofread_chunks(content);
@@ -963,9 +975,13 @@ pub async fn companion(
     force_agent: bool,
 ) -> Result<AIResponse, String> {
     let prompt = get_prompt(PromptAction::Companion, content, context, settings);
-    // 本地 Agent 引擎（开关强制，或 AI 助手未配置时的自动回退）。
-    let result = if force_agent || !api_ready(settings) {
+    // 本地 Agent 引擎（开关强制，或 AI 助手未配置且后备开关开启时的自动回退）。
+    let result = if force_agent || (!api_ready(settings) && settings.agent_fallback_enabled) {
         crate::agent::bridge::complete(&prompt).await?
+    } else if !api_ready(settings) {
+        return Err(
+            "AI 助手未启用或未配置 API 密钥，且「未配置时回退本地 AI Agent」已关闭；请在设置中启用 AI 助手或打开该后备开关".into(),
+        );
     } else {
         call_api(prompt, settings, Some(800), None).await?
     };

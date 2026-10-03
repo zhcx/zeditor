@@ -81,8 +81,10 @@ test('Agent streaming coalesces events per frame and throttles markdown re-rende
 test('Agent backend select only lists installed and compatible CLIs', () => {
   const panel = read('src/components/Chatbot/AgentPanel.tsx');
 
-  // 下拉选项由可用后端生成：未安装 / 未启用（探测不兼容）的后端不出现。
+  // 下拉选项由可用后端生成：未安装 / 未启用（探测不兼容）/ 用户在设置中
+  // 停用的后端都不出现。
   assert.match(panel, /const availableBackends = useMemo\(/);
+  assert.match(panel, /\.filter\(\(id\) => settings\.agent\.backends\[id\]\?\.enabled !== false\)/);
   assert.match(panel, /\.filter\(\(id\) => backends\.find\(\(item\) => item\.id === id\)\?\.compatible\)/);
   assert.match(panel, /options=\{availableBackends\.map\(\(id\) => \(\{/);
   // 选中的后端不可用时回退到第一个可用项（派生值，无额外渲染副作用）。
@@ -90,6 +92,38 @@ test('Agent backend select only lists installed and compatible CLIs', () => {
   // 一个可用后端都没有时禁用下拉并给出说明，而不是呈现空菜单。
   assert.match(panel, /disabled=\{availableBackends\.length === 0\}/);
   assert.match(panel, /未检测到可用的 Agent/);
+});
+
+test('chat surface hides the API runtime when the AI assistant is disabled', () => {
+  const chat = read('src/components/Chatbot/AIChatbotPanel.tsx');
+  const panel = read('src/components/Chatbot/AgentPanel.tsx');
+
+  // AI 助手关闭时强制 Agent 运行时（即使上次停留在 API 模式）。
+  assert.match(chat, /const effectiveRuntime: AIRuntime = aiEnabled \? runtime : 'agent'/);
+  // 「AI 对话」标签只在 AI 助手启用时渲染。
+  assert.match(panel, /const aiEnabled = useAppStore\(\(state\) => state\.settings\.ai\.enabled\)/);
+  assert.match(panel, /\{aiEnabled && \(/);
+});
+
+test('local agent fallback and per-backend switches are wired end to end', () => {
+  const rust = read('src-tauri/src/ai/client.rs');
+  const commands = read('src-tauri/src/commands.rs');
+  const bridge = read('src-tauri/src/agent/bridge.rs');
+  const settings = read('src/components/Settings/SettingsPanel.tsx');
+
+  // 后备总开关：关闭时 AI 未配置直接报错，不再调用本机 CLI。
+  assert.match(commands, /pub agent_fallback_enabled: bool/);
+  assert.match(rust, /settings\.agent_fallback_enabled/);
+  assert.match(rust, /「未配置时回退本地 AI Agent」已关闭/);
+  // 持久化设置中停用的后端不参与桥接候选。
+  assert.match(commands, /pub enabled: bool,/);
+  assert.match(bridge, /fn disabled_backends\(\) -> Vec<AgentBackendId>/);
+  assert.match(bridge, /\.filter\(\|backend\| !disabled\.contains\(backend\)\)/);
+  // 设置面板：后备开关 + 每后端启用/停用开关。
+  assert.match(settings, /label="AI 未配置时回退本地 AI Agent"/);
+  assert.match(settings, /aria-label=\{`\$\{backendEnabled \? '停用' : '启用'\} \$\{label\}`\}/);
+  // 停用的后端从「默认 Agent」下拉移除。
+  assert.match(settings, /AGENT_BACKEND_OPTIONS\.filter\(\(option\) => localSettings\.agent\.backends\[option\.value as AgentBackendId\]\?\.enabled !== false\)/);
 });
 
 test('Agent startup reports progress before slow preparation steps', () => {

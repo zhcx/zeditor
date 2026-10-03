@@ -72,11 +72,13 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
     content,
   }), [activeTab?.title, activeTabId, content, currentFile]);
   const currentDocumentKey = automaticContext?.key || `${activeTabId || currentFile || 'untitled'}:untitled`;
-  // 下拉只列出已安装且兼容的 Agent：未安装、未启用（探测不通过）的后端不出现。
+  // 下拉只列出已安装、兼容且未停用的 Agent：未安装、探测不通过或用户在
+  // 设置中停用的后端都不出现。
   const availableBackends = useMemo(
     () => (Object.keys(BACKEND_LABELS) as AgentBackendId[])
+      .filter((id) => settings.agent.backends[id]?.enabled !== false)
       .filter((id) => backends.find((item) => item.id === id)?.compatible),
-    [backends],
+    [backends, settings.agent.backends],
   );
   // 选中的后端不可用时回退到第一个可用项：下拉里没有不可用项，选中态也不能
   // 指向已隐藏的后端。回退期间的模型/配置取该后端的设置值，忽略本地编辑。
@@ -492,14 +494,18 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
 }
 
 export function RuntimeTabs({ active, onChange }: { active: 'api' | 'agent'; onChange: (runtime: 'api' | 'agent') => void }) {
+  // AI 助手关闭时不渲染「AI 对话」标签：对话栏只剩 Agent 运行时。
+  const aiEnabled = useAppStore((state) => state.settings.ai.enabled);
   return (
     <div className="ai-runtime-tabs" role="tablist" aria-label="AI 运行模式">
-      <button className={`ai-runtime-tab api ${active === 'api' ? 'active' : ''}`} onClick={() => onChange('api')} role="tab" aria-selected={active === 'api'}>
-        <span className="ai-runtime-tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 16 16"><path d="M3 3.2h10v7.5H8l-3.2 2.4v-2.4H3z" /><path d="M5.4 6.9h5.2" /></svg>
-        </span>
-        <span className="ai-runtime-tab-label">AI 对话</span>
-      </button>
+      {aiEnabled && (
+        <button className={`ai-runtime-tab api ${active === 'api' ? 'active' : ''}`} onClick={() => onChange('api')} role="tab" aria-selected={active === 'api'}>
+          <span className="ai-runtime-tab-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16"><path d="M3 3.2h10v7.5H8l-3.2 2.4v-2.4H3z" /><path d="M5.4 6.9h5.2" /></svg>
+          </span>
+          <span className="ai-runtime-tab-label">AI 对话</span>
+        </button>
+      )}
       <button className={`ai-runtime-tab agent ${active === 'agent' ? 'active' : ''}`} onClick={() => onChange('agent')} role="tab" aria-selected={active === 'agent'}>
         <span className="ai-runtime-tab-icon" aria-hidden="true">
           <svg viewBox="0 0 16 16"><rect x="2.4" y="3" width="11.2" height="10" rx="1.5" /><path d="m4.7 6 2 1.6-2 1.6M8.5 9.4h2.8" /></svg>
