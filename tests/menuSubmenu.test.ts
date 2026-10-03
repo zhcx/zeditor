@@ -9,7 +9,9 @@ test('top-level menus do not clip the shared export and theme submenus', async (
   ]);
   const topLevelMenuRule = styles.match(/\.app \.menu-dropdown\s*\{[\s\S]*?\}/)?.[0] ?? '';
 
-  assert.match(menuSource, /label:\s*'导出',[\s\S]*?children:/);
-  assert.match(menuSource, /label:\s*'主题',[\s\S]*?children:/);
+  assert.match(menuSource, /label:\s*t\('导出', language\),[\s\S]*?children:/);
+  assert.match(menuSource, /label:\s*t\('主题', language\),[\s\S]*?children:/);
+  // 语言子菜单与主题同级：列出全部支持语言并带选中态。
+  assert.match(menuSource, /label:\s*t\('语言', language\),[\s\S]*?LANGUAGE_OPTIONS\.map/);
   assert.match(topLevelMenuRule, /overflow:\s*visible/);
 });

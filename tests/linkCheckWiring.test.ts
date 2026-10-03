@@ -56,7 +56,7 @@ test('链接检查接线：菜单入口、快捷键与 F2 结果导航', async (
   const app = await read('../src/App.tsx');
 
   // 菜单「功能 → 检查链接」派发命令事件，快捷键展示 Ctrl+Alt+V。
-  assert.match(menuBar, /label: '检查链接'/);
+  assert.match(menuBar, /label: t\('检查链接', language\)/);
   assert.match(menuBar, /new CustomEvent\('zeditor-check-links'\)/);
   assert.match(menuBar, /shortcut: 'Ctrl\+Alt\+V'/);
 
