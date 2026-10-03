@@ -1359,6 +1359,35 @@ export function SettingsPanel() {
                   )}
                 </>
               )}
+              {/* 校对 / 伴写的执行引擎：无论 AI 助手是否启用都可选择，
+                  便于确认具体走 AI 助手 API 还是本机 AI Agent。 */}
+              <SettingToggle
+                label="AI 未配置时回退本地 AI Agent"
+                description="AI 助手未启用或缺少 API 密钥时，相关功能自动改用本机 AI Agent；关闭后未配置即提示错误，不再调用本机 CLI"
+                checked={localSettings.ai.agent_fallback_enabled !== false}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  ai: { ...localSettings.ai, agent_fallback_enabled: checked },
+                })}
+              />
+              <SettingToggle
+                label="校对通过本地 AI Agent"
+                description="开启后「校对」交给本机 AI Agent（Pi / Claude Code 等）单次执行整篇；关闭后优先走 AI 助手 API，未配置 API 时自动回退本地 Agent"
+                checked={localSettings.ai.proofread_use_agent === true}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  ai: { ...localSettings.ai, proofread_use_agent: checked },
+                })}
+              />
+              <SettingToggle
+                label="伴写通过本地 AI Agent"
+                description="开启后 AI 伴写与续写交给本机 AI Agent 执行；关闭后优先走 AI 助手 API，未配置 API 时自动回退本地 Agent"
+                checked={localSettings.ai.companion_use_agent === true}
+                onChange={(checked) => setLocalSettings({
+                  ...localSettings,
+                  ai: { ...localSettings.ai, companion_use_agent: checked },
+                })}
+              />
               <div className="settings-subsection-divider" />
               <SettingToggle
                 label="启用本地 Agent（Beta）"
@@ -1376,7 +1405,7 @@ export function SettingsPanel() {
                     <SettingsSelect
                       ariaLabel="默认 Agent"
                       value={localSettings.agent.backend}
-                      options={AGENT_BACKEND_OPTIONS}
+                      options={AGENT_BACKEND_OPTIONS.filter((option) => localSettings.agent.backends[option.value as AgentBackendId]?.enabled !== false)}
                       onChange={(backend) => setLocalSettings({
                         ...localSettings,
                         agent: { ...localSettings.agent, backend: backend as AgentBackendId },
@@ -1385,31 +1414,45 @@ export function SettingsPanel() {
                   </div>
                   {(Object.keys(localSettings.agent.backends) as AgentBackendId[]).map((backendId) => {
                     const config = localSettings.agent.backends[backendId];
+                    const backendEnabled = config.enabled !== false;
                     const status = agentStatuses.find((item) => item.id === backendId);
                     const label = AGENT_BACKEND_OPTIONS.find((option) => option.value === backendId)?.label ?? backendId;
+                    const updateConfig = (patch: Partial<typeof config>) => setLocalSettings({
+                      ...localSettings,
+                      agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, ...patch } } },
+                    });
                     return (
-                      <section className="agent-backend-settings" key={backendId}>
-                        <header><strong>{label}</strong><span className={status?.compatible ? 'ready' : ''}>{status ? (status.compatible ? status.version || '可用' : status.diagnostic) : '尚未检测'}</span></header>
+                      <section className={`agent-backend-settings${backendEnabled ? '' : ' agent-backend-off'}`} key={backendId}>
+                        <header>
+                          <strong>{label}</strong>
+                          <span className={status?.compatible ? 'ready' : ''}>{status ? (status.compatible ? status.version || '可用' : status.diagnostic) : '尚未检测'}</span>
+                          <button
+                            type="button"
+                            role="switch"
+                            aria-checked={backendEnabled}
+                            aria-label={`${backendEnabled ? '停用' : '启用'} ${label}`}
+                            className={`settings-switch${backendEnabled ? ' is-on' : ''}`}
+                            title={backendEnabled ? '停用该 Agent' : '启用该 Agent'}
+                            onClick={() => updateConfig({ enabled: !backendEnabled })}
+                          >
+                            <span className="settings-switch-thumb" />
+                          </button>
+                        </header>
                         <div className="setting-item">
                           <label>可执行文件</label>
                           <input
                             type="text"
                             value={config.executable_path}
-                            onChange={(event) => setLocalSettings({
-                              ...localSettings,
-                              agent: {
-                                ...localSettings.agent,
-                                backends: { ...localSettings.agent.backends, [backendId]: { ...config, executable_path: event.target.value } },
-                              },
-                            })}
+                            disabled={!backendEnabled}
+                            onChange={(event) => updateConfig({ executable_path: event.target.value })}
                             placeholder={backendId === 'codex' ? '留空则优先使用官方编辑器扩展或 PATH 中的 codex' : `留空则从 PATH 自动查找 ${backendId === 'claude_code' ? 'claude' : backendId}`}
                           />
                         </div>
                         <div className="agent-backend-options">
-                          <div className="setting-item"><label>模型覆盖</label><input type="text" value={config.model} onChange={(event) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, model: event.target.value } } } })} placeholder="使用 CLI 默认模型" /></div>
+                          <div className="setting-item"><label>模型覆盖</label><input type="text" value={config.model} disabled={!backendEnabled} onChange={(event) => updateConfig({ model: event.target.value })} placeholder="使用 CLI 默认模型" /></div>
                           {/* Pi 没有 agent/profile 概念，隐藏该项以保持设置项与后端能力一致。 */}
                           {backendId !== 'pi' && (
-                            <div className="setting-item"><label>{backendId === 'claude_code' ? 'Agent' : backendId === 'codex' ? 'Profile' : 'Agent 模式'}</label><input type="text" value={config.profile} onChange={(event) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, profile: event.target.value } } } })} placeholder="使用 CLI 默认配置" /></div>
+                            <div className="setting-item"><label>{backendId === 'claude_code' ? 'Agent' : backendId === 'codex' ? 'Profile' : 'Agent 模式'}</label><input type="text" value={config.profile} disabled={!backendEnabled} onChange={(event) => updateConfig({ profile: event.target.value })} placeholder="使用 CLI 默认配置" /></div>
                           )}
                           {backendId !== 'opencode' && (
                             <div className="setting-item">
@@ -1417,8 +1460,9 @@ export function SettingsPanel() {
                               <SettingsSelect
                                 ariaLabel="推理强度"
                                 value={config.reasoning_effort}
+                                disabled={!backendEnabled}
                                 options={backendId === 'claude_code' ? [...REASONING_EFFORT_OPTIONS, { value: 'max', label: '最大' }] : REASONING_EFFORT_OPTIONS}
-                                onChange={(effort) => setLocalSettings({ ...localSettings, agent: { ...localSettings.agent, backends: { ...localSettings.agent.backends, [backendId]: { ...config, reasoning_effort: effort } } } })}
+                                onChange={(effort) => updateConfig({ reasoning_effort: effort })}
                               />
                             </div>
                           )}

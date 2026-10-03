@@ -38,10 +38,10 @@ test('table toolbar exposes row, column, alignment and format actions', async ()
 test('menu bar publishes table and image requests instead of touching the editor directly', async () => {
   const menuBar = await read('../src/components/MenuBar/MenuBar.tsx');
 
-  assert.match(menuBar, /label: '插入图片…'/);
-  assert.match(menuBar, /label: '插入表格'/);
+  assert.match(menuBar, /label: t\('插入图片…', language\)/);
+  assert.match(menuBar, /label: t\('插入表格', language\)/);
   assert.match(menuBar, /Ctrl\+Shift\+T/);
-  assert.match(menuBar, /label: '表格操作'/);
+  assert.match(menuBar, /label: t\('表格操作', language\)/);
   assert.match(menuBar, /new CustomEvent\('zeditor-table-action', \{ detail: \{ action \} \}\)/);
   // 插入类入口统一按 kind 派发事件（table / image / markmap）。
   assert.match(menuBar, /window\.dispatchEvent\(new CustomEvent\(`zeditor-insert-\$\{kind\}`\)\)/);

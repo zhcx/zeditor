@@ -118,6 +118,12 @@ export interface Settings {
     temperature: number;
     /** 校对模式开关：开启用 AI 校对，关闭用内置 Markdown 静态校对。 */
     proofread_with_ai: boolean;
+    /** 校对引擎：true 时通过本机 AI Agent 运行（单次调用整篇），否则走 AI 助手 API（未配置时自动回退本地 Agent）。 */
+    proofread_use_agent: boolean;
+    /** 伴写引擎：true 时通过本机 AI Agent 运行，否则走 AI 助手 API（未配置时自动回退本地 Agent）。 */
+    companion_use_agent: boolean;
+    /** 本地 Agent 后备总开关：AI 助手未配置时是否自动改用本机 AI Agent；关闭后直接报错。 */
+    agent_fallback_enabled: boolean;
     auto_suggest: boolean;
     suggest_delay: number;
     writing_style: 'formal' | 'casual' | 'academic' | 'creative' | 'custom';
@@ -413,6 +419,9 @@ const defaultSettings: Settings = {
     model: 'gpt-4o-mini',
     temperature: 0.7,
     proofread_with_ai: true,
+    proofread_use_agent: false,
+    companion_use_agent: false,
+    agent_fallback_enabled: true,
     auto_suggest: false,
     suggest_delay: 2000,
     writing_style: 'formal',
@@ -424,10 +433,10 @@ const defaultSettings: Settings = {
     enabled: false,
     backend: 'claude_code',
     backends: {
-      claude_code: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
-      codex: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
-      opencode: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
-      pi: { executable_path: '', model: '', profile: '', reasoning_effort: '' },
+      claude_code: { executable_path: '', model: '', profile: '', reasoning_effort: '', enabled: true },
+      codex: { executable_path: '', model: '', profile: '', reasoning_effort: '', enabled: true },
+      opencode: { executable_path: '', model: '', profile: '', reasoning_effort: '', enabled: true },
+      pi: { executable_path: '', model: '', profile: '', reasoning_effort: '', enabled: true },
     },
   },
   explorer: {

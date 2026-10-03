@@ -253,6 +253,24 @@ function App() {
     return () => window.removeEventListener('zeditor-install-update', install);
   }, [requestAppClose]);
 
+  // Agent 预热：应用启动阶段后台完成 CLI 版本/能力探测（后端按 mtime 缓存）。
+  // AI 助手未配置时，伴写、校对等编辑功能会桥接到本地 Agent CLI，预热能让
+  // 首次桥接调用省下 1–3 秒探测等待；Agent 面板的首次回合同样受益。
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return;
+    const config = settings.agent.backends[settings.agent.backend];
+    const tasks: Promise<unknown>[] = [
+      invoke('agent_probe_backend', {
+        backend: settings.agent.backend,
+        executablePath: config?.executable_path?.trim() || null,
+      }).catch(() => null),
+    ];
+    if (!settings.ai.enabled) {
+      tasks.push(invoke('agent_probe_backend', { backend: null, executablePath: null }).catch(() => null));
+    }
+    void Promise.allSettled(tasks);
+  }, [settings.agent.backend, settings.agent.backends, settings.ai.enabled]);
+
   // 演示模式：监听来自菜单/工具栏的演示请求事件
   useEffect(() => {
     const startPresentation = () => setPresentationVisible(true);

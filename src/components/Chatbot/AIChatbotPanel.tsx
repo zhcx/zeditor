@@ -11,7 +11,7 @@ import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { AgentPanel, RuntimeTabs } from './AgentPanel';
 import { ChatSelectMenu } from './ChatSelectMenu';
 import type { AIRuntime } from '../../types/agent';
-import { parseAIProviderProfiles } from '../../utils/aiProviderProfiles';
+import { listConfiguredAIProviders, parseAIProviderProfiles, resolveConfiguredAIProvider } from '../../utils/aiProviderProfiles';
 import { buildAutomaticEditorContext, formatAssistantInsertion } from '../../utils/assistantEditor';
 
 const md = new MarkdownIt({ html: false, breaks: true, linkify: true });
@@ -78,15 +78,19 @@ function ReasoningOptionIcon({ effort }: { effort: ReasoningEffort }) {
 }
 
 export function AIChatbotPanel() {
+  const aiEnabled = useAppStore((state) => state.settings.ai.enabled);
   const [runtime, setRuntime] = useState<AIRuntime>(() => {
     try { return localStorage.getItem('zeditor.ai-runtime') === 'agent' ? 'agent' : 'api'; }
     catch { return 'api'; }
   });
+  // AI 助手关闭时对话栏只保留 Agent 运行时（AI 对话标签随之隐藏）。
+  const effectiveRuntime: AIRuntime = aiEnabled ? runtime : 'agent';
   const handleRuntimeChange = (next: AIRuntime) => {
+    if (!aiEnabled && next !== 'agent') return;
     setRuntime(next);
     try { localStorage.setItem('zeditor.ai-runtime', next); } catch { /* ignored */ }
   };
-  return runtime === 'agent'
+  return effectiveRuntime === 'agent'
     ? <AgentPanel onRuntimeChange={handleRuntimeChange} />
     : <ApiChatPanel onRuntimeChange={handleRuntimeChange} />;
 }
@@ -131,8 +135,61 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
     }
   }, []);
   const workspaceConfigKey = workspaceConfig.key;
-  const [chatProvider, setChatProvider] = useState<AIProviderId>(() => workspaceConfig.provider || settings.ai.provider);
-  const [chatModel, setChatModel] = useState(() => workspaceConfig.model || settings.ai.model);
+  // 合并各服务商的档案：优先使用 provider_profiles，其次兼容旧版 provider_api_keys
+  // 与设置页顶层的 api_key，避免老配置里的密钥被漏判为「未配置」。
+  const providerProfiles = useMemo(() => {
+    const profiles = parseAIProviderProfiles(settings.ai.provider_profiles);
+    let legacyKeys: Record<string, string> = {};
+    try {
+      const parsed: unknown = JSON.parse(settings.ai.provider_api_keys || '{}');
+      if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+        legacyKeys = parsed as Record<string, string>;
+      }
+    } catch { /* 旧数据损坏时按无密钥处理。 */ }
+    const active = profiles[settings.ai.provider];
+    const fallbackKey = (settings.ai.api_key || legacyKeys[settings.ai.provider] || '').trim();
+    if (fallbackKey && !(active?.api_key || '').trim()) {
+      profiles[settings.ai.provider] = {
+        ...active,
+        api_key: fallbackKey,
+        api_endpoint: active?.api_endpoint || settings.ai.api_endpoint,
+        model: active?.model || settings.ai.model,
+        models: active?.models,
+      };
+    }
+    return profiles;
+  }, [
+    settings.ai.provider_profiles,
+    settings.ai.provider_api_keys,
+    settings.ai.provider,
+    settings.ai.api_key,
+    settings.ai.api_endpoint,
+    settings.ai.model,
+  ]);
+  const configuredProviders = useMemo(
+    () => listConfiguredAIProviders(AI_PROVIDER_DEFINITIONS, providerProfiles, settings.ai.provider),
+    [providerProfiles, settings.ai.provider],
+  );
+  const configuredProviderIds = useMemo(
+    () => new Set(configuredProviders.map((provider) => provider.id)),
+    [configuredProviders],
+  );
+  const resolveProvider = useCallback(
+    (candidates: Array<AIProviderId | undefined>) =>
+      resolveConfiguredAIProvider(configuredProviders, candidates),
+    [configuredProviders],
+  );
+  // 打开面板时直接落到真正配置好的服务商上：工作区记忆 → 设置默认 → 已配置列表首个。
+  // 避免「设置里配了 A，对话框却显示未配置的默认服务商」这种误导。
+  const initialProvider = resolveProvider([workspaceConfig.provider, settings.ai.provider]) ?? settings.ai.provider;
+  const [chatProvider, setChatProvider] = useState<AIProviderId>(initialProvider);
+  const [chatModel, setChatModel] = useState(() => (
+    (workspaceConfig.provider === initialProvider ? workspaceConfig.model : undefined)
+    || (initialProvider === settings.ai.provider ? settings.ai.model : undefined)
+    || providerProfiles[initialProvider]?.model
+    || AI_PROVIDER_DEFINITIONS.find((item) => item.id === initialProvider)?.model
+    || ''
+  ));
   const listRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const composerResizeRef = useRef({ active: false, startY: 0, startHeight: 84 });
@@ -238,21 +295,32 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
     sendChatMessage(text, attachments, { provider: chatProvider, model: chatModel, searchContext, searchPreview, workspaceContext });
   }, [inputValue, pendingAttachments, chatbotLoading, sendChatMessage, chatProvider, chatModel, settings.web_search, webSearchActive, webSearchEnabled, webSearchLoading, workspaceContext]);
 
-  const providerProfiles = useMemo(
-    () => parseAIProviderProfiles(settings.ai.provider_profiles),
-    [settings.ai.provider_profiles],
-  );
-
   const selectedProfile = providerProfiles[chatProvider];
   const selectedDefinition = AI_PROVIDER_DEFINITIONS.find((item) => item.id === chatProvider);
-  const availableProviders = AI_PROVIDER_DEFINITIONS.filter((provider) =>
-    provider.id === settings.ai.provider || Boolean(providerProfiles[provider.id]?.api_key),
-  );
+  // 只有真正配置过的服务商才进入候选列表：设置页默认的 openai 若从未填写密钥，
+  // 就不该再作为可选项把对话框「钉」在未配置的服务商上。
+  const availableProviders = configuredProviders;
+  const providerSelectable = availableProviders.length > 1;
+  const hasConfiguredProvider = availableProviders.length > 0;
   const chatModels = Array.from(new Set([
     ...(selectedProfile?.models || []),
     selectedProfile?.model,
     chatProvider === settings.ai.provider ? settings.ai.model : undefined,
+    selectedDefinition?.model,
   ].filter((model): model is string => Boolean(model))));
+
+  // 当前选择的服务商被删掉密钥、或设置里切换了默认服务商时，纠正到仍然可用的那个。
+  useEffect(() => {
+    if (configuredProviderIds.has(chatProvider)) return;
+    const next = resolveProvider([settings.ai.provider, workspaceConfig.provider]);
+    if (!next || next === chatProvider) return;
+    setChatProvider(next);
+    setChatModel(
+      providerProfiles[next]?.model
+      || AI_PROVIDER_DEFINITIONS.find((item) => item.id === next)?.model
+      || '',
+    );
+  }, [chatProvider, configuredProviderIds, providerProfiles, resolveProvider, settings.ai.provider, workspaceConfig.provider]);
 
   const handleChatProviderChange = (provider: AIProviderId) => {
     const profile = providerProfiles[provider];
@@ -400,17 +468,29 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
             </button>
           </div>
         </div>
-        <div className="chatbot-ai-selectors">
+        <div className={`chatbot-ai-selectors${providerSelectable ? '' : ' chatbot-ai-selectors-single'}`}>
           <span className="chatbot-selector-label chatbot-provider-label">服务商</span>
           <span className="chatbot-selector-label chatbot-model-label">模型</span>
-          <ChatSelectMenu
-            className="chatbot-provider-select"
-            value={chatProvider}
-            label={selectedDefinition?.label || chatProvider}
-            options={availableProviders.map((provider) => ({ value: provider.id, label: provider.label }))}
-            onChange={(value) => handleChatProviderChange(value as AIProviderId)}
-            ariaLabel="选择 AI 服务商"
-          />
+          {providerSelectable ? (
+            <ChatSelectMenu
+              className="chatbot-provider-select"
+              value={chatProvider}
+              label={selectedDefinition?.label || chatProvider}
+              options={availableProviders.map((provider) => ({ value: provider.id, label: provider.label }))}
+              onChange={(value) => handleChatProviderChange(value as AIProviderId)}
+              ariaLabel="选择 AI 服务商"
+            />
+          ) : (
+            // 只配置了一个服务商（或尚未配置）时无需下拉，直接平铺当前生效的服务商。
+            <span
+              className={`chatbot-provider-static${hasConfiguredProvider ? '' : ' is-unconfigured'}`}
+              title={hasConfiguredProvider
+                ? `当前服务商：${selectedDefinition?.label || chatProvider}`
+                : '尚未配置任何 AI 服务商，请前往「设置 → AI 助手」添加 API 密钥'}
+            >
+              {hasConfiguredProvider ? (selectedDefinition?.label || chatProvider) : '未配置'}
+            </span>
+          )}
           <ChatSelectMenu
             className="chatbot-model-select"
             value={chatModel}

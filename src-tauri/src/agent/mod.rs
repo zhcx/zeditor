@@ -1,4 +1,5 @@
 mod adapters;
+pub(crate) mod bridge;
 mod git;
 mod models;
 mod process;
@@ -392,6 +393,16 @@ fn probe_capabilities(path: &Path, backend: AgentBackendId) -> Result<(), String
         ));
     }
     Ok(())
+}
+
+#[tauri::command]
+pub async fn agent_probe_backend(
+    backend: Option<AgentBackendId>,
+    executable_path: Option<String>,
+) -> Result<String, String> {
+    // 启动阶段后台预热：把 CLI 版本/能力探测（两次子进程冷启动）提前执行，
+    // 结果按 mtime 缓存（见 ensure_backend_probed），首次实际调用零探测等待。
+    bridge::probe_any(backend, executable_path).await
 }
 
 #[tauri::command]

@@ -27,9 +27,11 @@ test('校对开关接线：设置键、设置面板与状态栏行为', async ()
   assert.doesNotMatch(proofreadBody, /enabled:\s*true/);
   assert.match(statusBar, /Markdown 检查/);
 
-  // aiStore 依据设置选择 AI 或内置 lint；选区校对使用 partial 模式，
-  // 且「从文档开头开始选」也会被识别为选区，避免上下文规则假阳性。
-  assert.match(aiStore, /aiRequested && !aiReady/);
+  // aiStore 依据设置选择 AI 或内置 lint：关闭「使用 AI 校对」走内置 lint；
+  // 开启时即使 AI 助手未配置也发起请求（后端自动落到本地 Agent 后备）。
+  // 选区校对使用 partial 模式，「从文档开头开始选」也会被识别为选区，
+  // 避免上下文规则假阳性。
+  assert.match(aiStore, /!aiReady && !aiRequested/);
   assert.match(aiStore, /const isPartial = baseOffset > 0 \|\| trimmedContent !== wholeTrimmed/);
   assert.match(aiStore, /lintMarkdown\(trimmedContent,\s*\{ partial: isPartial \}\)/);
 });

@@ -248,6 +248,7 @@ fn main() {
             ai::genies::list_custom_genies,
             ai::genies::open_genies_folder,
             agent::agent_detect_backends,
+            agent::agent_probe_backend,
             agent::agent_list_models,
             agent::agent_list_sessions,
             agent::agent_get_session_events,
@@ -271,6 +272,11 @@ fn main() {
             let agent_storage = _app.path().app_data_dir()?.join("agent-runtime");
             _app.manage(agent::AgentSupervisor::new(agent_storage));
             _app.manage(converter::ConverterManager::default());
+
+            // 桥接层读取持久化设置中的后端启用/停用状态。
+            if let Ok(config_dir) = _app.path().app_config_dir() {
+                agent::bridge::init_settings_path(config_dir.join("settings.json"));
+            }
 
             let webdav_queue_path = _app.path().app_data_dir()?.join("webdav-pending.json");
             _app.manage(WebDavSyncManager::new(

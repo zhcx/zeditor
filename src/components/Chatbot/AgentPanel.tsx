@@ -72,10 +72,26 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
     content,
   }), [activeTab?.title, activeTabId, content, currentFile]);
   const currentDocumentKey = automaticContext?.key || `${activeTabId || currentFile || 'untitled'}:untitled`;
-  const backendConfig = settings.agent.backends[backend];
-  const backendStatus = backends.find((item) => item.id === backend);
-  const modelCatalog = modelCatalogs[backend];
-  const effectiveModel = model || modelCatalog?.current_model || '';
+  // 下拉只列出已安装、兼容且未停用的 Agent：未安装、探测不通过或用户在
+  // 设置中停用的后端都不出现。
+  const availableBackends = useMemo(
+    () => (Object.keys(BACKEND_LABELS) as AgentBackendId[])
+      .filter((id) => settings.agent.backends[id]?.enabled !== false)
+      .filter((id) => backends.find((item) => item.id === id)?.compatible),
+    [backends, settings.agent.backends],
+  );
+  // 选中的后端不可用时回退到第一个可用项：下拉里没有不可用项，选中态也不能
+  // 指向已隐藏的后端。回退期间的模型/配置取该后端的设置值，忽略本地编辑。
+  const effectiveBackend = availableBackends.includes(backend)
+    ? backend
+    : availableBackends[0] ?? backend;
+  const isImplicitBackend = effectiveBackend !== backend;
+  const backendConfig = settings.agent.backends[effectiveBackend];
+  const backendStatus = backends.find((item) => item.id === effectiveBackend);
+  const modelCatalog = modelCatalogs[effectiveBackend];
+  const effectiveProfile = isImplicitBackend ? backendConfig.profile : profile;
+  const effectiveReasoningEffort = isImplicitBackend ? backendConfig.reasoning_effort : reasoningEffort;
+  const effectiveModel = (isImplicitBackend ? backendConfig.model : model) || modelCatalog?.current_model || '';
   const effectiveApprovalMode = activeSession?.approval_mode || approvalMode;
   const selectedModel = modelCatalog?.models.find((item) => item.id === effectiveModel);
   const changeKey = changes?.files.map((file) => `${file.status}:${file.path}`).join('|') || '';
@@ -96,8 +112,8 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
 
   useEffect(() => {
     if (!backendStatus?.compatible || modelCatalog || !workspaceRoot) return;
-    void loadModels(backend, backendConfig.executable_path, profile, workspaceRoot);
-  }, [backend, backendConfig.executable_path, backendStatus?.compatible, loadModels, modelCatalog, profile, workspaceRoot]);
+    void loadModels(effectiveBackend, backendConfig.executable_path, effectiveProfile, workspaceRoot);
+  }, [effectiveBackend, backendConfig.executable_path, backendStatus?.compatible, loadModels, modelCatalog, effectiveProfile, workspaceRoot]);
 
   useEffect(() => {
     if (automaticDocumentKeyRef.current !== currentDocumentKey) {
@@ -144,7 +160,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
 
   const resumeSession = (sessionId: string) => {
     const session = sessions.find((item) => item.id === sessionId);
-    if (session && session.backend !== backend) {
+    if (session && session.backend !== effectiveBackend) {
       const config = settings.agent.backends[session.backend];
       setBackend(session.backend);
       setModel(config.model);
@@ -186,17 +202,17 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
     setPrompt('');
     try {
       await startTurn({
-        backend,
+        backend: effectiveBackend,
         workspaceRoot,
         prompt: text,
         executablePath: backendConfig.executable_path,
         model: effectiveModel,
-        profile,
-        reasoningEffort,
+        profile: effectiveProfile,
+        reasoningEffort: effectiveReasoningEffort,
         contextPaths,
         editorContext: editorContext || undefined,
         approvalMode: effectiveApprovalMode,
-        sessionId: activeSession?.backend === backend ? activeSession.id : undefined,
+        sessionId: activeSession?.backend === effectiveBackend ? activeSession.id : undefined,
       });
       setContextPaths([]);
       setEditorContext(null);
@@ -219,15 +235,15 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
   }
   const supportedEfforts = selectedModel?.supported_reasoning_efforts.length
     ? selectedModel.supported_reasoning_efforts
-    : backend === 'claude_code' ? ['low', 'medium', 'high', 'xhigh', 'max'] : ['low', 'medium', 'high', 'xhigh'];
+    : effectiveBackend === 'claude_code' ? ['low', 'medium', 'high', 'xhigh', 'max'] : ['low', 'medium', 'high', 'xhigh'];
   const effortOptions = [
     { value: '', label: '自动', description: selectedModel?.default_reasoning_effort ? `模型默认：${EFFORT_LABELS[selectedModel.default_reasoning_effort] || selectedModel.default_reasoning_effort}` : '使用 CLI 或模型默认值' },
     ...supportedEfforts.map((effort) => ({ value: effort, label: EFFORT_LABELS[effort] || effort })),
   ];
-  if (reasoningEffort && !effortOptions.some((item) => item.value === reasoningEffort)) {
-    effortOptions.push({ value: reasoningEffort, label: EFFORT_LABELS[reasoningEffort] || reasoningEffort });
+  if (effectiveReasoningEffort && !effortOptions.some((item) => item.value === effectiveReasoningEffort)) {
+    effortOptions.push({ value: effectiveReasoningEffort, label: EFFORT_LABELS[effectiveReasoningEffort] || effectiveReasoningEffort });
   }
-  const modelLabel = selectedModel?.display_name || effectiveModel || (modelsLoading === backend ? '读取模型…' : 'CLI 默认模型');
+  const modelLabel = selectedModel?.display_name || effectiveModel || (modelsLoading === effectiveBackend ? '读取模型…' : 'CLI 默认模型');
   const normalizedWorkspaceRoot = normalizeWorkspacePath(workspaceRoot);
   const workspaceSessions = sessions.filter((session) => normalizeWorkspacePath(session.workspace_root) === normalizedWorkspaceRoot);
   // 会话标题由后端从首条提问自动生成；旧会话无标题时回退到 backend+时间。
@@ -278,15 +294,20 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
           <span className="chatbot-selector-label agent-session-label">会话</span>
           <ChatSelectMenu
             className="agent-backend-select"
-            value={backend}
-            label={BACKEND_LABELS[backend]}
-            options={(Object.keys(BACKEND_LABELS) as AgentBackendId[]).map((id) => ({
+            value={effectiveBackend}
+            label={availableBackends.includes(backend)
+              ? BACKEND_LABELS[backend]
+              : availableBackends.length > 0
+                ? BACKEND_LABELS[availableBackends[0]]
+                : '未检测到可用的 Agent'}
+            options={availableBackends.map((id) => ({
               value: id,
               label: BACKEND_LABELS[id],
-              description: backends.find((item) => item.id === id)?.compatible ? '已发现并兼容' : '未安装或不可用',
+              description: '已发现并兼容',
             }))}
             onChange={(value) => changeBackend(value as AgentBackendId)}
             ariaLabel="选择 Agent"
+            disabled={availableBackends.length === 0}
           />
           <ChatSelectMenu
             className="agent-session-select"
@@ -440,7 +461,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
             label={modelLabel}
             options={modelOptions}
             onChange={setModel}
-            disabled={loading || modelsLoading === backend || modelOptions.length === 0}
+            disabled={loading || modelsLoading === effectiveBackend || modelOptions.length === 0}
             ariaLabel="Agent 模型"
             placement="top"
             footer={modelCatalog?.diagnostic}
@@ -448,8 +469,8 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
           {backendStatus?.capabilities.reasoning_effort && (
             <ChatSelectMenu
               className="agent-effort-menu"
-              value={reasoningEffort}
-              label={EFFORT_LABELS[reasoningEffort] || reasoningEffort}
+              value={effectiveReasoningEffort}
+              label={EFFORT_LABELS[effectiveReasoningEffort] || effectiveReasoningEffort}
               options={effortOptions}
               onChange={setReasoningEffort}
               disabled={loading}
@@ -473,14 +494,18 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
 }
 
 export function RuntimeTabs({ active, onChange }: { active: 'api' | 'agent'; onChange: (runtime: 'api' | 'agent') => void }) {
+  // AI 助手关闭时不渲染「AI 对话」标签：对话栏只剩 Agent 运行时。
+  const aiEnabled = useAppStore((state) => state.settings.ai.enabled);
   return (
     <div className="ai-runtime-tabs" role="tablist" aria-label="AI 运行模式">
-      <button className={`ai-runtime-tab api ${active === 'api' ? 'active' : ''}`} onClick={() => onChange('api')} role="tab" aria-selected={active === 'api'}>
-        <span className="ai-runtime-tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 16 16"><path d="M3 3.2h10v7.5H8l-3.2 2.4v-2.4H3z" /><path d="M5.4 6.9h5.2" /></svg>
-        </span>
-        <span className="ai-runtime-tab-label">AI 对话</span>
-      </button>
+      {aiEnabled && (
+        <button className={`ai-runtime-tab api ${active === 'api' ? 'active' : ''}`} onClick={() => onChange('api')} role="tab" aria-selected={active === 'api'}>
+          <span className="ai-runtime-tab-icon" aria-hidden="true">
+            <svg viewBox="0 0 16 16"><path d="M3 3.2h10v7.5H8l-3.2 2.4v-2.4H3z" /><path d="M5.4 6.9h5.2" /></svg>
+          </span>
+          <span className="ai-runtime-tab-label">AI 对话</span>
+        </button>
+      )}
       <button className={`ai-runtime-tab agent ${active === 'agent' ? 'active' : ''}`} onClick={() => onChange('agent')} role="tab" aria-selected={active === 'agent'}>
         <span className="ai-runtime-tab-icon" aria-hidden="true">
           <svg viewBox="0 0 16 16"><rect x="2.4" y="3" width="11.2" height="10" rx="1.5" /><path d="m4.7 6 2 1.6-2 1.6M8.5 9.4h2.8" /></svg>

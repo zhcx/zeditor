@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAppStore } from '../../stores/appStore';
+import { t, LANGUAGE_OPTIONS } from '../../i18n';
 import { open as openDialog, save, message } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -424,6 +425,7 @@ export function MenuBar() {
   const mode = useAppStore((state) => state.mode);
   // 主题偏好解析与 themes/apply 的 resolveThemePreference 同规则，用于菜单当前态勾选。
   const resolvedTheme = resolveThemePreference(settings.appearance.theme);
+  const language = settings.appearance.language;
 
   const [activeMenu, setActiveMenu] = useState<string | null>(null);
   const [menuOpen, setMenuOpen] = useState(false);
@@ -782,7 +784,7 @@ export function MenuBar() {
         })),
         { divider: true, label: '' },
         {
-          label: '清除最近文件夹',
+          label: t('清除最近文件夹', language),
           action: () => {
             setActiveMenu(null);
             setMenuOpen(false);
@@ -792,84 +794,84 @@ export function MenuBar() {
           },
         },
       ]
-    : [{ label: '（暂无最近文件夹）', action: () => undefined }];
+    : [{ label: t('（暂无最近文件夹）', language), action: () => undefined }];
 
   const menus: MenuGroup[] = [
     {
       label: APP_NAME,
       variant: 'app',
       items: [
-        { label: '快捷键说明', action: () => setHelpModal('shortcuts') },
-        { label: 'Markdown 语法', action: () => setHelpModal('syntax') },
+        { label: t('快捷键说明', language), action: () => setHelpModal('shortcuts') },
+        { label: t('Markdown 语法', language), action: () => setHelpModal('syntax') },
         { divider: true, label: '' },
-        { label: '检查更新', action: handleCheckUpdates },
+        { label: t('检查更新', language), action: handleCheckUpdates },
         { divider: true, label: '' },
-        { label: '关于 Zeditor', action: () => setHelpModal('about') },
+        { label: t('关于 Zeditor', language), action: () => setHelpModal('about') },
       ],
     },
     {
-      label: '文件',
+      label: t('文件', language),
       items: [
-        { label: '新建', action: handleNewFile, shortcut: 'Ctrl+N' },
-        { label: '打开', action: handleOpenFile, shortcut: 'Ctrl+O' },
-        { label: '导入并转换文档…', action: handleConvertDocument },
-        ...('__TAURI_INTERNALS__' in window ? [{ label: '最近的文件夹', children: recentFolderMenuItems } satisfies MenuItem] : []),
-        { label: '保存', action: handleSaveFile, shortcut: 'Ctrl+S' },
-        { label: '另存为', action: handleSaveAs, shortcut: 'Ctrl+Shift+S' },
+        { label: t('新建', language), action: handleNewFile, shortcut: 'Ctrl+N' },
+        { label: t('打开', language), action: handleOpenFile, shortcut: 'Ctrl+O' },
+        { label: t('导入并转换文档…', language), action: handleConvertDocument },
+        ...('__TAURI_INTERNALS__' in window ? [{ label: t('最近的文件夹', language), children: recentFolderMenuItems } satisfies MenuItem] : []),
+        { label: t('保存', language), action: handleSaveFile, shortcut: 'Ctrl+S' },
+        { label: t('另存为', language), action: handleSaveAs, shortcut: 'Ctrl+Shift+S' },
         { divider: true, label: '' },
         {
-          label: '导出',
+          label: t('导出', language),
           children: [
-            { label: '导出为 HTML', action: () => handleExport('html') },
-            { label: '导出为 PDF...', action: () => { setPdfExportOpen(true); setActiveMenu(null); setMenuOpen(false); } },
-            { label: '导出为 Word', action: () => handleExport('word') },
+            { label: t('导出为 HTML', language), action: () => handleExport('html') },
+            { label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); setMenuOpen(false); } },
+            { label: t('导出为 Word', language), action: () => handleExport('word') },
           ],
         },
-        { label: '导出为 HTML', action: () => handleExport('html') },
-        { label: '导出为 PDF...', action: () => { setPdfExportOpen(true); setActiveMenu(null); } },
+        { label: t('导出为 HTML', language), action: () => handleExport('html') },
+        { label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); } },
       ],
     },
     {
-      label: '功能',
+      label: t('功能', language),
       items: [
-        { label: '撤销', action: () => document.execCommand('undo'), shortcut: 'Ctrl+Z' },
-        { label: '重做', action: () => document.execCommand('redo'), shortcut: 'Ctrl+Y' },
+        { label: t('撤销', language), action: () => document.execCommand('undo'), shortcut: 'Ctrl+Z' },
+        { label: t('重做', language), action: () => document.execCommand('redo'), shortcut: 'Ctrl+Y' },
         { divider: true, label: '' },
-        { label: '剪切', action: () => document.execCommand('cut'), shortcut: 'Ctrl+X' },
-        { label: '复制', action: () => document.execCommand('copy'), shortcut: 'Ctrl+C' },
-        { label: '粘贴', action: () => document.execCommand('paste'), shortcut: 'Ctrl+V' },
+        { label: t('剪切', language), action: () => document.execCommand('cut'), shortcut: 'Ctrl+X' },
+        { label: t('复制', language), action: () => document.execCommand('copy'), shortcut: 'Ctrl+C' },
+        { label: t('粘贴', language), action: () => document.execCommand('paste'), shortcut: 'Ctrl+V' },
         { divider: true, label: '' },
-        { label: '插入图片…', action: () => requestInsert('image'), shortcut: 'Ctrl+Shift+I' },
-        { label: '插入表格', action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
-        { label: '插入思维导图', action: () => requestInsert('markmap') },
-        { label: 'AI 指令面板', action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }, shortcut: 'Ctrl+J' },
-        { label: '检查链接', action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-check-links')); }, shortcut: 'Ctrl+Alt+V' },
+        { label: t('插入图片…', language), action: () => requestInsert('image'), shortcut: 'Ctrl+Shift+I' },
+        { label: t('插入表格', language), action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
+        { label: t('插入思维导图', language), action: () => requestInsert('markmap') },
+        { label: t('AI 指令面板', language), action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }, shortcut: 'Ctrl+J' },
+        { label: t('检查链接', language), action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-check-links')); }, shortcut: 'Ctrl+Alt+V' },
         {
-          label: '表格操作',
+          label: t('表格操作', language),
           children: [
-            { label: '上方插入行', action: () => requestTableAction('row-above') },
-            { label: '下方插入行', action: () => requestTableAction('row-below') },
-            { label: '删除当前行', action: () => requestTableAction('row-delete') },
-            { label: '左侧插入列', action: () => requestTableAction('column-left') },
-            { label: '右侧插入列', action: () => requestTableAction('column-right') },
-            { label: '删除当前列', action: () => requestTableAction('column-delete') },
-            { label: '当前列左对齐', action: () => requestTableAction('align-left') },
-            { label: '当前列居中', action: () => requestTableAction('align-center') },
-            { label: '当前列右对齐', action: () => requestTableAction('align-right') },
-            { label: '整理表格格式', action: () => requestTableAction('format') },
-            { label: '删除整张表格', action: () => requestTableAction('table-delete') },
+            { label: t('上方插入行', language), action: () => requestTableAction('row-above') },
+            { label: t('下方插入行', language), action: () => requestTableAction('row-below') },
+            { label: t('删除当前行', language), action: () => requestTableAction('row-delete') },
+            { label: t('左侧插入列', language), action: () => requestTableAction('column-left') },
+            { label: t('右侧插入列', language), action: () => requestTableAction('column-right') },
+            { label: t('删除当前列', language), action: () => requestTableAction('column-delete') },
+            { label: t('当前列左对齐', language), action: () => requestTableAction('align-left') },
+            { label: t('当前列居中', language), action: () => requestTableAction('align-center') },
+            { label: t('当前列右对齐', language), action: () => requestTableAction('align-right') },
+            { label: t('整理表格格式', language), action: () => requestTableAction('format') },
+            { label: t('删除整张表格', language), action: () => requestTableAction('table-delete') },
           ],
         },
         { divider: true, label: '' },
-        { label: '全选', action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A' },
+        { label: t('全选', language), action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A' },
         { divider: true, label: '' },
-        { label: '分屏模式', checked: mode === 'split', action: () => useAppStore.getState().setMode('split') },
-        { label: '沉浸阅读', checked: mode === 'immersive', action: () => useAppStore.getState().setMode('immersive') },
-        { label: '沉浸写作', checked: mode === 'zen', action: () => useAppStore.getState().setMode('zen') },
-        { label: '演示模式', action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); } },
+        { label: t('分屏模式', language), checked: mode === 'split', action: () => useAppStore.getState().setMode('split') },
+        { label: t('沉浸阅读', language), checked: mode === 'immersive', action: () => useAppStore.getState().setMode('immersive') },
+        { label: t('沉浸写作', language), checked: mode === 'zen', action: () => useAppStore.getState().setMode('zen') },
+        { label: t('演示模式', language), action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); } },
         { divider: true, label: '' },
         {
-          label: '主题',
+          label: t('主题', language),
           children: THEMES.map((theme) => ({
             label: `${theme.label}（${theme.labelEn}）`,
             checked: resolvedTheme === theme.id,
@@ -878,8 +880,18 @@ export function MenuBar() {
             },
           })),
         },
+        {
+          label: t('语言', language),
+          children: LANGUAGE_OPTIONS.map((option) => ({
+            label: option.nativeLabel,
+            checked: language === option.value,
+            action: () => {
+              setSettings({ ...settings, appearance: { ...settings.appearance, language: option.value } });
+            },
+          })),
+        },
         { divider: true, label: '' },
-        { label: '设置', action: () => setSettingsOpen(true) },
+        { label: t('设置', language), action: () => setSettingsOpen(true) },
       ],
     },
   ];

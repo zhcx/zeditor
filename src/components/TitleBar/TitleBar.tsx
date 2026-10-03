@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { MenuBar } from '../MenuBar/MenuBar';
 import { useAppStore } from '../../stores/appStore';
+import { t } from '../../i18n';
 
 const APP_NAME = 'Zeditor';
 
@@ -13,8 +14,9 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const mountedRef = useRef(true);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const language = useAppStore(state => state.settings.appearance.language);
   const activeDocumentTitle = useAppStore(state => (
-    state.tabs.find(tab => tab.id === state.activeTabId)?.title || '未命名'
+    state.tabs.find(tab => tab.id === state.activeTabId)?.title || t('未命名', state.settings.appearance.language)
   ));
 
   useEffect(() => {
@@ -81,7 +83,7 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
         className="titlebar-drag-spacer"
         data-tauri-drag-region
       >
-        <div className="titlebar-command-center" role="status" aria-label={`当前文档：${activeDocumentTitle}`}>
+        <div className="titlebar-command-center" role="status" aria-label={`${t('当前文档：', language)}${activeDocumentTitle}`}>
           <span>{activeDocumentTitle}</span>
         </div>
       </div>
@@ -89,16 +91,16 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
         <button
           className="titlebar-btn titlebar-minimize"
           onClick={handleMinimize}
-          title="最小化"
-          aria-label="最小化"
+          title={t('最小化', language)}
+          aria-label={t('最小化', language)}
         >
           <svg width="12" height="1" viewBox="0 0 12 1"><rect width="12" height="1" fill="currentColor"/></svg>
         </button>
         <button
           className="titlebar-btn titlebar-maximize"
           onClick={handleToggleMaximize}
-          title={isMaximized ? '还原' : '最大化'}
-          aria-label={isMaximized ? '还原' : '最大化'}
+          title={isMaximized ? t('还原', language) : t('最大化', language)}
+          aria-label={isMaximized ? t('还原', language) : t('最大化', language)}
         >
           {isMaximized ? (
             <svg width="10" height="10" viewBox="0 0 10 10">
@@ -114,8 +116,8 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
         <button
           className="titlebar-btn titlebar-close"
           onClick={handleClose}
-          title="关闭"
-          aria-label="关闭"
+          title={t('关闭', language)}
+          aria-label={t('关闭', language)}
         >
           <svg width="10" height="10" viewBox="0 0 10 10">
             <path d="M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>

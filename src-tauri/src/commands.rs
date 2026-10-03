@@ -145,6 +145,9 @@ pub struct AgentBackendConfig {
     pub profile: String,
     #[serde(default)]
     pub reasoning_effort: String,
+    /// 启用/停用该后端：缺省视为启用；停用后不参与 Agent 面板选择与本地桥接。
+    #[serde(default = "default_true")]
+    pub enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -256,6 +259,10 @@ pub struct ExportSettings {
     pub html_template: String,
 }
 
+fn default_true() -> bool {
+    true
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AISettings {
     pub enabled: bool,
@@ -271,6 +278,16 @@ pub struct AISettings {
     pub provider_api_keys: String,
     #[serde(default)]
     pub provider_profiles: String,
+    /// 校对引擎：true 时强制走本机 AI Agent（单次调用整篇），不走 AI 助手 API。
+    #[serde(default)]
+    pub proofread_use_agent: bool,
+    /// 伴写引擎：true 时强制走本机 AI Agent，不走 AI 助手 API。
+    #[serde(default)]
+    pub companion_use_agent: bool,
+    /// 本地 Agent 后备总开关：AI 助手未配置时是否自动改用本机 AI Agent；
+    /// 关闭后 AI 未配置直接报错，不再调用本机 CLI。
+    #[serde(default = "default_true")]
+    pub agent_fallback_enabled: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -378,6 +395,9 @@ impl Default for Settings {
                 custom_style_prompt: String::new(),
                 provider_api_keys: "{}".into(),
                 provider_profiles: "{}".into(),
+                proofread_use_agent: false,
+                companion_use_agent: false,
+                agent_fallback_enabled: true,
             },
             agent: AgentSettings::default(),
             web_search: WebSearchSettings {
