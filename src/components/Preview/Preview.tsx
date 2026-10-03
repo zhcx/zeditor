@@ -137,7 +137,10 @@ function tableLayoutKey(documentPath: string | null, table: HTMLTableElement, in
 }
 
 function tableColumnCount(table: HTMLTableElement): number {
-  return table.querySelectorAll('tr:first-child > *').length;
+  // 必须取 rows[0] 而不是 `tr:first-child`：thead 和 tbody 的首行都满足
+  // :first-child，选择器会数出两倍列，colgroup 里多出的 col 会让浏览器
+  // 把表格撑满容器并按比例压缩列宽，拖动也就改不到真正的列。
+  return table.rows[0]?.cells.length ?? 0;
 }
 
 function applyColumnWidths(table: HTMLTableElement, widths: number[]): void {
@@ -163,7 +166,7 @@ function applyColumnWidths(table: HTMLTableElement, widths: number[]): void {
 }
 
 function measureColumnWidths(table: HTMLTableElement): number[] {
-  return Array.from(table.querySelectorAll<HTMLTableCellElement>('tr:first-child > *'))
+  return Array.from(table.rows[0]?.cells ?? [])
     .map((cell) => Math.round(cell.getBoundingClientRect().width));
 }
 
@@ -177,11 +180,13 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): voi
     table.parentElement?.insertBefore(wrap, table);
     wrap.appendChild(table);
 
-    let widths = tableColumnWidths.get(key) ?? [];
+    let widths = (tableColumnWidths.get(key) ?? []).slice(0, tableColumnCount(table));
     applyColumnWidths(table, widths);
 
     const handles: HTMLDivElement[] = [];
-    const currentWidths = () => (widths.some((width) => width > 0) ? widths.slice() : measureColumnWidths(table));
+    // 拖动起点永远取当前渲染宽度：手柄按渲染位置摆放，若沿用上次写入的
+    // 设置值，起点会和手柄所在的实际边界脱节，越拖偏差越大。
+    const currentWidths = () => measureColumnWidths(table);
     // 只有内容真的超出可用宽度时才允许横向滚动：否则窄表格下方会出现一条空滚动条。
     const syncScrollable = () => {
       const overflow = table.getBoundingClientRect().width > wrap.clientWidth + 1;
@@ -189,12 +194,12 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): voi
     };
     const reposition = () => {
       const wrapRect = wrap.getBoundingClientRect();
-      const cells = Array.from(table.querySelectorAll<HTMLTableCellElement>('tr:first-child > *'));
+      const cells = Array.from(table.rows[0]?.cells ?? []);
       const height = table.getBoundingClientRect().height;
       syncScrollable();
       handles.forEach((handle, index) => {
         const cell = cells[index];
-        if (!cell || index === cells.length - 1) {
+        if (!cell) {
           handle.style.display = 'none';
           return;
         }
@@ -204,7 +209,8 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): voi
       });
     };
 
-    for (let index = 0; index < tableColumnCount(table) - 1; index += 1) {
+    // 每列一个右边界手柄：列与列之间 + 最右列的右边缘都能拖动调宽。
+    for (let index = 0; index < tableColumnCount(table); index += 1) {
       const handle = document.createElement('div');
       handle.className = 'table-column-handle';
       handle.setAttribute('role', 'separator');
@@ -247,6 +253,19 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): voi
       });
     }
 
+    // 首次定位之外，字体加载、分栏拖宽、窗口缩放等后续布局变化都会改变
+    // 列边界，手柄必须跟着重摆，否则会停在过期位置上。
+    let repositionObserver: ResizeObserver | null = null;
+    if (typeof ResizeObserver !== 'undefined') {
+      repositionObserver = new ResizeObserver(() => {
+        if (!wrap.isConnected) {
+          repositionObserver?.disconnect();
+          return;
+        }
+        reposition();
+      });
+      repositionObserver.observe(wrap);
+    }
     window.requestAnimationFrame(reposition);
   });
 }
