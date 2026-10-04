@@ -1,3 +1,4 @@
+use base64::{engine::general_purpose, Engine as _};
 mod client;
 mod manager;
 mod manifest;
@@ -151,12 +152,13 @@ pub async fn webdav_download_version(
         return Err("WebDAV 下载校验失败：内容哈希与清单不一致".to_string());
     }
     let size = content.len() as u64;
-    let text = String::from_utf8(content)
-        .map_err(|_| "WebDAV 下载内容不是有效的 UTF-8 文本".to_string())?;
+    let data_base64 = Some(general_purpose::STANDARD.encode(&content));
+    let text = String::from_utf8(content).unwrap_or_default();
 
     Ok(WebDavDownloadedVersion {
         filename: manifest.display_name,
         content: text,
+        data_base64,
         size,
         sha256: version.sha256.clone(),
     })
@@ -287,12 +289,13 @@ pub async fn s3_download_version(
         return Err("S3 下载校验失败：内容哈希与清单不一致".to_string());
     }
     let size = content.len() as u64;
-    let text =
-        String::from_utf8(content).map_err(|_| "S3 下载内容不是有效的 UTF-8 文本".to_string())?;
+    let data_base64 = Some(general_purpose::STANDARD.encode(&content));
+    let text = String::from_utf8(content).unwrap_or_default();
 
     Ok(WebDavDownloadedVersion {
         filename: manifest.display_name,
         content: text,
+        data_base64,
         size,
         sha256: version.sha256.clone(),
     })

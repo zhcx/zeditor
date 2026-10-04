@@ -26,6 +26,10 @@ test('counts a Unicode emoji as one total character', () => {
   assert.equal(calculateTextStatistics('中👍A').totalCharacters, 3);
 });
 
+test('counts supplementary Han characters and unpaired surrogates consistently', () => {
+  assert.deepEqual(calculateTextStatistics('𠮷😀\uD800A\uDC00'), { wordCount: 2, totalCharacters: 5 });
+});
+
 test('formats the merged word count and total character count only', () => {
   assert.equal(formatTextStatistics(''), '0 字, 0 字符');
   assert.equal(formatTextStatistics('中文 hello'), '3 字, 8 字符');

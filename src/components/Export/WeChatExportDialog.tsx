@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useMemo, useState } from 'react';
 import MarkdownIt from 'markdown-it';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -79,7 +80,7 @@ export function WeChatExportDialog({ content, title, onClose }: { content: strin
   const copy = async () => { await copyRichHtml(html); setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
   const saveHtml = async () => { const path = await save({ filters: [{ name: '公众号 HTML', extensions: ['html'] }], defaultPath: `${title}-公众号.html` }); if (path) await invoke('save_file_content', { path, content: html }); };
   return <div className="modal-overlay" onClick={onClose}><div className="modal-content wechat-export-modal" onClick={(event) => event.stopPropagation()}>
-    <div className="modal-header"><div><h2>公众号排版导出</h2><p className="export-modal-subtitle">原创主题 · 内联样式 · 可直接粘贴到微信公众号编辑器</p></div><button className="modal-close" onClick={onClose}>×</button></div>
+    <div className="modal-header"><div><h2>公众号排版导出</h2><p className="export-modal-subtitle">原创主题 · 内联样式 · 可直接粘贴到微信公众号编辑器</p></div><button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button></div>
     <div className="modal-body"><div className="wechat-theme-grid">{themes.map((item) => <button key={item.id} className={item.id === themeId ? 'active' : ''} onClick={() => setThemeId(item.id)} style={{ '--wechat-primary': item.primary, '--wechat-pale': item.pale } as React.CSSProperties}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div><div className="wechat-export-preview" dangerouslySetInnerHTML={{ __html: html }} /></div>
     <div className="form-actions"><button className="cancel-btn" onClick={onClose}>取消</button><button className="secondary-btn" onClick={() => void saveHtml()}>保存 HTML</button><button className="save-btn" onClick={() => void copy()}>{copied ? '已复制，可粘贴到公众号' : '复制富文本到公众号'}</button></div>
   </div></div>;

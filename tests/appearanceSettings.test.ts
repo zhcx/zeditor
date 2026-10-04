@@ -52,7 +52,7 @@ test('editor and preview font sizes update before settings persistence', () => {
   assert.match(settingsPanel, /document\.documentElement\.style\.setProperty\('--font-content-size', `\$\{fontSize\}px`\)/);
   assert.match(settingsPanel, /zeditor-content-font-size-preview/);
   assert.match(settingsPanel, /previewContentFontSize\(fontSize\)/);
-  assert.match(settingsPanel, /previewContentFontSize\(settings\.appearance\.font_size\)/);
+  assert.match(settingsPanel, /previewContentFontSize\(settings\.appearance\.font_size, settings\.appearance\.font_family\)/);
   assert.match(settingsPanel, /setSettingsOpen\(false\);[\s\S]*window\.setTimeout\(\(\) => void saveSettings\(saveData\), 0\)/);
   assert.match(editor, /addEventListener\('zeditor-content-font-size-preview', handleFontSizePreview\)/);
   assert.match(editor, /fontSize,[\s\S]*lineHeight: Math\.round\(fontSize \* settings\.appearance\.line_height\)/);

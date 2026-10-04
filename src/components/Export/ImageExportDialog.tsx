@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useMemo, useState } from 'react';
 import MarkdownIt from 'markdown-it';
 import { applyExportTemplate, EXPORT_TEMPLATES, loadExportTemplate, saveExportTemplate, type ExportTemplate } from './exportTemplates';
@@ -65,7 +66,7 @@ export function ImageExportDialog({ content, onClose }: ImageExportDialogProps) 
 
   return <div className="modal-overlay" onClick={onClose}>
     <div className="modal-content image-export-modal" onClick={(event) => event.stopPropagation()}>
-      <div className="modal-header"><div><h2>导出为图片</h2><p className="export-modal-subtitle">选择适合内容的画布比例</p></div><button className="modal-close" onClick={onClose}>×</button></div>
+      <div className="modal-header"><div><h2>导出为图片</h2><p className="export-modal-subtitle">选择适合内容的画布比例</p></div><button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button></div>
       <div className="modal-body image-export-body">
         <div className="option-row"><label>导出模板</label><select value={template.id} onChange={(event) => setTemplate({ ...EXPORT_TEMPLATES.find((item) => item.id === event.target.value)! })}>{EXPORT_TEMPLATES.map((item) => <option key={item.id} value={item.id}>{item.label}</option>)}</select></div>
         <div className="image-format-grid">

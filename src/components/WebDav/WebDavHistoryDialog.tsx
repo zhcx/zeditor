@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { openBase64Document } from '../../services/textDocuments';
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { save } from '@tauri-apps/plugin-dialog';
@@ -90,7 +92,9 @@ export function WebDavHistoryDialog({
         filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
       });
       if (typeof path !== 'string') return;
-      await invoke('save_file_content', { path, content: downloaded.content });
+      // 备份保存的是原始字节，恢复时不能将 GBK/UTF-16 强制写成 UTF-8。
+      if (downloaded.data_base64 !== undefined) await invoke('save_file_bytes', { path, dataBase64: downloaded.data_base64 });
+      else await invoke('save_file_content', { path, content: downloaded.content });
     } catch (downloadError) {
       setError(String(downloadError).slice(0, 240));
     } finally {
@@ -104,11 +108,11 @@ export function WebDavHistoryDialog({
     setError('');
     try {
       const downloaded = await downloadVersion(documentId, version.id, settings);
-      useAppStore.getState().addTab({
-        title: downloaded.filename,
-        content: downloaded.content,
-        modified: false,
-      });
+      if (downloaded.data_base64 !== undefined) {
+        await openBase64Document(downloaded.filename, downloaded.data_base64);
+      } else {
+        useAppStore.getState().addTab({ title: downloaded.filename, content: downloaded.content, modified: true });
+      }
       onClose();
     } catch (openError) {
       setError(String(openError).slice(0, 240));
@@ -144,7 +148,7 @@ export function WebDavHistoryDialog({
       <div className="webdav-history-dialog-header">
         <h3>{mode === 'global' ? '全部备份' : '当前文档历史'}</h3>
         <button type="button" className="webdav-dialog-close" onClick={close} aria-label="关闭">
-          <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="m4 4 8 8m0-8-8 8" /></svg>
+          <AppIcon name="close" size={20}  />
         </button>
       </div>
 

@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { useAIStore, type AIChangeKind, type AIEditMode } from '../../stores/aiStore';
 
 const MODE_LABELS: Record<AIEditMode, string> = {
@@ -16,7 +18,7 @@ const KIND_LABELS: Record<AIChangeKind, string> = {
 };
 
 export function AIDiffConfirmDialog() {
-  const { pendingEdit, editMode, setEditMode, acceptPendingEdit, rejectPendingEdit, undoLastAiRound } = useAIStore();
+  const { pendingEdit, editMode, setEditMode, acceptPendingEdit, rejectPendingEdit, undoLastAiRound } = useAIStore(useShallow(state => ({ pendingEdit: state.pendingEdit, editMode: state.editMode, setEditMode: state.setEditMode, acceptPendingEdit: state.acceptPendingEdit, rejectPendingEdit: state.rejectPendingEdit, undoLastAiRound: state.undoLastAiRound })));
 
   if (!pendingEdit) return null;
 
@@ -28,7 +30,7 @@ export function AIDiffConfirmDialog() {
             <h3>确认 AI 修改</h3>
             <p>{KIND_LABELS[pendingEdit.kind]} · {pendingEdit.kind === 'fact' ? '请核验事实来源后再应用' : '不涉及事实核验'}</p>
           </div>
-          <button className="ai-diff-close" onClick={rejectPendingEdit} aria-label="拒绝修改">×</button>
+          <button className="ai-diff-close" onClick={rejectPendingEdit} aria-label="拒绝修改"><AppIcon name="close" size={16} /></button>
         </header>
 
         <div className="ai-mode-switch" aria-label="AI 操作模式">

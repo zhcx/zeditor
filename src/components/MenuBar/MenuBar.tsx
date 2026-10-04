@@ -1,8 +1,11 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { t, LANGUAGE_OPTIONS } from '../../i18n';
 import { open as openDialog, save, message } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { getCurrentWindow } from '@tauri-apps/api/window';
 import { listen } from '@tauri-apps/api/event';
 import { open } from '@tauri-apps/plugin-shell';
 import MarkdownIt from 'markdown-it';
@@ -10,6 +13,7 @@ import hljs from '../../utils/highlight';
 import { applyExportTemplate, loadExportTemplate } from '../Export/exportTemplates';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { resolveSaveBaseName } from '../../utils/saveName';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import type { TableAction } from '../../utils/markdownTable';
 import { THEMES, resolveThemePreference } from '../../themes/apply';
 
@@ -96,7 +100,6 @@ const APP_NAME = 'Zeditor';
 // F11 全屏切换：桌面端切换 Tauri 窗口全屏，Web 构建回退到浏览器全屏 API。
 async function toggleAppFullscreen() {
   if ('__TAURI_INTERNALS__' in window) {
-    const { getCurrentWindow } = await import('@tauri-apps/api/window');
     const appWindow = getCurrentWindow();
     await appWindow.setFullscreen(!(await appWindow.isFullscreen()));
     return;
@@ -112,7 +115,7 @@ function HelpModal({ type, updateInfo, updateError, downloadProgress, downloadDo
   const content = {
     shortcuts: {
       title: '快捷键说明',
-      body: `
+      body: formatShortcut(`
 **文件操作**
 - Ctrl+N - 新建文件
 - Ctrl+O - 打开文件
@@ -148,7 +151,7 @@ function HelpModal({ type, updateInfo, updateError, downloadProgress, downloadDo
 
 **视图**
 - F11 - 全屏切换
-      `
+      `),
     },
     syntax: {
       title: 'Markdown 语法入门与速查',
@@ -196,7 +199,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.5.7**
+**Zeditor v0.5.8**
 
 一款现代化的 Markdown 编辑器
 
@@ -215,10 +218,11 @@ graph TD
 - GitHub Release 自动检查更新
 
 **本版本更新**
-- **Agent 交互响应性能优化**：用户输入到首个反馈显著加快——隔离工作区准备与 CLI 探测并行、仓库全量文件哈希分片并行，耗时步骤前即时显示进展提示；流式输出按帧合并渲染、Markdown 按节奏追赶，长回答期间输入框保持流畅
-- **窄窗口 Agent 工具栏换行**：「+ / @引用 / 审批 / 模型 / 推理强度 / 发送」以可读最小宽度换行，不再因控件被挤扁而文字重叠
-- **侧栏默认宽度修正**：新会话默认宽度 220px → 250px，资源管理器标题完整可见
-- **主题子菜单溢出修复**：视图 → 主题列表靠近视口底部时自动向上翻转，12 套主题不再被裁切
+- 支持 11 种文字编码，旧编码文档可选择编码打开和保存
+- 可调整界面字号与字间距；默认字间距 0.6 px
+- 应用图标换成蓝底白色 Z，界面图标统一为几何轮廓
+- 优化编辑器加载、文件读取、文档统计与安全保存
+- macOS 界面显示 ⌘、⇧、⌥，检查更新会选择匹配芯片架构的安装包
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it
@@ -295,7 +299,7 @@ https://github.com/zhcx/zeditor
       <div className={`modal-content${type === 'syntax' ? ' markdown-syntax-modal' : ''}`} onClick={(e) => e.stopPropagation()}>
         <div className="modal-header">
           <h2>{title}</h2>
-          <button className="modal-close" onClick={onClose} aria-label="关闭">×</button>
+          <button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button>
         </div>
         <div className="modal-body">
           {type === 'update' ? (
@@ -421,7 +425,7 @@ export function MenuBar() {
     convertDocument,
     saveTab,
     getActiveTab
-  } = useAppStore();
+  } = useAppStore(useShallow(state => ({ content: state.content, settings: state.settings, setSettings: state.setSettings, setSettingsOpen: state.setSettingsOpen, addTab: state.addTab, openFile: state.openFile, convertDocument: state.convertDocument, saveTab: state.saveTab, getActiveTab: state.getActiveTab })));
   const mode = useAppStore((state) => state.mode);
   // 主题偏好解析与 themes/apply 的 resolveThemePreference 同规则，用于菜单当前态勾选。
   const resolvedTheme = resolveThemePreference(settings.appearance.theme);
@@ -946,7 +950,7 @@ export function MenuBar() {
 
           const renderOptionLabel = (item: MenuItem) => (
             <span className="menu-option-label">
-              <span className="menu-check" aria-hidden="true">{item.checked ? '✓' : ''}</span>
+              <span className="menu-check" aria-hidden="true">{item.checked ? <AppIcon name="check" size={14} /> : ''}</span>
               <span>{item.label}</span>
             </span>
           );
@@ -975,7 +979,7 @@ export function MenuBar() {
               >
                 {isAppMenu ? (
                   <>
-                    <span className="titlebar-icon" aria-hidden="true">M</span>
+                    <span className="titlebar-icon" aria-hidden="true"><img src="/app-icon.png" alt="" /></span>
                     <span className="titlebar-app-name">{APP_NAME}</span>
                   </>
                 ) : (
@@ -1010,7 +1014,7 @@ export function MenuBar() {
                                   aria-checked={child.checked ?? undefined}
                                 >
                                   {renderOptionLabel(child)}
-                                  {child.shortcut && <span className="shortcut">{child.shortcut}</span>}
+                                  {child.shortcut && <span className="shortcut">{formatShortcut(child.shortcut)}</span>}
                                 </button>
                               )
                             ))}
@@ -1025,7 +1029,7 @@ export function MenuBar() {
                         aria-checked={item.checked ?? undefined}
                       >
                         {renderOptionLabel(item)}
-                        {item.shortcut && <span className="shortcut">{item.shortcut}</span>}
+                        {item.shortcut && <span className="shortcut">{formatShortcut(item.shortcut)}</span>}
                       </button>
                     )
                   ))}

@@ -160,7 +160,7 @@ test('image asset service copies files or clipboard data into .assets before ins
   assert.match(service, /invoke<ImageAssetImport>\('import_image_asset',\s*\{\s*sourcePath,\s*documentPath\s*\}\)/);
   assert.match(service, /invoke<ImageAssetImport>\('import_image_bytes',\s*\{\s*dataBase64,\s*extension,\s*documentPath\s*\}\)/);
   assert.match(service, /请先保存文档/);
-  assert.match(service, /invalidateResolvedSource\(useAppStore\.getState\(\)\.currentFile, asset\.relativePath\)/);
+  assert.match(service, /invalidateResolvedSource\(target\.path, asset\.relativePath\)/);
   assert.match(service, /setUploadStatus\('error'/);
   assert.match(service, /formatImageMarkdown\(spec\)/);
 });

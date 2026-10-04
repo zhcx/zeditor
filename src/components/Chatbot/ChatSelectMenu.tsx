@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useEffect, useRef, useState } from 'react';
 
 export interface ChatSelectOption {
@@ -62,7 +63,7 @@ export function ChatSelectMenu({
         title={label}
       >
         <span>{label}</span>
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" /></svg>
+        <AppIcon name="chevronDown" size={20}  />
       </button>
       {open && (
         <div className={`chat-select-popover placement-${placement}`} role="listbox" aria-label={ariaLabel}>
@@ -83,7 +84,7 @@ export function ChatSelectMenu({
                   <strong>{option.label}</strong>
                   {option.description && <small>{option.description}</small>}
                 </span>
-                <span className="chat-select-check" aria-hidden="true">{option.value === value ? '✓' : ''}</span>
+                <span className="chat-select-check" aria-hidden="true">{option.value === value ? <AppIcon name="check" size={14} /> : ''}</span>
               </button>
             ))}
           </div>

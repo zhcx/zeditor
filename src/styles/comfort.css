@@ -1,0 +1,158 @@
+/* 清晰舒适的工作台：基于现有主题变量统一密度、可读性与交互状态。 */
+:root {
+  --ui-font-size-xs: 11px;
+  --ui-font-size-sm: 12px;
+  --ui-font-size-md: 13px;
+  --ui-titlebar-height: 40px;
+  --ui-activitybar-width: 54px;
+  --ui-sidebar-header-height: 44px;
+  --ui-tab-height: 40px;
+  --ui-statusbar-height: 30px;
+  --ui-tree-row-height: 30px;
+  --ui-control-height-md: 30px;
+}
+
+/* 当前文档既是定位线索，也是可搜索的切换入口。 */
+.titlebar .menu-trigger { height: 30px; padding-inline: 9px; }
+.titlebar .titlebar-command-center {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  width: min(34vw, 440px);
+  height: 29px;
+  padding: 0 10px;
+  border: 1px solid var(--border-soft);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-input) 58%, transparent);
+  color: var(--text-secondary);
+  font-family: var(--font-sans);
+  font-size: 12px;
+  pointer-events: auto;
+  cursor: pointer;
+}
+.titlebar .titlebar-command-center:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text-color); }
+.titlebar-command-center > svg { width: 14px; height: 14px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.5; }
+.titlebar-command-center > span:first-of-type { flex: 1; text-align: left; }
+.titlebar-command-center kbd { flex-shrink: 0; font: inherit; font-size: 10px; color: var(--text-muted); }
+.titlebar-document-dirty { width: 5px; height: 5px; border-radius: 50%; background: var(--accent-color); flex-shrink: 0; }
+
+/* 导航按钮独立成组，留出更舒适的鼠标命中空间。 */
+.activity-bar { padding-block: 8px; }
+.activity-bar-main, .activity-bar-bottom { align-items: center; gap: 5px; }
+.activity-bar-button { width: 38px; height: 40px; border-radius: 8px !important; }
+.activity-bar-button svg { width: 21px; height: 21px; }
+.activity-bar-button.active { background: var(--accent-soft); color: var(--accent-color); }
+.activity-bar-button.active::before { left: -8px; height: 18px; border-radius: 0 3px 3px 0; }
+.activity-immersive-picker { display: flex; justify-content: center; width: 100%; }
+
+/* 文件层次依靠留白与选中底色表达，避免每个分组都画重边框。 */
+.vscode-explorer-header { font-size: 12px; letter-spacing: 0; padding-inline: 14px 8px; }
+.vscode-explorer-actions { gap: 1px; }
+.vscode-explorer-actions button { width: 28px; height: 28px; }
+.vscode-explorer-tree { padding-top: 6px; }
+.vscode-explorer .explorer-section { margin-bottom: 8px; border: 0; }
+.vscode-explorer .explorer-section-heading { min-height: 31px; padding-block: 3px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.vscode-explorer .explorer-row, .vscode-explorer .outline-explorer-row { font-size: 13px; color: var(--text-secondary); }
+.vscode-explorer .open-editor-row { min-height: 32px; }
+.vscode-explorer .explorer-row.active { color: var(--text-color); background: var(--accent-soft); }
+.vscode-explorer .explorer-count { padding: 1px 6px; border-radius: 5px; font-size: 10px; background: var(--bg-hover); color: var(--text-secondary); }
+.vscode-explorer .outline-level { font-size: 9px; opacity: .8; }
+.workspace-empty-state { padding: 10px 18px 14px; }
+.workspace-empty-state p { margin-block: 0 10px; font-size: 12px; line-height: 1.65; }
+.workspace-empty-state .workspace-hint { margin: 10px 0 0; color: var(--text-muted); font-size: 11px; }
+.workspace-empty-state .open-workspace-button { min-height: 32px; border: 1px solid color-mix(in srgb, var(--accent-color) 28%, var(--border-soft)); border-radius: 7px; background: var(--accent-soft); color: var(--accent-color); font-size: 12px; font-weight: 500; }
+.workspace-empty-state .open-workspace-button:hover { background: color-mix(in srgb, var(--accent-soft) 78%, var(--accent-color)); }
+.vscode-explorer .explorer-close { width: 24px; height: 24px; border-radius: 5px; }
+
+/* 标签仍与两侧文档同步；激活状态更明确，长标题和路径可悬停查看。 */
+.document-pane-tabs .tab { min-width: 116px; max-width: 230px; padding-inline: 12px 7px; border-right-color: var(--border-soft); }
+.document-pane-tabs .tab.active { box-shadow: inset 0 2px 0 var(--accent-color); }
+.document-pane-tabs .tab-close { width: 24px; height: 24px; margin-left: 8px; font-size: 17px; }
+.document-pane-tabs .tab:focus-within .tab-close { opacity: 1; }
+.document-pane-tabs .tab-title { display: flex; align-items: center; gap: 6px; }
+.document-pane-tabs .tab-modified { margin: 0; font-size: 8px; color: var(--accent-color); }
+.document-pane-tabs .new-tab-btn { width: 36px; height: 32px; margin-inline: 4px; flex-shrink: 0; font-size: 20px; }
+
+/* 隐藏测量轨只参与布局计算，不创建重复的可交互按钮。 */
+.toolbar .toolbar-measurement { position: fixed; top: -10000px; left: 0; display: flex; width: max-content; max-width: none; visibility: hidden; pointer-events: none; white-space: nowrap; }
+.toolbar-measurement .toolbar-item { flex-shrink: 0; }
+.toolbar-measurement .toolbar-btn { display: inline-flex; align-items: center; justify-content: center; }
+.editor-pane-toolbar .toolbar { height: 44px; min-height: 44px; padding: 6px 8px; gap: 4px; border-radius: 0; }
+.editor-pane-toolbar .toolbar-scroll-area { min-width: 0; flex: 1; overflow: hidden; }
+.editor-pane-toolbar .toolbar-left { width: max-content; gap: 0; }
+.editor-pane-toolbar .toolbar-btn, .immersive-writing-toolbar .toolbar-btn { height: 32px; min-height: 32px; min-width: 36px; padding-inline: 9px; font-size: 12px; font-weight: 500; letter-spacing: 0; }
+.toolbar .toolbar-more-btn { width: 36px; min-width: 36px; padding: 0; font-size: 16px; }
+.toolbar .toolbar-overflow { flex-shrink: 0; margin: 0; }
+.editor-pane-toolbar .toolbar-separator { width: 1px; margin-inline: 5px; background: var(--border-soft); color: transparent; }
+.toolbar-overflow-menu { max-width: calc(100vw - 20px); border-radius: 10px; }
+.toolbar-menu .toolbar-menu-item { min-height: 34px; font-size: 13px; }
+
+/* 把预览对齐区变成轻量状态和阅读入口。 */
+.preview-pane-actions { display: flex; align-items: center; justify-content: space-between; gap: 10px; flex-basis: 44px; height: 44px; padding: 0 18px; color: var(--text-secondary); font-size: 12px; }
+.preview-pane-actions > span { display: inline-flex; align-items: center; gap: 7px; }
+.preview-live-dot { width: 5px; height: 5px; border-radius: 50%; background: var(--success-color); opacity: .8; }
+.preview-pane-actions button { height: 30px; padding: 0 9px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); font: inherit; cursor: pointer; }
+.preview-pane-actions button:hover { background: var(--bg-hover); color: var(--text-color); }
+.preview-pane-actions button span { margin-left: 5px; color: var(--text-muted); }
+
+/* 文档保持既有字号和主题，只整理标题节奏与正文对比度。 */
+.preview-document.markdown-body { padding: 28px clamp(22px, 3vw, 42px) 56px; }
+.preview-document.markdown-body h1 { margin-bottom: 1em; font-size: 2em; letter-spacing: -.02em; }
+.preview-document.markdown-body h2 { margin-top: 1.6em; margin-bottom: .65em; padding-bottom: .38em; font-size: 1.45em; border-bottom-color: var(--border-soft); }
+.preview-document.markdown-body h3 { margin-top: 1.5em; margin-bottom: .6em; }
+.preview-document.markdown-body :is(p, li) { color: var(--text-color); }
+.preview-document.markdown-body blockquote { margin-block: 1.3em; border-left: 3px solid color-mix(in srgb, var(--accent-color) 55%, var(--border-color)); border-radius: 0 7px 7px 0; padding: 10px 16px; background: color-mix(in srgb, var(--accent-soft) 55%, transparent); }
+.preview-document.markdown-body blockquote p { margin: 0; color: var(--text-secondary); }
+.preview-document.markdown-body pre { border-radius: 9px; padding: 16px 18px; border-color: var(--border-soft); }
+.preview-document.markdown-body th { background: var(--bg-hover); font-weight: 600; }
+.preview-document.markdown-body :is(th, td) { padding: 9px 12px; border-color: var(--border-soft); }
+.preview-document.markdown-body input.task-list-item-checkbox { width: 14px; height: 14px; margin-right: 7px; accent-color: var(--accent-color); cursor: pointer; }
+
+/* 空白文档的轻提示不拦截编辑器点击，第一笔输入后自然收起。 */
+.editor-empty-guide { position: absolute; top: clamp(110px, 20vh, 190px); inset-inline: 28px; display: flex; align-items: center; flex-direction: column; text-align: center; color: var(--text-secondary); pointer-events: none; }
+.editor-empty-guide > svg { width: 27px; height: 27px; margin-bottom: 16px; fill: none; stroke: var(--text-muted); stroke-width: 1.2; stroke-linecap: round; stroke-linejoin: round; }
+.editor-empty-guide strong { font-size: 16px; font-weight: 500; color: var(--text-secondary); }
+.editor-empty-guide p { margin: 9px 0 22px; font-size: 12px; color: var(--text-muted); }
+.editor-empty-guide > div { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px 20px; font-size: 11px; color: var(--text-muted); }
+.editor-empty-guide kbd { padding: 3px 5px; border: 1px solid var(--border-soft); border-radius: 5px; font: inherit; background: var(--bg-hover); }
+
+/* 次要信息安静呈现，保存状态始终可辨识。 */
+.statusbar { padding-inline: 8px; font-size: 12px; }
+.statusbar .status-item { min-height: 24px; border-radius: 5px; padding-inline: 6px; color: var(--text-secondary); }
+.statusbar .status-item:not(button):not(.clickable):hover { background: transparent; }
+.statusbar .status-save-state { gap: 6px; }
+.status-save-dot { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--success-color); }
+.status-save-state[data-state="modified"] .status-save-dot { background: var(--warning-color); }
+.status-save-state[data-state="saving"] .status-save-dot { background: var(--accent-color); }
+.statusbar-center { flex: 1; overflow: hidden; justify-content: center; padding-inline: 10px; }
+.statusbar-center > .status-item { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: block; line-height: 24px; }
+.statusbar-right { flex-shrink: 0; }
+.statusbar .status-companion-value { color: var(--text-secondary); }
+
+/* 对话框与表单通过一致的按钮高度和更明确的留白减轻拥挤。 */
+.settings-panel { border-radius: 16px; }
+.settings-header { padding-bottom: 18px; }
+.settings-navigation .settings-tabs .tab-btn { min-height: 42px; border-radius: 8px; font-size: 13px; }
+.settings-panel :is(.settings-field-description, .setting-description) { line-height: 1.65; }
+.app .modal-content { border-radius: 14px; }
+.app .modal-header { padding-block: 20px 16px; }
+.app .modal-footer { padding-block: 14px; gap: 9px; }
+.app .modal-footer button { min-height: 34px; border-radius: 7px; }
+.app :is(.toolbar-menu-item, .settings-tab, .context-menu-item):focus-visible { outline-offset: -2px; }
+
+@media (max-width: 1100px) {
+  .statusbar .status-mode-label, .statusbar .status-mode-label + .status-divider { display: none; }
+  .titlebar .titlebar-command-center { width: min(32vw, 320px); }
+}
+@media (max-width: 920px) {
+  .statusbar-center { display: none; }
+  .statusbar-left { flex: 1; }
+  .titlebar-command-center kbd { display: none; }
+  .preview-pane-actions { padding-inline: 12px; }
+}
+@media (max-width: 760px) {
+  .titlebar .titlebar-command-center { width: min(40vw, 240px); min-width: 80px; }
+  .titlebar-drag-spacer { padding-inline: 8px; }
+  .preview-pane-actions > span { font-size: 11px; }
+  .statusbar .status-companion-value { display: none; }
+}

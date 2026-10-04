@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { createPortal } from 'react-dom';
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 
@@ -146,7 +147,7 @@ export function FontFamilyPicker({ value, fontFamilies, onChange, placeholder }:
         >
           <span className="font-picker-preview" style={{ fontFamily: font }}>Aa 字</span>
           <span className="font-picker-name">{font}</span>
-          {font === value && <span className="font-picker-check" aria-hidden="true">✓</span>}
+          {font === value && <span className="font-picker-check" aria-hidden="true"><AppIcon name="check" size={14} /></span>}
         </button>
       ))}
     </div>,
@@ -185,7 +186,7 @@ export function FontFamilyPicker({ value, fontFamilies, onChange, placeholder }:
           }
         }}
       >
-        <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>
+        <AppIcon name="chevronDown" size={20}  />
       </button>
       {dropdown}
     </div>

@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -91,7 +93,7 @@ export function TablePicker({
       onClick={(event) => event.stopPropagation()}
     >
       <div className="table-picker">
-        <div className="table-picker-header"><strong>插入表格</strong><span>{size.rows} × {size.columns}</span></div>
+        <div className="table-picker-header"><strong>插入表格</strong><span>{size.rows} <AppIcon name="close" size={16} />{size.columns}</span></div>
         <div
           className="table-picker-grid"
           onClick={handleInsert}
@@ -118,8 +120,8 @@ export function TablePicker({
         </div>
         <div className="table-picker-hint">拖动选择表格大小，松开鼠标插入</div>
         <button type="button" className="table-picker-default" onClick={onInsertDefault}>
-          <span>插入 {defaultSize.rows} × {defaultSize.columns} 表格</span>
-          <span className="table-picker-shortcut">Ctrl+Shift+T</span>
+          <span>插入 {defaultSize.rows} <AppIcon name="close" size={16} />{defaultSize.columns} 表格</span>
+          <span className="table-picker-shortcut">{formatShortcut('Ctrl+Shift+T')}</span>
         </button>
       </div>
     </div>,

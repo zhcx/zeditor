@@ -180,6 +180,8 @@ pub struct WebDavDocumentSummary {
 pub struct WebDavDownloadedVersion {
     pub filename: String,
     pub content: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_base64: Option<String>,
     pub size: u64,
     pub sha256: String,
 }

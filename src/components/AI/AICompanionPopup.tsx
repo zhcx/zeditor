@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useAIStore } from '../../stores/aiStore';
 import { useAppStore } from '../../stores/appStore';
 
@@ -12,7 +13,7 @@ export function AICompanionPopup() {
     applySuggestion,
     getCompanionSuggestion,
     clearResults
-  } = useAIStore();
+  } = useAIStore(useShallow(state => ({ companionVisible: state.companionVisible, companionPosition: state.companionPosition, companionSuggestions: state.companionSuggestions, status: state.status, statusMessage: state.statusMessage, setCompanionVisible: state.setCompanionVisible, applySuggestion: state.applySuggestion, getCompanionSuggestion: state.getCompanionSuggestion, clearResults: state.clearResults })));
   const currentStyle = useAppStore((state) => state.settings.ai.writing_style);
 
   if (!companionVisible || !companionPosition) return null;

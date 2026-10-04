@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { useAIStore, ProofreadResult } from '../../stores/aiStore';
 
 export function AIProofreadPanel() {
@@ -6,7 +8,7 @@ export function AIProofreadPanel() {
     proofreadResults,
     setProofreadPanelVisible,
     applyProofreadFix
-  } = useAIStore();
+  } = useAIStore(useShallow(state => ({ proofreadPanelVisible: state.proofreadPanelVisible, proofreadResults: state.proofreadResults, setProofreadPanelVisible: state.setProofreadPanelVisible, applyProofreadFix: state.applyProofreadFix })));
 
   if (!proofreadPanelVisible) return null;
 
@@ -32,7 +34,7 @@ export function AIProofreadPanel() {
     <div className="ai-proofread-panel">
       <div className="ai-proofread-header">
         <h4>校对结果 ({proofreadResults.length}处问题)</h4>
-        <button className="close-btn" onClick={handleClose} aria-label="关闭">×</button>
+        <button className="close-btn" onClick={handleClose} aria-label="关闭"><AppIcon name="close" size={16} /></button>
       </div>
       <div className="ai-proofread-list">
         {proofreadResults.map((result, index) => (
@@ -46,7 +48,7 @@ export function AIProofreadPanel() {
             <div className="error-content">
               <div>
                 <span className="original">{result.original}</span>
-                <span style={{ margin: '0 8px', color: 'var(--text-muted)' }}>→</span>
+                <span style={{ margin: '0 8px', color: 'var(--text-muted)' }}><AppIcon name="arrowRight" size={16} /></span>
                 <span className="suggestion">{result.suggestion}</span>
               </div>
               <div className="explanation">{result.explanation}</div>

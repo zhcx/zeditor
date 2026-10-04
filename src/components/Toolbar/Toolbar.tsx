@@ -1,3 +1,6 @@
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useAppStore } from '../../stores/appStore';
@@ -7,6 +10,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { TablePicker } from '../Editor/TablePicker';
 import { ToolbarMenu, type ToolbarMenuItem } from './ToolbarMenu';
 import { formatMarkdown, type MarkdownFormatResult } from '../../utils/markdownFormatter';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import {
   formatMediaEmbed,
   mediaDialogFilters,
@@ -19,6 +23,7 @@ import { insertImageFromPath } from '../../services/imageAssets';
 import { imageDialogFilters } from '../../utils/imageSyntax';
 import { insertTable as buildTableInsert } from '../../utils/markdownTable';
 import { stripInlineFormatting } from '../../utils/inlineFormatting';
+import { fitToolbarButtons } from '../../utils/workbenchNavigation';
 
 type ToolbarIconName = 'link' | 'image' | 'video' | 'table' | 'folder' | 'chat' | 'proofread' | 'sparkle' | 'palette' | 'rewrite' | 'translate' | 'summary' | 'outline';
 
@@ -43,27 +48,17 @@ interface ToolbarGroup {
   buttons: ToolbarButton[];
 }
 
+const ToolbarGlyphNames = {"link":"link","image":"image","video":"video","table":"table","folder":"folder","chat":"assistant","proofread":"fileCheck","sparkle":"sparkles","palette":"palette","rewrite":"penLine","translate":"languages","summary":"summary","outline":"outline"} as const satisfies Record<string, IconName>;
+
 function ToolbarGlyph({ name }: { name: ToolbarIconName }) {
-  if (name === 'link') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m6.2 9.8 3.6-3.6M5.1 11.9l-1 .9a2.7 2.7 0 0 1-3.8-3.8l2.3-2.3a2.7 2.7 0 0 1 3.8 0M10.9 4.1l1-.9A2.7 2.7 0 0 1 15.7 7l-2.3 2.3a2.7 2.7 0 0 1-3.8 0" /></svg>;
-  if (name === 'image') return <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2.5" width="13" height="11" rx="1" /><circle cx="5" cy="6" r="1.2" /><path d="m2.5 12 3.6-3.4 2.2 2 2.2-2.4 3 3" /></svg>;
-  if (name === 'video') return <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="3" width="13" height="10" rx="1.5" /><path d="m6.5 6 4 2-4 2z" /></svg>;
-  if (name === 'table') return <svg viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="2" width="13" height="12" rx=".5" /><path d="M1.5 6h13M1.5 10h13M6 2v12m4-12v12" /></svg>;
-  if (name === 'folder') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M1.5 4h5l1.2 1.5h6.8v7.8h-13z" /></svg>;
-  if (name === 'chat') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5h12v8H7l-3.5 3v-3H2z" /><path d="M5 6.5h6" /></svg>;
-  if (name === 'proofread') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.2 6 11.5 13.5 4" /></svg>;
-  if (name === 'sparkle') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 1.5 1 3.5 3.5 1L9 7l-1 3.5L7 7 3.5 6 7 5zM12.5 10l.5 1.5 1.5.5-1.5.5-.5 1.5-.5-1.5-1.5-.5 1.5-.5z" /></svg>;
-  if (name === 'palette') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M8 1.5a6.4 6.4 0 0 0 0 12.8h1.2a1.4 1.4 0 0 0 0-2.8H8.5a1.3 1.3 0 0 1 0-2.6H12A2.5 2.5 0 0 0 14.5 6C13.8 3.4 11.2 1.5 8 1.5Z" /><circle cx="4.5" cy="6.3" r=".7" /><circle cx="6.4" cy="3.9" r=".7" /><circle cx="9.4" cy="3.8" r=".7" /></svg>;
-  if (name === 'rewrite') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 3.5h7M3 6.5h5M2.5 13.5l.7-3.2L11.5 2l2.5 2.5-8.3 8.3z" /></svg>;
-  if (name === 'translate') return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="6.2" /><path d="M1.8 8h12.4M8 1.8c1.6 1.7 2.4 3.7 2.4 6.2S9.6 12.5 8 14.2C6.4 12.5 5.6 10.5 5.6 8S6.4 3.5 8 1.8Z" /></svg>;
-  if (name === 'summary') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 1.8h7l3 3v9.4H3zM10 1.8v3h3M5.2 8h5.6M5.2 10.5h5.6" /></svg>;
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 2.5h10M4.5 6h7M6 9.5h4M8 9.5v4" /></svg>;
+  return <AppIcon name={ToolbarGlyphNames[name]} />;
 }
 
 export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; onInsert: (url: string, alt?: string) => void }) {
   const [mode, setMode] = useState<'link' | 'upload' | 'local' | null>(null);
   const [imageUrl, setImageUrl] = useState('');
   const [altText, setAltText] = useState('');
-  const { setUploadStatus, settings, setSettingsOpen, setSettingsTab } = useAppStore();
+  const { setUploadStatus, settings, setSettingsOpen, setSettingsTab } = useAppStore(useShallow(state => ({ setUploadStatus: state.setUploadStatus, settings: state.settings, setSettingsOpen: state.setSettingsOpen, setSettingsTab: state.setSettingsTab })));
 
   const handleUpload = async () => {
     try {
@@ -123,7 +118,7 @@ export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; 
       <div className="modal-content image-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>插入图片</h2>
-          <button className="modal-close" onClick={onClose}>×</button>
+          <button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button>
         </div>
         <div className="modal-body">
           {!mode ? (
@@ -213,7 +208,7 @@ function MediaInsertModal({ onClose, onInsertSyntax }: { onClose: () => void; on
       <div className="modal-content video-insert-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h2>插入媒体</h2>
-          <button className="modal-close" onClick={onClose} aria-label="关闭">×</button>
+          <button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button>
         </div>
         <div className="modal-body">
           {step === 'choose' ? (
@@ -261,7 +256,7 @@ function EmojiPicker({ favorites, onClose, onInsert }: { favorites: string[]; on
       <div className="modal-content emoji-picker-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h2>插入 Emoji</h2>
-          <button className="modal-close" onClick={onClose} aria-label="关闭">×</button>
+          <button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button>
         </div>
         <div className="modal-body emoji-picker-body">
           {favorites.length > 0 && (
@@ -280,7 +275,7 @@ function MarkdownFormatModal({ result, onClose, onApply }: { result: MarkdownFor
   return (
     <div className="modal-overlay" onClick={onClose}>
       <div className="modal-content markdown-format-modal" onClick={(event) => event.stopPropagation()}>
-        <div className="modal-header"><h2>Markdown 语法检查</h2><button className="modal-close" onClick={onClose} aria-label="关闭">×</button></div>
+        <div className="modal-header"><h2>Markdown 语法检查</h2><button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button></div>
         <div className="modal-body">
           <div className={`markdown-format-summary ${result.issues.length ? 'has-issues' : 'is-clean'}`}>
             <strong>{result.issues.length ? `发现 ${result.issues.length} 类可规范项` : 'Markdown 格式已经很规范'}</strong>
@@ -295,7 +290,7 @@ function MarkdownFormatModal({ result, onClose, onApply }: { result: MarkdownFor
 }
 
 export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
-  const { editorView, setContent, content, settings } = useAppStore();
+  const { editorView, setContent, content, settings } = useAppStore(useShallow(state => ({ editorView: state.editorView, setContent: state.setContent, content: state.content, settings: state.settings })));
   const [showImageModal, setShowImageModal] = useState(false);
   const [showMediaModal, setShowMediaModal] = useState(false);
   const [showEmojiPicker, setShowEmojiPicker] = useState(false);
@@ -306,6 +301,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   const toolbarWheelFrameRef = useRef<number | null>(null);
   const toolbarRef = useRef<HTMLDivElement>(null);
   const toolbarScrollAreaRef = useRef<HTMLDivElement>(null);
+  const toolbarMeasurementRef = useRef<HTMLDivElement>(null);
   const moreButtonRef = useRef<HTMLButtonElement>(null);
   const overflowMenuRef = useRef<HTMLDivElement>(null);
   const [directButtonCount, setDirectButtonCount] = useState(8);
@@ -443,8 +439,8 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       title: '格式',
       buttons: [
         // 统一使用文字标签：图标、字母、符号混排会让工具栏显得杂乱。
-        { label: '加粗', title: '加粗 (Ctrl+B)', action: () => wrapSelection('**', '**') },
-        { label: '斜体', title: '斜体 (Ctrl+I)', action: () => wrapSelection('*', '*') },
+        { label: '加粗', title: `加粗 (${formatShortcut('Ctrl+B')})`, action: () => wrapSelection('**', '**') },
+        { label: '斜体', title: `斜体 (${formatShortcut('Ctrl+I')})`, action: () => wrapSelection('*', '*') },
         { label: '删除线', title: '删除线', action: () => wrapSelection('~~', '~~') },
         {
           label: '样式',
@@ -483,8 +479,8 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     {
       title: '编辑',
       buttons: [
-        { label: '撤销', title: '撤销 (Ctrl+Z)', action: () => runEditorCommand('undo') },
-        { label: '重做', title: '重做 (Ctrl+Y)', action: () => runEditorCommand('redo') },
+        { label: '撤销', title: `撤销 (${formatShortcut('Ctrl+Z')})`, action: () => runEditorCommand('undo') },
+        { label: '重做', title: `重做 (${formatShortcut('Ctrl+Y')})`, action: () => runEditorCommand('redo') },
         {
           label: '整理',
           title: '缩进与文本整理',
@@ -500,7 +496,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       title: '插入',
       buttons: [
         // 表格只有一个入口：点击打开尺寸选择器，拖动选行列或直接用默认 3 × 3。
-        { label: '表格', picker: true, title: '插入表格（拖动选择行列，Ctrl+Shift+T 为 3 × 3）' },
+        { label: '表格', picker: true, title: `插入表格（拖动选择行列，${formatShortcut('Ctrl+Shift+T')} 为 3 × 3）` },
         {
           label: '插入',
           title: '插入内容块',
@@ -548,28 +544,23 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   const overflowButtons = toolbarButtons.slice(directButtonCount);
 
   useLayoutEffect(() => {
-    const element = toolbarScrollAreaRef.current;
-    if (!element) return;
-    const buttonGroups = toolbarStructureKey.split('|').map((item) => item.split(':', 1)[0]);
+    const element = toolbarRef.current;
+    const measurement = toolbarMeasurementRef.current;
+    if (!element || !measurement) return;
+    let disposed = false;
     const updateVisibleButtons = () => {
-      const available = element.clientWidth;
-      const buttonWidth = 34;
-      const separatorWidth = 15;
-      let used = 0;
-      let nextCount = 0;
-      buttonGroups.forEach((group, index) => {
-        const separator = index > 0 && group !== buttonGroups[index - 1] ? separatorWidth : 0;
-        if (used + buttonWidth + separator <= available) {
-          used += buttonWidth + separator;
-          nextCount += 1;
-        }
-      });
-      setDirectButtonCount(Math.max(1, Math.min(buttonGroups.length, nextCount)));
+      const style = getComputedStyle(element);
+      const available = element.clientWidth - parseFloat(style.paddingLeft) - parseFloat(style.paddingRight);
+      const widths = Array.from(measurement.children).map(item => item.getBoundingClientRect().width);
+      const overflowWidth = (moreButtonRef.current?.getBoundingClientRect().width || 36) + 4;
+      setDirectButtonCount(fitToolbarButtons(widths, available, overflowWidth));
     };
     updateVisibleButtons();
     const observer = new ResizeObserver(updateVisibleButtons);
     observer.observe(element);
-    return () => observer.disconnect();
+    observer.observe(measurement);
+    void document.fonts.ready.then(() => { if (!disposed) updateVisibleButtons(); });
+    return () => { disposed = true; observer.disconnect(); };
   }, [toolbarStructureKey, variant]);
 
   useEffect(() => {
@@ -592,14 +583,20 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       const target = event.target as Node;
       if (!toolbarRef.current?.contains(target) && !overflowMenuRef.current?.contains(target)) setOverflowOpen(false);
     };
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault(); event.stopPropagation(); setOverflowOpen(false);
+    };
     updateOverflowPosition();
     window.addEventListener('resize', updateOverflowPosition);
     window.addEventListener('scroll', updateOverflowPosition, true);
     window.addEventListener('pointerdown', closeOnOutsidePointer, true);
+    window.addEventListener('keydown', closeOnEscape, true);
     return () => {
       window.removeEventListener('resize', updateOverflowPosition);
       window.removeEventListener('scroll', updateOverflowPosition, true);
       window.removeEventListener('pointerdown', closeOnOutsidePointer, true);
+      window.removeEventListener('keydown', closeOnEscape, true);
     };
   }, [overflowButtons.length, overflowOpen, variant]);
 
@@ -665,6 +662,17 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
 
   return (
     <div ref={toolbarRef} className={`toolbar toolbar-${variant}`}>
+      <div ref={toolbarMeasurementRef} className="toolbar-measurement" aria-hidden="true">
+        {toolbarButtons.map((btn, index) => (
+          <span className="toolbar-item" key={btn.title}>
+            {index > 0 && btn.group !== toolbarButtons[index - 1].group && <span className="toolbar-separator">|</span>}
+            <span className={`toolbar-btn${btn.menu ? ' toolbar-menu-trigger' : ''}`}>
+              {btn.icon ? <ToolbarGlyph name={btn.icon} /> : btn.label}
+              {btn.menu && <span className="toolbar-menu-caret"><AppIcon name="chevronDown" size={14} /></span>}
+            </span>
+          </span>
+        ))}
+      </div>
       <div ref={toolbarScrollAreaRef} className="toolbar-scroll-area" onWheel={handleToolbarWheel}>
         <div className="toolbar-left">
           {visibleButtons.map((btn, index) => (
@@ -686,7 +694,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
             aria-expanded={overflowOpen}
             onMouseDown={(event) => event.preventDefault()}
             onClick={() => setOverflowOpen((open) => !open)}
-          >•••</button>
+          ><AppIcon name="more" size={16} /></button>
         </div>
       )}
       {overflowOpen && createPortal(

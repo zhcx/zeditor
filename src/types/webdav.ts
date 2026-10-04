@@ -52,6 +52,7 @@ export interface WebDavVersion {
 export interface WebDavDownloadedVersion {
   filename: string;
   content: string;
+  data_base64?: string;
   size: number;
   sha256: string;
 }

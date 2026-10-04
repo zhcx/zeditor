@@ -29,7 +29,7 @@ test('media asset service imports files, resolves paths and inserts syntax at th
   assert.match(service, /invoke<\(string \| null\)\[\]>\('resolve_media_sources',\s*\{\s*documentPath:\s*baseDocument,\s*sources:\s*pending\s*\}\)/);
   assert.match(service, /convertFileSrc\(absolutePath, 'asset'\)/);
   assert.match(service, /请先保存文档/);
-  assert.match(service, /resolvedMediaCache\.delete\(cacheKey\(documentPath, asset\.relativePath\)\)/);
+  assert.match(service, /invalidateResolvedSource\(target\.path, asset\.relativePath\)/);
   assert.match(service, /setUploadStatus\('error'/);
 });
 

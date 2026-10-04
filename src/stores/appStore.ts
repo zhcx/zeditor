@@ -4,7 +4,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { EditorController } from '../types/editor';
 import { formatTextStatistics } from '../utils/textStatistics';
-import { DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT } from '../utils/appearanceSettings';
+import { DEFAULT_FONT_SIZE, DEFAULT_LINE_HEIGHT, DEFAULT_UI_FONT_SIZE, DEFAULT_LETTER_SPACING } from '../utils/appearanceSettings';
 import { applySavedTab } from '../utils/tabPersistence';
 import { readStoredStringArray } from '../utils/storage';
 import { useWebDavStore } from './webdavStore';
@@ -15,9 +15,12 @@ import type { ConverterDialogAction } from '../components/ConverterDialog/Conver
 import { isConvertibleDocumentName } from '../utils/documentFormats';
 import { isTextFileName } from '../utils/fileIcon';
 import { normalizeAgentBackend } from '../utils/agentSettings';
+import { isTextEncoding, type TextEncoding, type TextDocument, type EncodingDialogRequest } from '../utils/textEncoding';
 
 const enqueueSave = createSaveQueue();
 let pendingSaves = 0;
+let fileOpenSequence = 0;
+const pendingFileReads = new Map<string, Promise<TextDocument>>();
 const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const browserSettingsKey = 'zeditor.browser.settings';
 let settingsMutationVersion = 0;
@@ -36,6 +39,8 @@ export interface Settings {
     language: AppLanguage;
     /** UI chrome font. Older saved settings omit this and fall back to YaHei. */
     ui_font_family?: string;
+    ui_font_size?: number;
+    letter_spacing?: number;
     font_family: string;
     font_size: number;
     line_height: number;
@@ -232,6 +237,7 @@ export interface Tab {
   path: string | null;
   content: string;
   modified: boolean;
+  encoding?: TextEncoding;
 }
 
 export interface TimelineEntry {
@@ -291,6 +297,10 @@ interface AppState {
   conversionStatus: ConversionStatus;
   conversionMessage: string;
   converterDialog: ConverterDialogAction | null;
+  encodingDialog: EncodingDialogRequest | null;
+  setEncodingDialog: (request: EncodingDialogRequest | null) => void;
+  setTabEncoding: (tabId: string, encoding: TextEncoding) => void;
+  reopenTabWithEncoding: (tabId: string, encoding: TextEncoding, cancelled?: () => boolean) => Promise<void>;
 
   setContent: (content: string) => void;
   setMode: (mode: 'split' | 'immersive' | 'zen') => void;
@@ -306,7 +316,7 @@ interface AppState {
   setEditorView: (view: EditorController | null) => void;
   loadSettings: () => Promise<void>;
   saveSettings: (settings: Settings) => Promise<void>;
-  openFile: (path: string) => Promise<void>;
+  openFile: (path: string, encoding?: TextEncoding, cancelled?: () => boolean) => Promise<void>;
   convertDocument: (path: string) => Promise<void>;
   saveFile: (path: string) => Promise<void>;
   saveTab: (tabId: string, path: string) => Promise<void>;
@@ -330,6 +340,8 @@ interface AppState {
 
 const defaultSettings: Settings = {
   appearance: {
+    ui_font_size: DEFAULT_UI_FONT_SIZE,
+    letter_spacing: DEFAULT_LETTER_SPACING,
     theme: 'vscode-dark',
     language: detectSystemLanguage(),
     ui_font_family: 'Microsoft YaHei',
@@ -577,6 +589,35 @@ export const useAppStore = create<AppState>((set, get) => ({
   conversionStatus: 'idle',
   conversionMessage: '',
   converterDialog: null,
+  encodingDialog: null,
+  setEncodingDialog: encodingDialog => set({ encodingDialog }),
+  setTabEncoding: (tabId, encoding) => {
+    if (!isTextEncoding(encoding)) throw new Error('不支持的文字编码');
+    const tab = get().tabs.find(item => item.id === tabId);
+    if (!tab) throw new Error('文档已关闭');
+    if ((tab.encoding || 'utf-8') === encoding) return;
+    set(state => ({ tabs: state.tabs.map(item => item.id === tabId ? { ...item, encoding, modified: true } : item) }));
+  },
+  reopenTabWithEncoding: async (tabId, encoding, cancelled) => {
+    if (!isTextEncoding(encoding)) throw new Error('不支持的文字编码');
+    const tab = get().tabs.find(item => item.id === tabId);
+    if (!tab?.path) throw new Error('请先保存文档，再用指定编码重新打开');
+    if (tab.modified) throw new Error('文档有未保存的修改，请先保存后再重新打开');
+    const loaded = await invoke<TextDocument>('read_text_document', { path: tab.path, encoding });
+    if (cancelled?.()) return;
+    const latest = get().tabs.find(item => item.id === tabId);
+    if (!latest || latest.modified || latest.path !== tab.path || latest.content !== tab.content || latest.encoding !== tab.encoding) {
+      throw new Error('读取期间文档已变化，未覆盖当前修改');
+    }
+    if (get().activeTabId === tabId && get().editorView?.getValue() === tab.content) {
+      get().editorView?.resetValue?.(loaded.content);
+    }
+    set(state => ({
+      tabs: state.tabs.map(item => item.id === tabId ? { ...item, content: loaded.content, encoding: loaded.encoding, modified: false } : item),
+      ...(state.activeTabId === tabId ? { content: loaded.content } : {}),
+    }));
+    get().updateWordCount();
+  },
 
   setContent: (content) => {
     const { activeTabId, tabs } = get();
@@ -697,15 +738,40 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  openFile: async (path) => {
+  openFile: async (path, encoding, cancelled) => {
+    const requestVersion = ++fileOpenSequence;
+    const opened = get().tabs.find(tab => tab.path === path);
+    if (opened) {
+      get().setActiveTab(opened.id);
+      return;
+    }
     if (!isTextFileName(path) && isConvertibleDocumentName(path)) {
       await get().convertDocument(path);
       return;
     }
     try {
-      const fileContent = await invoke<string>('get_file_content', { path });
+      const readKey = `${path}\u0000${encoding || 'auto'}`;
+      let reading = pendingFileReads.get(readKey);
+      if (!reading) {
+        reading = invoke<TextDocument>('read_text_document', { path, encoding: encoding || null }).finally(() => pendingFileReads.delete(readKey));
+        pendingFileReads.set(readKey, reading);
+      }
+      const loaded = await reading;
+      if (cancelled?.()) return;
+      const fileContent = loaded.content;
       const { tabs, activeTabId } = get();
       const existingTab = tabs.find(t => t.path === path);
+
+      // 慢请求完成时只添加后台标签；最近一次打开或切换操作决定当前文档。
+      if (requestVersion !== fileOpenSequence) {
+        if (!existingTab) {
+          set({ tabs: [...tabs, {
+            id: generateId(), title: path.split(/[\\/]/).pop() || path,
+            path, content: fileContent, encoding: loaded.encoding, modified: false,
+          }] });
+        }
+        return;
+      }
 
       if (existingTab) {
         set({
@@ -716,9 +782,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       } else {
         const activeTab = tabs.find(t => t.id === activeTabId);
         if (activeTab && !activeTab.modified && !activeTab.path) {
+          if (get().editorView?.getValue() === activeTab.content) get().editorView?.resetValue?.(fileContent);
           const newTabs = tabs.map(t =>
             t.id === activeTabId
-              ? { ...t, content: fileContent, path, title: path.split(/[\\/]/).pop() || path, modified: false }
+              ? { ...t, content: fileContent, path, title: path.split(/[\\/]/).pop() || path, encoding: loaded.encoding, modified: false }
               : t
           );
           set({
@@ -734,6 +801,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             path,
             content: fileContent,
             modified: false,
+            encoding: loaded.encoding,
           };
           set({
             tabs: [...tabs, newTab],
@@ -745,11 +813,19 @@ export const useAppStore = create<AppState>((set, get) => ({
       }
       get().updateWordCount();
     } catch (error) {
-      console.error('Failed to open file:', error);
+      if (cancelled?.()) return;
+      if (String(error).includes('text_encoding_required:') && requestVersion === fileOpenSequence) {
+        set({ encodingDialog: { mode: 'open', path } });
+        get().setUploadStatus('error', 0, '无法自动识别编码，请选择正确的编码打开文档');
+        throw error;
+      }
+      get().setUploadStatus('error', 0, `打开文件失败：${String(error)}`);
+      throw error;
     }
   },
 
   convertDocument: async (path) => {
+    const requestVersion = ++fileOpenSequence;
     const sourceName = path.split(/[\\/]/).pop() || path;
     get().setConversionStatus('converting', `正在转换：${sourceName}`);
     try {
@@ -821,9 +897,11 @@ export const useAppStore = create<AppState>((set, get) => ({
       const { tabs } = get();
       set({
         tabs: [...tabs, newTab],
-        activeTabId: newTab.id,
-        content: markdown,
-        currentFile: null,
+        ...(requestVersion === fileOpenSequence ? {
+          activeTabId: newTab.id,
+          content: markdown,
+          currentFile: null,
+        } : {}),
       });
       get().updateWordCount();
       get().setConversionStatus('success', `导入成功：${title}`);
@@ -851,9 +929,10 @@ export const useAppStore = create<AppState>((set, get) => ({
       await enqueueSave(async () => {
         const tab = get().tabs.find(item => item.id === tabId);
         if (!tab) throw new Error('找不到要保存的标签页');
-        await invoke('save_file_content', { path, content: tab.content });
+        const encoding = tab.encoding || 'utf-8';
+        await invoke('save_file_content', { path, content: tab.content, encoding });
         set(state => ({
-          tabs: applySavedTab(state.tabs, tabId, path, tab.content),
+          tabs: applySavedTab(state.tabs, tabId, path, tab.content, encoding),
           currentFile: state.activeTabId === tabId ? path : state.currentFile,
         }));
 
@@ -897,6 +976,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addTab: (tab?: Partial<Tab>) => {
+    fileOpenSequence += 1;
     const { tabs } = get();
     const id = generateId();
     const newTab: Tab = {
@@ -905,6 +985,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       path: tab?.path || null,
       content: tab?.content || '',
       modified: tab?.modified || false,
+      encoding: tab?.encoding || 'utf-8',
     };
     set({
       tabs: [...tabs, newTab],
@@ -918,6 +999,7 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   closeTab: (id) => {
     const { tabs, activeTabId, timeline } = get();
+    if (id === activeTabId) fileOpenSequence += 1;
     const tabIndex = tabs.findIndex(t => t.id === id);
     const newTabs = tabs.filter(t => t.id !== id);
     const pendingTimer = timelineCaptureTimers.get(id);
@@ -956,6 +1038,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     const { tabs } = get();
     const tab = tabs.find(t => t.id === id);
     if (tab) {
+      fileOpenSequence += 1;
       set({
         activeTabId: id,
         content: tab.content,

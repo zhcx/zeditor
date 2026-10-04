@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
 import MarkdownIt from 'markdown-it';
@@ -440,7 +442,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     openEditor: (index: number) => void;
     openMenu: (event: MouseEvent, index: number) => void;
   }>({ openEditor: () => {}, openMenu: () => {} });
-  const { content, settings, currentFile } = useAppStore();
+  const { content, settings, currentFile } = useAppStore(useShallow(state => ({ content: state.content, settings: state.settings, currentFile: state.currentFile })));
   const workflowViewerEnabled = settings.workflow?.render_in_preview !== false;
   // Markdown parsing, sanitization and DOM replacement are comparatively
   // expensive. Deferring them keeps Monaco's keystroke updates responsive.
@@ -947,7 +949,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
         <article ref={containerRef} className="preview-document markdown-body" onClick={handleSourceClick} />
         {isEmpty && (
           <div className="preview-empty-state">
-            <span className="preview-empty-mark" aria-hidden="true">↗</span>
+            <span className="preview-empty-mark" aria-hidden="true"><AppIcon name="arrowUpRight" size={16} /></span>
             <strong>预览将在这里显示</strong>
             <span>开始写作后，这里会呈现舒适的阅读排版。</span>
           </div>

@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { createPortal } from 'react-dom';
 import {
   useCallback,
@@ -166,7 +167,7 @@ export function SettingsSelect({
 
   const renderBadge = (option: SettingsSelectOption) => (
     option.badge
-      ? <span className="settings-select-badge" style={option.color ? { background: option.color } : undefined}>{option.badge}</span>
+      ? <span className="settings-select-badge" style={option.color ? { background: option.color } : undefined}>{option.badge === '⚙' ? <AppIcon name="settings" size={14} /> : option.badge}</span>
       : null
   );
 
@@ -182,10 +183,7 @@ export function SettingsSelect({
     >
       {showSearch && (
         <div className="settings-select-search">
-          <svg viewBox="0 0 16 16" aria-hidden="true">
-            <circle cx="7" cy="7" r="4.4" fill="none" stroke="currentColor" strokeWidth="1.4" />
-            <path d="m10.4 10.4 3 3" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" />
-          </svg>
+          <AppIcon name="search" size={20}  />
           <input
             ref={searchRef}
             type="text"
@@ -223,7 +221,7 @@ export function SettingsSelect({
                 <span className="settings-select-option-label">{option.label}</span>
                 {option.description && <small>{option.description}</small>}
               </span>
-              <span className="settings-select-check" aria-hidden="true">{isSelected ? '✓' : ''}</span>
+              <span className="settings-select-check" aria-hidden="true">{isSelected ? <AppIcon name="check" size={14} /> : ''}</span>
             </button>
           );
         })}
@@ -247,9 +245,7 @@ export function SettingsSelect({
       >
         {selected ? renderBadge(selected) : null}
         <span className="settings-select-value">{selected ? selected.label : placeholder}</span>
-        <svg className="settings-select-caret" viewBox="0 0 16 16" aria-hidden="true">
-          <path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
-        </svg>
+        <AppIcon name="chevronDown" size={20} className="settings-select-caret" />
       </button>
       {panel}
     </div>

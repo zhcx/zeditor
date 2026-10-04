@@ -3,6 +3,27 @@ export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 32;
 export const FONT_SIZE_RANGE_THUMB = 18;
 export const DEFAULT_LINE_HEIGHT = 1.4;
+export const DEFAULT_UI_FONT_SIZE = 13;
+export const DEFAULT_LETTER_SPACING = 0.6;
+export const UI_FONT_SIZE_MIN = 11;
+export const UI_FONT_SIZE_MAX = 20;
+
+export function normalizeTypography(appearance: { ui_font_size?: unknown; letter_spacing?: unknown }) {
+  const clamp = (value: unknown, fallback: number, min: number, max: number) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+  return {
+    uiFontSize: clamp(appearance.ui_font_size, DEFAULT_UI_FONT_SIZE, UI_FONT_SIZE_MIN, UI_FONT_SIZE_MAX),
+    letterSpacing: clamp(appearance.letter_spacing, DEFAULT_LETTER_SPACING, 0, 5),
+  };
+}
+
+export function typographyCssVariables(appearance: { ui_font_size?: unknown; letter_spacing?: unknown }) {
+  const { uiFontSize, letterSpacing } = normalizeTypography(appearance);
+  return {
+    '--ui-font-scale': String(uiFontSize / DEFAULT_UI_FONT_SIZE),
+    '--ui-font-base-size': `${uiFontSize}px`,
+    '--text-letter-spacing': `${letterSpacing}px`,
+  };
+}
 
 /**
  * 构造编辑区内容的字体栈，规则与 App.tsx 写入 --font-content 的保持一致。

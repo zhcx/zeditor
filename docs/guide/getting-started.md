@@ -14,8 +14,8 @@ Zeditor 是一款本地优先的 Markdown 编辑器：安装即用、无需登�
 | --- | --- | --- |
 | Windows x86_64（Win10 1809+） | NSIS `.exe` | 大多数用户，按向导安装 |
 | Windows x86_64 | MSI | 企业部署、静默安装 |
-| macOS Apple Silicon（macOS 12+） | DMG | M1 / M2 / M3 / M4 芯片 |
-| macOS Intel（macOS 12+） | DMG | Intel 芯片 Mac |
+| macOS Apple Silicon（macOS 12+） | `aarch64.dmg` | M1 / M2 / M3 / M4 芯片 |
+| macOS Intel（macOS 12+） | `x64.dmg` | Intel 芯片 Mac |
 | Ubuntu / Debian | DEB | Ubuntu 20.04+、Debian 11+ 等 |
 | Fedora / RHEL / openSUSE | RPM | RPM 系发行版 |
 | 通用 Linux | AppImage | 免安装，`chmod +x` 后直接运行 |
@@ -29,6 +29,8 @@ Windows 安装包尚未进行 Authenticode 代码签名，首次运行可能触�
 启动后你会看到左右分屏的编辑界面：左侧写 Markdown，右侧实时预览。几件事值得先知道：
 
 - **界面语言**默认跟随系统，可在 `设置 → 外观` 中切换简体中文 / 繁體中文 / English。
+- **文字编码**：新文档默认为 UTF-8；打开不同编码的旧文档时可选择实际编码，详细步骤见[文件与工作区](/guide/files#选择文件编码)。
+- **界面排版**：在 `设置 → 外观` 调整界面字号与字间距，均可即时预览；字间距默认 0.6 px。
 - **主题**默认为深色，可在主题菜单中选择（含 12 套主题，见 [界面总览](/guide/interface#主题)）。
 - 应用菜单中的「**快捷键说明**」和「**Markdown 语法**」是两份内置速查，随时可查。
 - 文档默认**自动保存**（每 30 秒，已保存过的文件），也可 `Ctrl+S` 手动保存。
@@ -44,6 +46,7 @@ Windows 安装包尚未进行 Authenticode 代码签名，首次运行可能触�
 ## 保持更新
 
 应用菜单 →「**检查更新**」可自动检测 GitHub 最新版本并一键下载安装；也可以直接前往 [Releases 页面](https://github.com/zhcx/zeditor/releases)手动下载，新版本可直接覆盖安装，文档与配置不受影响。
+macOS 更新会自动为 Apple Silicon 或 Intel 芯片匹配相应的 DMG 安装包。
 
 ## 下一步
 

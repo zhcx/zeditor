@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useEffect, useRef } from 'react';
 import type { CloseGuardTab, UnsavedChangesAction } from '../../utils/windowCloseGuard';
 
@@ -41,10 +42,7 @@ export function UnsavedChangesDialog({ tabs, onAction, scope = 'application', bu
         <header className="unsaved-dialog-header">
           <div className="unsaved-dialog-heading">
             <span className="unsaved-dialog-icon" aria-hidden="true">
-              <svg viewBox="0 0 24 24" fill="none">
-                <path d="M12 3.75 21 19.5H3L12 3.75Z" />
-                <path d="M12 9v4.5M12 16.5v.1" />
-              </svg>
+              <AppIcon name="warning" size={20}  />
             </span>
             <div>
               <h2 id="unsaved-dialog-title">
@@ -64,7 +62,7 @@ export function UnsavedChangesDialog({ tabs, onAction, scope = 'application', bu
             title={isApplicationClose ? '取消退出 (Esc)' : '取消关闭 (Esc)'}
             onClick={() => onAction('cancel')}
           >
-            <span aria-hidden="true">×</span>
+            <span aria-hidden="true"><AppIcon name="close" size={16} /></span>
           </button>
         </header>
 

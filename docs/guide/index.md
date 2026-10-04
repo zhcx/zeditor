@@ -25,6 +25,8 @@ title: 简介
 | 文档转换 | AnyDoc 原生引擎，本机处理、按需下载 | [文档转换](/guide/converter) |
 | 多格式导出 | HTML / PDF / Word / 长图 / 公众号排版，9 套模板 | [导出](/guide/export) |
 | 自动云备份 | WebDAV 与 S3，保留最近 20 个内容版本 | [云备份](/guide/cloud-backup) |
+| 旧编码文档 | UTF-8、UTF-16、GBK、Big5、Shift-JIS 等 11 种文本编码，打开时可选择编码 | [文件与工作区](/guide/files#选择文件编码) |
+| 可调阅读体验 | 独立调整界面字号和字间距 | [设置参考](/reference/settings#外观) |
 
 ## 设计原则
 

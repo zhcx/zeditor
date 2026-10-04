@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -139,7 +140,7 @@ export function PdfExportDialog({ content, filePath, onClose }: PdfExportDialogP
       <div className="modal-content pdf-export-modal" onClick={e => e.stopPropagation()}>
         <div className="modal-header">
           <h2>导出 PDF</h2>
-          <button className="modal-close" onClick={onClose} disabled={exporting}>×</button>
+          <button className="modal-close" onClick={onClose} disabled={exporting} aria-label="关闭"><AppIcon name="close" size={16} /></button>
         </div>
 
         <div className="modal-body">
@@ -173,10 +174,7 @@ export function PdfExportDialog({ content, filePath, onClose }: PdfExportDialogP
           {/* Success Icon */}
           {success && (
             <div className="pdf-success-icon">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <circle cx="12" cy="12" r="10" />
-                <path d="M8 12l3 3 5-6" strokeLinecap="round" strokeLinejoin="round" />
-              </svg>
+              <AppIcon name="checkCircle" size={20}  />
             </div>
           )}
 

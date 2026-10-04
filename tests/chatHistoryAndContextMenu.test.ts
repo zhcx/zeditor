@@ -105,11 +105,9 @@ test('editor context menu groups actions by scenario and reuses toolbar formatti
   // 插入与表格子菜单：表格操作仅在光标位于表格内时启用
   assert.match(editor, /label="插入" icon="insert"/);
   // 每一行都有独立图标，不再出现共用一个「横线」图标的情况
-  assert.match(editor, /name === 'cut'\)/);
-  assert.match(editor, /name === 'format'\)/);
-  assert.match(editor, /name === 'heading'\)/);
-  assert.match(editor, /name === 'insert'\)/);
-  assert.match(editor, /name === 'selectAll'\)/);
+  assert.match(editor, /name=\{ContextMenuIconNames\[name\]\}/);
+  const iconMap = JSON.parse(editor.match(/const ContextMenuIconNames = (\{[^\n]+\}) as const/)![1]);
+  assert.deepEqual(['cut', 'format', 'heading', 'insert', 'selectAll'].map(key => iconMap[key]), ['cut', 'sliders', 'heading', 'plus', 'selectAll']);
   assert.match(editor, /requestContextTable/);
   assert.match(editor, /window\.dispatchEvent\(new CustomEvent\('zeditor-insert-table'\)\)/);
   assert.match(editor, /label="表格" icon="table"/);

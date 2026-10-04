@@ -1,0 +1,33 @@
+/* 独立于旧组件的描边覆盖，保证每个图标使用相同几何网格与光学粗细。 */
+svg.app-icon { display: inline-block; flex-shrink: 0; vertical-align: middle; fill: none !important; stroke: currentColor !important; stroke-width: 1.75 !important; stroke-linecap: round; stroke-linejoin: round; }
+.app-icon-label { fill: currentColor; stroke: none; font-family: Arial, sans-serif; font-weight: 650; letter-spacing: -.2px; }
+svg.app-icon.folder-icon { width: 18px; height: 18px; border: 0; background: none; box-shadow: none; }
+svg.app-icon.folder-icon::before, svg.app-icon.folder-icon::after { content: none; }
+.explorer-chevron { display: inline-flex; align-items: center; justify-content: center; width: 14px; height: 14px; border: 0; background: none; }
+.explorer-chevron::before, .explorer-chevron::after { content: none; }
+.tab-file-icon { display: inline-flex; align-items: center; justify-content: center; width: 18px; height: 18px; border: 0; background: none; }
+.tab-file-icon::before, .tab-file-icon::after { content: none; }
+.tab-file-icon > svg { width: 16px; height: 16px; }
+.toolbar-menu-caret, .status-ai-chevron, .status-companion-chevron { display: inline-flex; align-items: center; justify-content: center; }
+.toolbar-menu-caret > svg { width: 11px; height: 11px; }
+.status-ai-actions > button > span:first-child { display: inline-flex; align-items: center; justify-content: center; }
+.status-ai-actions > button > span:first-child > svg { width: 18px; height: 18px; }
+.slash-command-icon > svg, .ai-palette-item-icon > svg { width: 20px; height: 20px; }
+.ai-palette-genie-picker svg { margin-right: 5px; }
+.titlebar-icon > svg { color: white; width: 14px; height: 14px; }
+.titlebar-icon:has(> img) { background: transparent; }
+.titlebar-icon > img { width: 20px; height: 20px; display: block; object-fit: contain; }
+.preview-empty-mark > svg { width: 20px; height: 20px; }
+.modal-close > svg, .close-btn > svg, .tab-close > svg, .new-tab-btn > svg { width: 16px; height: 16px; }
+.explorer-close > svg, .workspace-close > svg { width: 13px; height: 13px; }
+.statusbar .status-item.ai-enabled svg.app-icon { fill: none !important; stroke: currentColor !important; }
+.file-kind-office svg, .file-kind-sheet svg { fill: none; }
+.vscode-explorer .explorer-chevron { width: 14px; height: 14px; border: 0; background: none; }
+.vscode-explorer .explorer-chevron::before, .vscode-explorer .explorer-chevron::after { content: none; }
+.presentation-exit-btn, .modal-close, .tab-close, .new-tab-btn, .close-btn { align-items: center; justify-content: center; }
+.agent-send-button > svg { width: 18px; height: 18px; }
+.chat-select-check > svg, .settings-select-check > svg, .font-picker-check > svg { width: 14px; height: 14px; }
+.table-toolbar-button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
+.table-toolbar { max-width: calc(100vw - 24px); flex-wrap: wrap; }
+.table-toolbar-hint { flex-basis: 100%; }
+.editor-context-menu-chevron > svg { width: 14px; height: 14px; }

@@ -1,24 +1,6 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256">
-  <defs>
-    <linearGradient id="paper" x1="52" y1="24" x2="204" y2="232" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#ffffff"/>
-      <stop offset="1" stop-color="#eef5ff"/>
-    </linearGradient>
-    <linearGradient id="fold" x1="160" y1="22" x2="210" y2="76" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#dbeafe"/>
-      <stop offset="1" stop-color="#bfdbfe"/>
-    </linearGradient>
-    <linearGradient id="accent" x1="78" y1="112" x2="181" y2="188" gradientUnits="userSpaceOnUse">
-      <stop stop-color="#2563eb"/>
-      <stop offset="1" stop-color="#0891b2"/>
-    </linearGradient>
-  </defs>
-
-  <path d="M47 18h108l54 54v164a8 8 0 0 1-8 8H47a8 8 0 0 1-8-8V26a8 8 0 0 1 8-8Z" fill="#16365c" opacity=".16" transform="translate(3 4)"/>
-  <path d="M47 14h108l54 54v164a8 8 0 0 1-8 8H47a8 8 0 0 1-8-8V22a8 8 0 0 1 8-8Z" fill="url(#paper)" stroke="#183b66" stroke-width="9" stroke-linejoin="round"/>
-  <path d="M155 14v48a10 10 0 0 0 10 10h44Z" fill="url(#fold)" stroke="#183b66" stroke-width="9" stroke-linejoin="round"/>
-
-  <path d="M69 108h17l25 31 25-31h17v79h-18v-50l-24 30-24-30v50H69Z" fill="#183b66"/>
-  <path d="M174 108v45h18l-29 35-29-35h18v-45Z" fill="url(#accent)"/>
-  <rect x="69" y="205" width="89" height="7" rx="3.5" fill="#bfdbfe"/>
+  <path d="M48 16h112l48 48v176H48z" fill="#fff" stroke="#526174" stroke-width="10" stroke-linejoin="round"/>
+  <path d="M160 16v48h48" fill="#eef3fb" stroke="#526174" stroke-width="10" stroke-linejoin="round"/>
+  <rect x="72" y="104" width="112" height="88" rx="8" fill="none" stroke="#2f6fed" stroke-width="10"/>
+  <path d="M91 171v-45l18 20 18-20v45m31-45v43m-12-12 12 12 12-12" fill="none" stroke="#2f6fed" stroke-width="9" stroke-linecap="round" stroke-linejoin="round"/>
 </svg>

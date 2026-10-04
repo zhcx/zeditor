@@ -1,8 +1,13 @@
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Settings } from '../../stores/appStore';
 import { useAIStore, type AIEditMode } from '../../stores/aiStore';
 import { WebDavStatusItem } from '../WebDav/WebDavStatusItem';
+import { encodingLabel } from '../../utils/textEncoding';
+import { formatShortcut } from '../../utils/platformShortcuts';
 
 type WritingStyle = Settings['ai']['writing_style'];
 
@@ -19,19 +24,20 @@ const EDIT_MODES: Array<{ value: AIEditMode; label: string }> = [
   { value: 'suggest', label: '建议' },
 ];
 
+const StatusGlyphNames = {"ai":"assistant","proofread":"fileCheck","success":"checkCircle","error":"error"} as const satisfies Record<string, IconName>;
+
 function StatusGlyph({ name }: { name: 'ai' | 'proofread' | 'success' | 'error' }) {
-  if (name === 'ai') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m8 1.8.9 3.3 3.3.9-3.3.9L8 9.2l-.9-3.3L3.8 5l3.3-.9zM12.2 10l.5 1.7 1.7.5-1.7.5-.5 1.7-.5-1.7-1.7-.5 1.7-.5z" /></svg>;
-  if (name === 'proofread') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 8.2 6 11.5 13.5 4" /><path d="M3 3.5h5" /></svg>;
-  if (name === 'success') return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m3 8.2 3 3L13 4.5" /></svg>;
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.5" /><path d="m6 6 4 4m0-4-4 4" /></svg>;
+  return <AppIcon name={StatusGlyphNames[name]} />;
 }
 
 export function StatusBar() {
+  const activeEncoding = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.encoding || 'utf-8');
+  const modified = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.modified ?? false);
   const {
     wordCount, mode, currentFile, isSaving, uploadStatus, uploadProgress, uploadMessage,
     conversionStatus, conversionMessage, settings, saveSettings, content, editorView,
     setSettingsOpen, setSettingsTab,
-  } = useAppStore();
+  } = useAppStore(useShallow(state => ({ wordCount: state.wordCount, mode: state.mode, currentFile: state.currentFile, isSaving: state.isSaving, uploadStatus: state.uploadStatus, uploadProgress: state.uploadProgress, uploadMessage: state.uploadMessage, conversionStatus: state.conversionStatus, conversionMessage: state.conversionMessage, settings: state.settings, saveSettings: state.saveSettings, content: state.content, editorView: state.editorView, setSettingsOpen: state.setSettingsOpen, setSettingsTab: state.setSettingsTab })));
   const {
     status: aiStatus,
     statusMessage: aiStatusMessage,
@@ -45,7 +51,7 @@ export function StatusBar() {
     summarizeText,
     generateOutline,
     proposeEdit,
-  } = useAIStore();
+  } = useAIStore(useShallow(state => ({ status: state.status, statusMessage: state.statusMessage, errorCount: state.errorCount, editMode: state.editMode, setEditMode: state.setEditMode, setProofreadPanelVisible: state.setProofreadPanelVisible, checkProofread: state.checkProofread, rewriteSelection: state.rewriteSelection, translateText: state.translateText, summarizeText: state.summarizeText, generateOutline: state.generateOutline, proposeEdit: state.proposeEdit })));
   const [aiMenuOpen, setAiMenuOpen] = useState(false);
   const [companionMenuOpen, setCompanionMenuOpen] = useState(false);
   const aiMenuRef = useRef<HTMLDivElement>(null);
@@ -214,9 +220,9 @@ export function StatusBar() {
   return (
     <div className="statusbar">
       <div className="statusbar-left">
-        <span className="status-item">{mode === 'split' ? '分屏模式' : mode === 'zen' ? '沉浸写作' : '沉浸阅读'}</span>
+        <span className="status-item status-mode-label">{mode === 'split' ? '分屏模式' : mode === 'zen' ? '沉浸写作' : '沉浸阅读'}</span>
         <span className="status-divider" aria-hidden="true" />
-        <span className="status-item">{isSaving ? '保存中...' : '已就绪'}</span>
+        <span className="status-item status-save-state" data-state={isSaving ? 'saving' : modified ? 'modified' : 'ready'} aria-live="polite"><span className="status-save-dot" aria-hidden="true" />{isSaving ? '保存中...' : modified ? '未保存修改' : currentFile ? '已保存' : '已就绪'}</span>
         <span className="status-divider" aria-hidden="true" />
         <div className="status-ai-control" ref={aiMenuRef}>
           <button
@@ -229,7 +235,7 @@ export function StatusBar() {
           >
             <StatusGlyph name="ai" />
             <span>{settings.ai.enabled ? 'AI' : '开启 AI'}</span>
-            <span className="status-ai-chevron" aria-hidden="true">⌃</span>
+            <span className="status-ai-chevron" aria-hidden="true"><AppIcon name="chevronUp" size={14} /></span>
           </button>
           {aiMenuOpen && (
             <div className="status-ai-menu" role="menu" aria-label="AI 功能">
@@ -238,11 +244,11 @@ export function StatusBar() {
                 <button type="button" className="status-ai-power" onClick={() => void setAIEnabled(false)}>关闭</button>
               </div>
               <div className="status-ai-actions">
-                <button type="button" role="menuitem" onClick={() => { setAiMenuOpen(false); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }}><span>⌘</span><strong>AI 指令面板</strong><small>Ctrl+J · 搜索指令或输入自定义要求</small></button>
-                <button type="button" role="menuitem" disabled={!hasSelection} title={!hasSelection ? '请先选择文字' : undefined} onClick={() => void handleRewrite()}><span>改</span><strong>重写选中</strong><small>{hasSelection ? '润色当前选区' : '请先选择文字'}</small></button>
-                <button type="button" role="menuitem" disabled={!hasSelection} title={!hasSelection ? '请先选择文字' : undefined} onClick={() => void handleTranslate()}><span>译</span><strong>翻译选中</strong><small>{hasSelection ? '翻译当前选区' : '请先选择文字'}</small></button>
-                <button type="button" role="menuitem" onClick={() => void handleSummarize()}><span>摘</span><strong>生成摘要</strong><small>提炼当前文档</small></button>
-                <button type="button" role="menuitem" onClick={() => void handleOutline()}><span>纲</span><strong>生成大纲</strong><small>整理文档结构</small></button>
+                <button type="button" role="menuitem" onClick={() => { setAiMenuOpen(false); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }}><span><AppIcon name="sparkles" /></span><strong>AI 指令面板</strong><small>{formatShortcut('Ctrl+J')} · 搜索指令或输入自定义要求</small></button>
+                <button type="button" role="menuitem" disabled={!hasSelection} title={!hasSelection ? '请先选择文字' : undefined} onClick={() => void handleRewrite()}><span><AppIcon name="penLine" /></span><strong>重写选中</strong><small>{hasSelection ? '润色当前选区' : '请先选择文字'}</small></button>
+                <button type="button" role="menuitem" disabled={!hasSelection} title={!hasSelection ? '请先选择文字' : undefined} onClick={() => void handleTranslate()}><span><AppIcon name="languages" /></span><strong>翻译选中</strong><small>{hasSelection ? '翻译当前选区' : '请先选择文字'}</small></button>
+                <button type="button" role="menuitem" onClick={() => void handleSummarize()}><span><AppIcon name="summary" /></span><strong>生成摘要</strong><small>提炼当前文档</small></button>
+                <button type="button" role="menuitem" onClick={() => void handleOutline()}><span><AppIcon name="outline" /></span><strong>生成大纲</strong><small>整理文档结构</small></button>
               </div>
               <div className="status-ai-options">
                 <div className="status-ai-option-row"><span>操作模式</span><span className="status-ai-segments">{EDIT_MODES.map(({ value, label }) => <button key={value} type="button" className={editMode === value ? 'selected' : ''} onClick={() => setEditMode(value)}>{label}</button>)}</span></div>
@@ -277,7 +283,7 @@ export function StatusBar() {
             <span className="status-companion-dot" aria-hidden="true" />
             <span>伴写</span>
             <span className="status-companion-value">{companionEnabled ? companionStyleLabel : '关闭'}</span>
-            <span className="status-companion-chevron" aria-hidden="true">⌃</span>
+            <span className="status-companion-chevron" aria-hidden="true"><AppIcon name="chevronUp" size={14} /></span>
           </button>
           {companionMenuOpen && (
             <div className="status-style-menu status-companion-menu" role="menu" aria-label="AI 伴写设置">
@@ -301,7 +307,7 @@ export function StatusBar() {
                   className={`status-style-option${settings.ai.writing_style === value ? ' selected' : ''}`}
                   onClick={() => void setCompanionStyle(value)}
                 >
-                  <span className="status-style-check" aria-hidden="true">{settings.ai.writing_style === value ? '✓' : ''}</span>
+                  <span className="status-style-check" aria-hidden="true">{settings.ai.writing_style === value ? <AppIcon name="check" size={14} /> : ''}</span>
                   <span>{label}</span>
                 </button>
               ))}
@@ -336,7 +342,7 @@ export function StatusBar() {
             {uploadStatus === 'success' && <span className="status-item upload-success"><StatusGlyph name="success" />上传成功</span>}
             {uploadStatus === 'error' && <span className="status-item upload-error"><StatusGlyph name="error" />上传失败: {uploadMessage}</span>}
           </div>
-        ) : <span className="status-item">{currentFile ? currentFile.split(/[\\/]/).pop() : '未保存'}</span>}
+        ) : <span className="status-item status-file-name" title={currentFile || '尚未保存到文件'}>{currentFile ? currentFile.split(/[\\/]/).pop() : '未保存'}</span>}
       </div>
       <div className="statusbar-right">
         {settings.mcp.enabled && (
@@ -353,7 +359,7 @@ export function StatusBar() {
             <span className="status-divider" aria-hidden="true" />
           </>
         )}
-        <span className="status-item">{wordCount}</span><span className="status-divider" aria-hidden="true" /><span className="status-item">UTF-8</span>
+        <span className="status-item status-statistics" title={wordCount}>{wordCount}</span><span className="status-divider" aria-hidden="true" /><button type="button" className="status-item status-button status-encoding" aria-label="文字编码" title="选择保存编码或用指定编码重新打开（桌面版）" disabled={!('__TAURI_INTERNALS__' in window)} onClick={() => { const tab = useAppStore.getState().getActiveTab(); if (tab) useAppStore.getState().setEncodingDialog({ mode: 'save', tabId: tab.id }); }}>{encodingLabel(activeEncoding)}<AppIcon name="chevronUp" size={12} /></button>
       </div>
     </div>
   );

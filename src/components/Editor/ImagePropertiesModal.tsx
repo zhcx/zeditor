@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useState } from 'react';
 import { normalizeImageSize, type ImageSpec } from '../../utils/imageSyntax';
 
@@ -39,7 +40,7 @@ export function ImagePropertiesModal({ spec, onApply, onClose }: ImageProperties
       <div className="modal-content image-modal" onClick={(event) => event.stopPropagation()}>
         <div className="modal-header">
           <h2>图片属性</h2>
-          <button className="modal-close" onClick={onClose} aria-label="关闭">×</button>
+          <button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button>
         </div>
         <div className="modal-body">
           <div className="link-form">

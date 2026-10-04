@@ -1,5 +1,14 @@
 import { useEffect } from 'react';
 import type { ColumnAlignment, TableAction } from '../../utils/markdownTable';
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
+
+const actionIcons: Record<TableAction, IconName> = {
+  'row-above': 'arrowUp', 'row-below': 'arrowDown', 'row-delete': 'trash',
+  'column-left': 'arrowLeft', 'column-right': 'arrowRight', 'column-delete': 'trash',
+  'align-left': 'alignLeft', 'align-center': 'alignCenter', 'align-right': 'alignRight', 'align-none': 'table',
+  format: 'sliders', 'table-delete': 'trash',
+};
 
 interface TableToolbarProps {
   /** 相对视口的定位（fixed） */
@@ -58,7 +67,7 @@ export function TableToolbar({ left, top, placement, alignment, columns, onActio
       aria-label={entry.title}
       onClick={() => onAction(entry.action)}
     >
-      {entry.label}
+      <AppIcon name={actionIcons[entry.action]} size={16} />{entry.label.replace(/[↑↓←→]/g, '')}
     </button>
   );
 
@@ -85,7 +94,7 @@ export function TableToolbar({ left, top, placement, alignment, columns, onActio
             aria-label={entry.title}
             onClick={() => onAction(entry.action)}
           >
-            {entry.label}
+            <AppIcon name={actionIcons[entry.action]} size={16} />{entry.label}
           </button>
         ))}
       </div>
@@ -97,7 +106,7 @@ export function TableToolbar({ left, top, placement, alignment, columns, onActio
           aria-label="整理表格格式"
           onClick={() => onAction('format')}
         >
-          整理
+          <AppIcon name="sliders" size={16} />整理
         </button>
         <button
           type="button"
@@ -106,7 +115,7 @@ export function TableToolbar({ left, top, placement, alignment, columns, onActio
           aria-label="删除整张表格"
           onClick={() => onAction('table-delete')}
         >
-          删表
+          <AppIcon name="trash" size={16} />删表
         </button>
       </div>
       <span className="table-toolbar-hint">Tab 切换单元格 · Enter 新增一行</span>

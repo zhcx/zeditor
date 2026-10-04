@@ -26,6 +26,15 @@ test('does not include heading-like text inside fenced code blocks', () => {
   ]);
 });
 
+test('带内容的围栏行不能关闭代码块并泄漏伪标题', () => {
+  const source = '```markdown\n```not-a-close\n# 代码中的标题\n```\n# 正文';
+  assert.deepEqual(parseMarkdownHeadings(source), [{ level: 1, text: '正文', line: 5 }]);
+});
+
+test('反引号信息串含反引号时不作为代码围栏', () => {
+  assert.deepEqual(parseMarkdownHeadings('```bad`info\n# 正文'), [{ level: 1, text: '正文', line: 2 }]);
+});
+
 test('uses the active opened file content for the outline', () => {
   const tabs = [
     { id: 'first', content: '# 第一个文件' },

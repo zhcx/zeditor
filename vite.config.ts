@@ -235,7 +235,7 @@ export default defineConfig({
     },
   ],
   build: {
-    // Monaco is loaded lazily via src/components/Editor/monacoLoader.ts and
+    // Editor is loaded lazily via src/App.tsx and Monaco
     // lands in its own async chunk automatically. Do NOT add a manualChunks
     // rule forcing it into a named chunk here: forcing groups alongside
     // dynamic imports makes the bundler hoist Vite's preload helper into the

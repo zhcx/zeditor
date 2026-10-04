@@ -1,8 +1,10 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { getCurrentWindow } from '@tauri-apps/api/window';
 import { MenuBar } from '../MenuBar/MenuBar';
 import { useAppStore } from '../../stores/appStore';
 import { t } from '../../i18n';
+import { formatShortcut } from '../../utils/platformShortcuts';
 
 const APP_NAME = 'Zeditor';
 
@@ -18,6 +20,7 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
   const activeDocumentTitle = useAppStore(state => (
     state.tabs.find(tab => tab.id === state.activeTabId)?.title || t('未命名', state.settings.appearance.language)
   ));
+  const modified = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.modified ?? false);
 
   useEffect(() => {
     if (!isTauri) return undefined;
@@ -83,9 +86,12 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
         className="titlebar-drag-spacer"
         data-tauri-drag-region
       >
-        <div className="titlebar-command-center" role="status" aria-label={`${t('当前文档：', language)}${activeDocumentTitle}`}>
+        <button type="button" className="titlebar-command-center" data-tauri-drag-region="false" aria-label={`${t('当前文档：', language)}${activeDocumentTitle} · ${t('切换文档', language)}`} aria-haspopup="dialog" aria-keyshortcuts="Control+P Meta+P" title={formatShortcut(t('切换文档（Ctrl+P）', language))} onClick={() => window.dispatchEvent(new CustomEvent('zeditor-switch-document'))}>
+          <AppIcon name="search" size={14}  />
           <span>{activeDocumentTitle}</span>
-        </div>
+          {modified && <span className="titlebar-document-dirty" aria-label={t('未保存修改', language)} />}
+          <kbd>{formatShortcut('Ctrl P')}</kbd>
+        </button>
       </div>
       <div className="titlebar-controls" data-tauri-drag-region="false">
         <button
@@ -94,7 +100,7 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
           title={t('最小化', language)}
           aria-label={t('最小化', language)}
         >
-          <svg width="12" height="1" viewBox="0 0 12 1"><rect width="12" height="1" fill="currentColor"/></svg>
+          <AppIcon name="windowMinimize" size={14}  />
         </button>
         <button
           className="titlebar-btn titlebar-maximize"
@@ -103,14 +109,9 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
           aria-label={isMaximized ? t('还原', language) : t('最大化', language)}
         >
           {isMaximized ? (
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <rect x="2" y="0" width="8" height="8" rx="1" fill="none" stroke="currentColor" strokeWidth="1.1"/>
-              <rect x="0" y="2" width="8" height="8" rx="1" fill="var(--bg-elevated)" stroke="currentColor" strokeWidth="1.1"/>
-            </svg>
+            <AppIcon name="windowRestore" size={14}  />
           ) : (
-            <svg width="10" height="10" viewBox="0 0 10 10">
-              <rect x="0.5" y="0.5" width="9" height="9" rx="1" fill="none" stroke="currentColor" strokeWidth="1.1"/>
-            </svg>
+            <AppIcon name="windowMaximize" size={14}  />
           )}
         </button>
         <button
@@ -119,9 +120,7 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
           title={t('关闭', language)}
           aria-label={t('关闭', language)}
         >
-          <svg width="10" height="10" viewBox="0 0 10 10">
-            <path d="M0.5 0.5L9.5 9.5M9.5 0.5L0.5 9.5" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round"/>
-          </svg>
+          <AppIcon name="close" size={14}  />
         </button>
       </div>
     </div>

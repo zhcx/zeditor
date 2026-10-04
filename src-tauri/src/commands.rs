@@ -115,6 +115,23 @@ pub struct McpSettings {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WorkflowSettings {
+    #[serde(default = "default_true")]
+    pub render_in_preview: bool,
+    #[serde(default = "default_true")]
+    pub preserve_format: bool,
+}
+
+impl Default for WorkflowSettings {
+    fn default() -> Self {
+        Self {
+            render_in_preview: true,
+            preserve_format: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Settings {
     pub appearance: AppearanceSettings,
     pub editor: EditorSettings,
@@ -133,6 +150,8 @@ pub struct Settings {
     pub explorer: ExplorerSettings,
     #[serde(default)]
     pub mcp: McpSettings,
+    #[serde(default)]
+    pub workflow: WorkflowSettings,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -198,9 +217,20 @@ pub struct AppearanceSettings {
     pub language: Option<String>,
     #[serde(default = "default_ui_font_family")]
     pub ui_font_family: String,
+    #[serde(default = "default_ui_font_size")]
+    pub ui_font_size: u32,
+    #[serde(default = "default_letter_spacing")]
+    pub letter_spacing: f32,
     pub font_family: String,
     pub font_size: u32,
     pub line_height: f32,
+}
+
+fn default_ui_font_size() -> u32 {
+    13
+}
+fn default_letter_spacing() -> f32 {
+    0.6
 }
 
 fn default_favorite_emojis() -> Vec<String> {
@@ -234,6 +264,8 @@ pub struct EditorSettings {
     /// 链接检查开关：Markdown 检查时验证本地链接与图片是否存在（默认开启）。
     #[serde(default = "default_check_local_links")]
     pub check_local_links: bool,
+    #[serde(default = "default_true")]
+    pub inline_popups: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -278,6 +310,8 @@ pub struct AISettings {
     pub provider_api_keys: String,
     #[serde(default)]
     pub provider_profiles: String,
+    #[serde(default = "default_true")]
+    pub proofread_with_ai: bool,
     /// 校对引擎：true 时强制走本机 AI Agent（单次调用整篇），不走 AI 助手 API。
     #[serde(default)]
     pub proofread_use_agent: bool,
@@ -336,6 +370,8 @@ impl Default for Settings {
                 theme: "vscode-dark".into(),
                 language: None,
                 ui_font_family: default_ui_font_family(),
+                ui_font_size: default_ui_font_size(),
+                letter_spacing: default_letter_spacing(),
                 font_family: "Microsoft YaHei".into(),
                 font_size: 14,
                 line_height: 1.6,
@@ -349,6 +385,7 @@ impl Default for Settings {
                 input_engine: EditorInputEngine::default(),
                 pin_toolbar: false,
                 check_local_links: default_check_local_links(),
+                inline_popups: true,
             },
             image_hosting: ImageHostingSettings {
                 active_service: "local".into(),
@@ -395,6 +432,7 @@ impl Default for Settings {
                 custom_style_prompt: String::new(),
                 provider_api_keys: "{}".into(),
                 provider_profiles: "{}".into(),
+                proofread_with_ai: true,
                 proofread_use_agent: false,
                 companion_use_agent: false,
                 agent_fallback_enabled: true,
@@ -419,6 +457,7 @@ impl Default for Settings {
             s3: S3Settings::default(),
             explorer: ExplorerSettings::default(),
             mcp: McpSettings::default(),
+            workflow: WorkflowSettings::default(),
         }
     }
 }
@@ -732,14 +771,92 @@ async fn read_utf8_text_file(path: &str, max_bytes: Option<u64>) -> Result<Strin
 }
 
 async fn write_utf8_text_file(path: &str, content: &str) -> Result<(), String> {
-    tokio::fs::write(path, content.as_bytes())
-        .await
-        .map_err(|e| e.to_string())
+    write_file_bytes_atomic(path, content.as_bytes()).await
+}
+
+async fn write_file_bytes_atomic(path: &str, content: &[u8]) -> Result<(), String> {
+    use tokio::io::AsyncWriteExt;
+    let mut target = PathBuf::from(path);
+    // 保留已有符号链接的语义，替换实际文档而不是链接本身。
+    let metadata = match tokio::fs::symlink_metadata(&target).await {
+        Ok(meta) => {
+            if meta.file_type().is_symlink() {
+                target = tokio::fs::canonicalize(&target)
+                    .await
+                    .map_err(|e| e.to_string())?;
+                Some(
+                    tokio::fs::metadata(&target)
+                        .await
+                        .map_err(|e| e.to_string())?,
+                )
+            } else {
+                Some(meta)
+            }
+        }
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => return Err(error.to_string()),
+    };
+    if let Some(meta) = &metadata {
+        if !meta.is_file() || meta.permissions().readonly() {
+            return Err("目标不是可写文件，原文档未修改。".into());
+        }
+    }
+    // 同目录的临时文件确保最终重命名位于同一文件系统；写入失败保留原文档。
+    let temporary = target.with_file_name(format!(".zeditor-save-{}.tmp", uuid::Uuid::new_v4()));
+    let result = async {
+        let mut file = tokio::fs::OpenOptions::new()
+            .write(true)
+            .create_new(true)
+            .open(&temporary)
+            .await?;
+        file.write_all(content).await?;
+        file.sync_all().await?;
+        drop(file);
+        if let Some(meta) = metadata {
+            tokio::fs::set_permissions(&temporary, meta.permissions()).await?;
+        }
+        tokio::fs::rename(&temporary, &target).await
+    }
+    .await;
+    if result.is_err() {
+        let _ = tokio::fs::remove_file(&temporary).await;
+    }
+    result.map_err(|error| error.to_string())
 }
 
 #[tauri::command]
 pub async fn get_file_content(path: String) -> Result<String, String> {
     read_utf8_text_file(&path, None).await
+}
+
+#[tauri::command]
+pub async fn read_text_document(
+    path: String,
+    encoding: Option<String>,
+) -> Result<crate::text_encoding::TextDocument, String> {
+    let bytes = tokio::fs::read(&path)
+        .await
+        .map_err(|error| error.to_string())?;
+    crate::text_encoding::decode_text(&bytes, encoding.as_deref())
+}
+
+#[tauri::command]
+pub async fn decode_text_document(
+    data_base64: String,
+    encoding: Option<String>,
+) -> Result<crate::text_encoding::TextDocument, String> {
+    let bytes = general_purpose::STANDARD
+        .decode(data_base64)
+        .map_err(|_| "文件数据不是有效的 Base64".to_string())?;
+    crate::text_encoding::decode_text(&bytes, encoding.as_deref())
+}
+
+#[tauri::command]
+pub async fn save_file_bytes(path: String, data_base64: String) -> Result<(), String> {
+    let bytes = general_purpose::STANDARD
+        .decode(data_base64)
+        .map_err(|_| "文件数据不是有效的 Base64".to_string())?;
+    write_file_bytes_atomic(&path, &bytes).await
 }
 
 #[tauri::command]
@@ -769,8 +886,18 @@ pub async fn read_file_base64(path: String) -> Result<String, String> {
     Ok(format!("data:{};base64,{}", mime, b64))
 }
 #[tauri::command]
-pub async fn save_file_content(path: String, content: String) -> Result<(), String> {
-    write_utf8_text_file(&path, &content).await
+pub async fn save_file_content(
+    path: String,
+    content: String,
+    encoding: Option<String>,
+) -> Result<(), String> {
+    if encoding.as_deref().unwrap_or("utf-8") == "utf-8" {
+        return write_utf8_text_file(&path, &content).await;
+    }
+    // 编码完成后才进入原子保存，不能表示的字符不会污染原文件。
+    let bytes =
+        crate::text_encoding::encode_text(&content, encoding.as_deref().unwrap_or("utf-8"))?;
+    write_file_bytes_atomic(&path, &bytes).await
 }
 
 fn get_recent_files_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -2122,35 +2249,20 @@ pub async fn check_for_updates() -> Result<UpdateInfo, String> {
         .to_string();
     let has_update = compare_versions(&latest, &current)?;
 
-    // Find the NSIS installer asset (.exe)
-    let mut asset_download_url = String::new();
-    let mut asset_name = String::new();
-    let mut asset_size: u64 = 0;
-    if let Some(assets) = rel["assets"].as_array() {
-        for asset in assets {
-            let name = asset["name"].as_str().unwrap_or("");
-            let lower = name.to_ascii_lowercase();
-            let is_current_platform_asset = if cfg!(target_os = "windows") {
-                lower.ends_with(".exe") || lower.ends_with(".msi")
-            } else if cfg!(target_os = "macos") {
-                lower.ends_with(".dmg")
-            } else {
-                lower.ends_with(".appimage") || lower.ends_with(".deb") || lower.ends_with(".rpm")
-            };
-            if is_current_platform_asset {
-                asset_download_url = asset["browser_download_url"]
-                    .as_str()
-                    .unwrap_or("")
-                    .to_string();
-                asset_name = name.to_string();
-                asset_size = asset["size"].as_u64().unwrap_or(0);
-                // Prefer the NSIS installer over MSI on Windows.
-                if lower.ends_with(".exe") {
-                    break;
-                }
-            }
-        }
-    }
+    let selected_asset = rel["assets"].as_array().and_then(|assets| {
+        select_release_asset(assets, std::env::consts::OS, std::env::consts::ARCH)
+    });
+    let asset_download_url = selected_asset
+        .and_then(|asset| asset["browser_download_url"].as_str())
+        .unwrap_or("")
+        .to_string();
+    let asset_name = selected_asset
+        .and_then(|asset| asset["name"].as_str())
+        .unwrap_or("")
+        .to_string();
+    let asset_size = selected_asset
+        .and_then(|asset| asset["size"].as_u64())
+        .unwrap_or(0);
 
     Ok(UpdateInfo {
         has_update,
@@ -2167,6 +2279,39 @@ pub async fn check_for_updates() -> Result<UpdateInfo, String> {
         release_notes: rel["body"].as_str().unwrap_or("暂无更新说明").into(),
         published_at: rel["published_at"].as_str().unwrap_or("").into(),
     })
+}
+
+fn select_release_asset<'a>(
+    assets: &'a [serde_json::Value],
+    target_os: &str,
+    target_arch: &str,
+) -> Option<&'a serde_json::Value> {
+    let matches = |asset: &&serde_json::Value| {
+        let name = asset["name"].as_str().unwrap_or("").to_ascii_lowercase();
+        match (target_os, target_arch) {
+            ("windows", "x86_64") => {
+                name.ends_with("_x64-setup.exe") || name.ends_with("_x64_en-us.msi")
+            }
+            ("macos", "aarch64") => name.ends_with("_aarch64.dmg"),
+            ("macos", "x86_64") => name.ends_with("_x64.dmg"),
+            ("linux", "x86_64") => {
+                name.ends_with("_amd64.appimage")
+                    || name.ends_with("_amd64.deb")
+                    || name.ends_with("-1.x86_64.rpm")
+            }
+            _ => false,
+        }
+    };
+    let candidates: Vec<&serde_json::Value> = assets.iter().filter(matches).collect();
+    if target_os == "windows" {
+        candidates
+            .iter()
+            .copied()
+            .find(|asset| asset["name"].as_str().unwrap_or("").ends_with(".exe"))
+            .or_else(|| candidates.first().copied())
+    } else {
+        candidates.first().copied()
+    }
 }
 
 async fn check_updates_from_atom(
@@ -2240,6 +2385,133 @@ fn compare_versions(latest: &str, current: &str) -> Result<bool, String> {
 #[cfg(test)]
 mod update_tests {
     use super::{extract_latest_tag_from_atom, validate_update_download, Settings};
+
+    #[test]
+    fn typography_preferences_survive_and_old_settings_receive_defaults() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["appearance"]["ui_font_size"] = serde_json::json!(18);
+        value["appearance"]["letter_spacing"] = serde_json::json!(1.2);
+        let saved: Settings = serde_json::from_value(value.clone()).unwrap();
+        assert_eq!(saved.appearance.ui_font_size, 18);
+        assert_eq!(saved.appearance.letter_spacing, 1.2);
+        value["appearance"]
+            .as_object_mut()
+            .unwrap()
+            .remove("ui_font_size");
+        value["appearance"]
+            .as_object_mut()
+            .unwrap()
+            .remove("letter_spacing");
+        let old: Settings = serde_json::from_value(value).unwrap();
+        assert_eq!(old.appearance.ui_font_size, 13);
+        assert_eq!(old.appearance.letter_spacing, 0.6);
+    }
+
+    #[tokio::test]
+    async fn encoded_file_commands_round_trip_and_failed_conversion_preserves_file() {
+        let temp = std::env::temp_dir();
+        let root = temp.join(format!("zeditor-encoding-test-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir(&root).await.unwrap();
+        let path = root.join("note.md");
+        let text = "中文 😀";
+        for encoding in ["utf-8-bom", "utf-16le-bom", "utf-16be", "gb18030"] {
+            super::save_file_content(
+                path.to_string_lossy().into(),
+                text.into(),
+                Some(encoding.into()),
+            )
+            .await
+            .unwrap();
+            let decoded =
+                super::read_text_document(path.to_string_lossy().into(), Some(encoding.into()))
+                    .await
+                    .unwrap();
+            assert_eq!(decoded.content, text);
+            assert_eq!(decoded.encoding, encoding);
+            let bytes = tokio::fs::read(&path).await.unwrap();
+            let base64 = base64::Engine::encode(&base64::engine::general_purpose::STANDARD, &bytes);
+            let memory = super::decode_text_document(base64.clone(), Some(encoding.into()))
+                .await
+                .unwrap();
+            assert_eq!(memory.content, text);
+            assert_eq!(memory.encoding, encoding);
+            super::save_file_bytes(path.to_string_lossy().into(), base64)
+                .await
+                .unwrap();
+            assert_eq!(tokio::fs::read(&path).await.unwrap(), bytes);
+        }
+        let before = tokio::fs::read(&path).await.unwrap();
+        assert!(super::save_file_content(
+            path.to_string_lossy().into(),
+            text.into(),
+            Some("gbk".into())
+        )
+        .await
+        .is_err());
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), before);
+        assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
+        assert_eq!(root.parent(), Some(temp.as_path()));
+        tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[test]
+    fn frontend_feature_switches_survive_settings_round_trip() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value["workflow"] = serde_json::json!({
+            "render_in_preview": false,
+            "preserve_format": false,
+        });
+        value["editor"]["inline_popups"] = serde_json::json!(false);
+        value["ai"]["proofread_with_ai"] = serde_json::json!(false);
+        let restored: Settings = serde_json::from_value(value).unwrap();
+        let saved = serde_json::to_value(restored).unwrap();
+        assert_eq!(saved["workflow"]["render_in_preview"], false);
+        assert_eq!(saved["workflow"]["preserve_format"], false);
+        assert_eq!(saved["editor"]["inline_popups"], false);
+        assert_eq!(saved["ai"]["proofread_with_ai"], false);
+    }
+
+    #[test]
+    fn old_settings_default_new_feature_switches_to_enabled() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        value.as_object_mut().unwrap().remove("workflow");
+        value["editor"]
+            .as_object_mut()
+            .unwrap()
+            .remove("inline_popups");
+        value["ai"]
+            .as_object_mut()
+            .unwrap()
+            .remove("proofread_with_ai");
+        let saved =
+            serde_json::to_value(serde_json::from_value::<Settings>(value).unwrap()).unwrap();
+        assert_eq!(saved["workflow"]["render_in_preview"], true);
+        assert_eq!(saved["workflow"]["preserve_format"], true);
+        assert_eq!(saved["editor"]["inline_popups"], true);
+        assert_eq!(saved["ai"]["proofread_with_ai"], true);
+    }
+
+    #[tokio::test]
+    async fn save_replaces_the_complete_file_without_truncating_open_readers() {
+        use tokio::io::AsyncReadExt;
+        let root = std::env::temp_dir().join(format!("zeditor-save-test-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let path = root.join("note.md");
+        tokio::fs::write(&path, "original").await.unwrap();
+        let mut reader = tokio::fs::File::open(&path).await.unwrap();
+        super::write_utf8_text_file(path.to_str().unwrap(), "updated")
+            .await
+            .unwrap();
+        let mut original = String::new();
+        reader.read_to_string(&mut original).await.unwrap();
+        drop(reader);
+        let saved = tokio::fs::read_to_string(&path).await.unwrap();
+        let entries = std::fs::read_dir(&root).unwrap().count();
+        tokio::fs::remove_dir_all(&root).await.unwrap();
+        assert_eq!(original, "original");
+        assert_eq!(saved, "updated");
+        assert_eq!(entries, 1, "保存后不应残留临时文件");
+    }
 
     #[test]
     fn editor_input_engine_survives_settings_round_trip() {

@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { save as chooseSaveFile } from '@tauri-apps/plugin-dialog';
 import { writeTextFile } from '@tauri-apps/plugin-fs';
@@ -115,7 +117,7 @@ export function WorkflowViewer({
     const skipped = result.issues.length > 0 ? `，${result.issues.length} 处已跳过（目标已变化）` : '';
     setStatus({
       kind: 'success',
-      text: `已写回编辑器 ${result.applied.length} 处修改${skipped}，按 Ctrl+S 保存文件`,
+      text: `已写回编辑器 ${result.applied.length} 处修改${skipped}，按 ${formatShortcut('Ctrl+S')} 保存文件`,
     });
   }, [onApply, patches, preserveFormat, source]);
 
@@ -244,7 +246,7 @@ export function WorkflowViewer({
             return (
               <li key={key}>
                 <span>{describeWorkflowPatch(patch)}</span>
-                <button type="button" onClick={() => removePatch(key)} aria-label="移除该修改">×</button>
+                <button type="button" onClick={() => removePatch(key)} aria-label="移除该修改"><AppIcon name="close" size={16} /></button>
               </li>
             );
           })}

@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useEffect, useState } from 'react';
 import type { S3Settings, WebDavSettings, WebDavSyncPhase } from '../../types/webdav';
 import { useWebDavStore } from '../../stores/webdavStore';
@@ -14,13 +15,7 @@ interface CloudStatusItemProps {
   onToggleProvider: (provider: 'webdav' | 's3', enabled: boolean) => void;
 }
 
-function CloudGlyph({ size = 13 }: { size?: number }) {
-  return (
-    <svg viewBox="0 0 16 16" width={size} height={size} aria-hidden="true">
-      <path d="M4.8 12.5h6.6a2.4 2.4 0 0 0 .5-4.75 4.1 4.1 0 0 0-8.1.7A2.6 2.6 0 0 0 4.8 12.5Z" />
-    </svg>
-  );
-}
+function CloudGlyph({ size = 13 }: { size?: number }) { return <AppIcon name="cloudSync" size={size} />; }
 
 /**
  * 聚合云同步状态栏项 + 完整云同步面板弹窗。
@@ -137,7 +132,7 @@ export function WebDavStatusItem({
                 </div>
               </div>
               <button type="button" className="cloud-panel-close" onClick={() => setPanelOpen(false)} aria-label="关闭">
-                <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round"><path d="m4 4 8 8m0-8-8 8" /></svg>
+                <AppIcon name="close" size={20}  />
               </button>
             </div>
 
@@ -224,7 +219,7 @@ export function WebDavStatusItem({
                         disabled={!providerEnabled}
                         onClick={() => viewAllBackups(provider)}
                       >
-                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><path d="M2.5 4.5h11M2.5 8h11M2.5 11.5h7" /></svg>
+                        <AppIcon name="history" size={20}  />
                         查看全部备份
                       </button>
                       <button
@@ -237,7 +232,7 @@ export function WebDavStatusItem({
                           onOpenSettings();
                         }}
                       >
-                        <svg viewBox="0 0 16 16" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="8" cy="8" r="2.5" /><path d="M8 1.5v2M8 12.5v2M1.5 8h2M12.5 8h2M3.5 3.5l1.4 1.4M11.1 11.1l1.4 1.4M12.5 3.5l-1.4 1.4M4.9 11.1l-1.4 1.4" /></svg>
+                        <AppIcon name="settings" size={20}  />
                         设置
                       </button>
                     </div>

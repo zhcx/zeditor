@@ -1,5 +1,7 @@
 import { Fragment, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { SlashCommand } from '../../utils/slashCommands';
+import { AppIcon } from '../Icons/AppIcon';
+import { getCommandIcon } from '../Icons/iconGeometry';
 
 export interface SlashMenuAnchor {
   left: number;
@@ -96,7 +98,7 @@ export function SlashCommandMenu({
                 onSelect(command);
               }}
             >
-            <span className="slash-command-icon" aria-hidden="true">{command.icon}</span>
+            <span className="slash-command-icon" aria-hidden="true"><AppIcon name={getCommandIcon(command.id)} /></span>
             <span className="slash-command-copy">
               <strong>{command.title}</strong>
               <small>{command.description}</small>

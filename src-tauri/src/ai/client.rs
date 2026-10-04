@@ -1979,6 +1979,7 @@ mod tests {
             custom_style_prompt: String::new(),
             provider_api_keys: "{}".into(),
             provider_profiles: "{}".into(),
+            proofread_with_ai: true,
             proofread_use_agent: true,
             companion_use_agent: false,
             agent_fallback_enabled: true,

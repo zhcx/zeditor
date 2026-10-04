@@ -1,6 +1,6 @@
 [package]
 name = "zeditor"
-version = "0.5.7"
+version = "0.5.8"
 description = "A modern Markdown editor with Notion-style UI"
 authors = ["you"]
 edition = "2021"
@@ -36,6 +36,7 @@ regex = "1"
 ed25519-dalek = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 semver = "1"
+encoding_rs = "0.8"
 # MCP 支持：WebSocket 桥接（编辑器内）与 MCP server 二进制共用。
 tokio-tungstenite = "0.24"
 futures = "0.3"

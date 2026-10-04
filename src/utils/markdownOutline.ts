@@ -40,8 +40,13 @@ export function parseMarkdownHeadings(content: string): MarkdownHeading[] {
     const fenceMatch = line.match(/^ {0,3}(`{3,}|~{3,})/);
     if (fenceMatch) {
       const marker = fenceMatch[1][0] as '`' | '~';
-      if (!fence) fence = { marker, length: fenceMatch[1].length };
-      else if (fence.marker === marker && fenceMatch[1].length >= fence.length) fence = null;
+      const rest = line.slice(fenceMatch[0].length);
+      if (!fence) {
+        // 反引号围栏的信息串不能包含反引号，否则它是普通文本。
+        if (marker !== '`' || !rest.includes('`')) fence = { marker, length: fenceMatch[1].length };
+      } else if (fence.marker === marker && fenceMatch[1].length >= fence.length && /^[\t ]*$/.test(rest)) {
+        fence = null;
+      }
       continue;
     }
     if (fence) continue;

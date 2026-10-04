@@ -2,6 +2,7 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../stores/appStore';
 import { formatImageMarkdown, type ImageSpec } from '../utils/imageSyntax';
 import { invalidateResolvedSource } from './mediaAssets';
+import { captureImportTarget, insertImportedText } from './documentInsertion';
 
 /** 桌面端 import_image_asset / import_image_bytes 的返回结构。 */
 export interface ImageAssetImport {
@@ -48,31 +49,18 @@ export async function importImageBytes(dataBase64: string, extension: string): P
   return invoke<ImageAssetImport>('import_image_bytes', { dataBase64, extension, documentPath });
 }
 
-/** 在光标处插入图片语法；没有编辑器实例时退化为追加到文档末尾。 */
-function insertImageMarkdown(markdown: string): void {
-  const store = useAppStore.getState();
-  const text = `\n${markdown}\n`;
-  if (!store.editorView) {
-    store.setContent(`${store.content}${text}`);
-    return;
-  }
-  const selection = store.editorView.getSelection();
-  const cursor = selection.from + text.length;
-  store.editorView.replaceRange(selection.from, selection.to, text, { from: cursor, to: cursor });
-  store.editorView.focus();
-}
-
 async function runImport(
   action: () => Promise<ImageAssetImport>,
   alt: string | undefined,
   pendingMessage: string,
   successMessage: string,
 ): Promise<boolean> {
+  const target = captureImportTarget();
   useAppStore.getState().setUploadStatus('uploading', 40, pendingMessage);
   try {
     const asset = await action();
-    invalidateResolvedSource(useAppStore.getState().currentFile, asset.relativePath);
-    insertImageMarkdown(imageMarkdownForAsset(asset, alt));
+    invalidateResolvedSource(target.path, asset.relativePath);
+    insertImportedText(target, `\n${imageMarkdownForAsset(asset, alt)}\n`);
     useAppStore.getState().setUploadStatus('success', 100, successMessage);
     return true;
   } catch (error) {

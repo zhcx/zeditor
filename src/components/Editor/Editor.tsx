@@ -1,3 +1,6 @@
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import 'monaco-editor/esm/nls.messages.zh-cn.js';
@@ -7,10 +10,11 @@ import MarkdownIt from 'markdown-it';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Settings } from '../../stores/appStore';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import { useAIStore, type ProofreadResult } from '../../stores/aiStore';
 import type { EditorController, EditorDispatchSpec, EditorLine } from '../../types/editor';
 import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../../utils/editorLayout';
-import { contentFontStack } from '../../utils/appearanceSettings';
+import { contentFontStack, normalizeTypography } from '../../utils/appearanceSettings';
 import { ensureMonacoTheme } from '../../themes/monaco';
 import { DocumentSessions, sameDocument } from '../../utils/documentSafety';
 import { filterSlashCommands, findSlashCommandTrigger, type SlashCommand } from '../../utils/slashCommands';
@@ -243,27 +247,10 @@ function ContextSubmenu({ label, icon, direction, open, disabled, onToggle, onHo
   );
 }
 
+const ContextMenuIconNames = {"sparkles":"companion","translate":"languages","copy":"copy","copyAs":"copyAs","paste":"paste","cut":"cut","text":"font","format":"sliders","heading":"heading","insert":"plus","selectAll":"selectAll","pdf":"fileLabel","document":"fileText","code":"code","image":"image","folder":"folder","undo":"undo","redo":"redo","table":"table","select":"cursor"} as const satisfies Record<string, IconName>;
+
 function ContextMenuIcon({ name }: { name: ContextMenuIconName }) {
-  if (name === 'sparkles') return <svg viewBox="0 0 18 18"><path d="m6.2 2 .7 2.1L9 5l-2.1.8-.7 2.1-.8-2.1L3.3 5l2.1-.9zM12.3 7.2l.9 2.5 2.5.9-2.5.9-.9 2.5-.9-2.5-2.5-.9 2.5-.9z" /></svg>;
-  if (name === 'translate') return <svg viewBox="0 0 18 18"><circle cx="9" cy="9" r="6.5" /><path d="M2.5 9h13M9 2.5c1.7 1.8 2.6 4 2.6 6.5S10.7 13.7 9 15.5C7.3 13.7 6.4 11.5 6.4 9S7.3 4.3 9 2.5Z" /></svg>;
-  if (name === 'copy') return <svg viewBox="0 0 18 18"><rect x="5.2" y="3.2" width="9" height="11.5" rx="1.5" /><path d="M3.4 12V5.3c0-1 .8-1.8 1.8-1.8" /></svg>;
-  if (name === 'copyAs') return <svg viewBox="0 0 18 18"><rect x="5.2" y="4" width="8.8" height="11" rx="1.4" /><path d="M3.2 12V4.8C3.2 3.8 4 3 5 3M15.5 7.2l1.8 1.8-1.8 1.8" /></svg>;
-  if (name === 'paste') return <svg viewBox="0 0 18 18"><path d="M6.2 3.7h-2v11h8.6v-2.1" /><rect x="6.2" y="2.5" width="6.5" height="9" rx="1.3" /><path d="M8 2.5V1.4h3v1.1" /></svg>;
-  if (name === 'text') return <svg viewBox="0 0 18 18"><path d="M2.4 6.2h5.2M5 6.2v6M10 6.2h5.6M12.8 6.2v6M10.6 12h4.4" /></svg>;
-  if (name === 'pdf') return <svg viewBox="0 0 18 18"><path d="M4 1.8h6l3.5 3.5v10.9H4zM10 1.8v3.5h3.5" /><path d="M5.5 12.8h1.2c1.4 0 1.4-2.3 0-2.3H5.5v4M8.7 14.5v-4h1c1.7 0 1.7 4 0 4zM12 14.5v-4h2" /></svg>;
-  if (name === 'document') return <svg viewBox="0 0 18 18"><path d="M4 1.8h6l3.5 3.5v10.9H4zM10 1.8v3.5h3.5M6.2 8.3h5.2M6.2 11h5.2M6.2 13.7h3.5" /></svg>;
-  if (name === 'code') return <svg viewBox="0 0 18 18"><path d="m6.4 4-4 5 4 5M11.6 4l4 5-4 5M10.2 2.8 7.8 15.2" /></svg>;
-  if (name === 'image') return <svg viewBox="0 0 18 18"><rect x="2.4" y="2.8" width="13.2" height="12.4" rx="1.4" /><circle cx="6.2" cy="6.7" r="1.2" /><path d="m3.5 13.5 3.6-3.8 2.5 2.4 2.1-2.2 2.8 3.1" /></svg>;
-  if (name === 'folder') return <svg viewBox="0 0 18 18"><path d="M2 5.2h5l1.3 1.5H16v7.8H2zM2 5.2V3.5h5l1.3 1.7" /></svg>;
-  if (name === 'table') return <svg viewBox="0 0 18 18"><rect x="2.2" y="3.2" width="13.6" height="11.6" rx="1.2" /><path d="M2.2 7h13.6M2.2 10.9h13.6M9 3.2v11.6" /></svg>;
-  if (name === 'cut') return <svg viewBox="0 0 18 18"><circle cx="5.4" cy="13.4" r="1.9" /><circle cx="12.6" cy="13.4" r="1.9" /><path d="M6.7 12 12.9 3M11.3 12 5.1 3" /></svg>;
-  if (name === 'format') return <svg viewBox="0 0 18 18"><path d="M4 14.6 11.2 7.4l2.4 2.4L6.4 17H4zM12.4 6.2l1.3-1.3a1.7 1.7 0 0 1 2.4 0l.3.3a1.7 1.7 0 0 1 0 2.4l-1.3 1.3" /><path d="M3 17h12" /></svg>;
-  if (name === 'heading') return <svg viewBox="0 0 18 18"><path d="M3.6 4v10M10 4v10M3.6 9h6.4M13.2 7.6h2.6M14.5 7.6V14" /></svg>;
-  if (name === 'insert') return <svg viewBox="0 0 18 18"><rect x="2.6" y="3.4" width="12.8" height="11.2" rx="1.5" /><path d="M9 6.6v5M6.5 9.1h5" /></svg>;
-  if (name === 'selectAll') return <svg viewBox="0 0 18 18"><path d="M3 6V4.4A1.4 1.4 0 0 1 4.4 3H6M12 3h1.6A1.4 1.4 0 0 1 15 4.4V6M15 12v1.6a1.4 1.4 0 0 1-1.4 1.4H12M6 15H4.4A1.4 1.4 0 0 1 3 13.6V12" /><path d="m6.6 9.2 1.7 1.7 3.3-3.5" /></svg>;
-  if (name === 'undo') return <svg viewBox="0 0 18 18"><path d="M6.5 5 3 8.5 6.5 12M3.4 8.5h6.2c3 0 4.8 1.6 4.8 4.3" /></svg>;
-  if (name === 'redo') return <svg viewBox="0 0 18 18"><path d="m11.5 5 3.5 3.5-3.5 3.5M14.6 8.5H8.4c-3 0-4.8 1.6-4.8 4.3" /></svg>;
-  return <svg viewBox="0 0 18 18"><path d="M3 4h12M3 9h12M3 14h12" /></svg>;
+  return <AppIcon name={ContextMenuIconNames[name]} label={name === 'pdf' ? 'PDF' : undefined} />;
 }
 
 const isTauriRuntime = () => '__TAURI_INTERNALS__' in window;
@@ -337,6 +324,7 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
       return () => disposable.dispose();
     },
     getValue: () => model.getValue(),
+    resetValue: (content) => model.setValue(content),
     getSelection,
     getText: (from, to) => model.getValueInRange(monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to))),
     replaceRange: (from, to, text, selection) => {
@@ -427,8 +415,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const tableActionRef = useRef<(action: TableAction) => void>(() => {});
   // 斜杠命令的实际插入同样在编辑器实例里执行：表格命令复用统一的 3 × 3 模板。
   const slashCommandRunRef = useRef<(command: SlashCommand) => void>(() => {});
-  const { content, currentFile, activeTabId, tabs, updateTabContent, settings, setEditorView } = useAppStore();
-  const { proofreadResults, rewriteSelection, translateText, setTranslationVisible, setStatus } = useAIStore();
+  const { content, currentFile, activeTabId, tabs, updateTabContent, settings, setEditorView } = useAppStore(useShallow(state => ({ content: state.content, currentFile: state.currentFile, activeTabId: state.activeTabId, tabs: state.tabs, updateTabContent: state.updateTabContent, settings: state.settings, setEditorView: state.setEditorView })));
+  const { proofreadResults, rewriteSelection, translateText, setTranslationVisible, setStatus } = useAIStore(useShallow(state => ({ proofreadResults: state.proofreadResults, rewriteSelection: state.rewriteSelection, translateText: state.translateText, setTranslationVisible: state.setTranslationVisible, setStatus: state.setStatus })));
   const slashCommands = useMemo(() => filterSlashCommands(slashMenu?.query || ''), [slashMenu?.query]);
   const language = normalizeLanguage(settings.appearance.language);
 
@@ -809,6 +797,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       // 命中旧测量缓存导致行文字宽度错乱、溢出编辑框。
       fontFamily: contentFontStack(useAppStore.getState().settings.appearance.font_family),
       fontSize: useAppStore.getState().settings.appearance.font_size,
+      letterSpacing: normalizeTypography(useAppStore.getState().settings.appearance).letterSpacing,
       lineHeight: Math.round(useAppStore.getState().settings.appearance.font_size * useAppStore.getState().settings.appearance.line_height),
       lineNumbers: 'on',
       minimap: { enabled: false },
@@ -1451,16 +1440,25 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       event.stopImmediatePropagation();
 
       const store = useAppStore.getState();
+      const pasteSnapshot = { activeTabId: store.activeTabId, content: store.content };
+      const pasteTargetChanged = () => {
+        if (sameDocument(pasteSnapshot, useAppStore.getState())) return false;
+        store.setUploadStatus('error', 0, '粘贴期间文档已变化，请重新插入图片');
+        return true;
+      };
       // 桌面端优先把剪贴板图片写进文档同级的 .assets：离线可用且不依赖图床配置。
       if (isTauriRuntime() && store.currentFile) {
         try {
           const dataUrl = await fileAsDataUrl(image);
+          if (pasteTargetChanged()) return;
           const extension = clipboardImageExtension(image.type);
           if (await insertImageFromBytes(dataUrl.split(',')[1], extension, '粘贴的图片')) return;
         } catch {
           // 落回图床 / dataURL 兜底路径
         }
       }
+
+      if (pasteTargetChanged()) return;
 
       if (!imageHostConfigured(store.settings)) {
         store.setUploadStatus('error', 0, '请先启用并配置图床服务');
@@ -1484,6 +1482,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           });
         }
         const markdown = `![粘贴的图片](${url})`;
+        if (pasteTargetChanged()) return;
         controller.replaceRange(selection.from, selection.to, markdown, { from: selection.from + markdown.length, to: selection.from + markdown.length });
         controller.focus();
         store.setUploadStatus('success', 100, isTauriRuntime() ? '图片已上传并插入' : '图片已嵌入文档');
@@ -1549,12 +1548,22 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   useEffect(() => {
     monacoRef.current?.updateOptions({
       fontSize: settings.appearance.font_size,
+      letterSpacing: normalizeTypography({ letter_spacing: settings.appearance.letter_spacing }).letterSpacing,
       lineHeight: Math.round(settings.appearance.font_size * settings.appearance.line_height),
       // 与创建时一致，传真实字体栈：字体名变化会让 Monaco 的测量缓存
       // 失效并重新测量，渲染与折行宽度保持一致，不再溢出编辑框。
       fontFamily: contentFontStack(settings.appearance.font_family),
     });
-  }, [settings.appearance.font_family, settings.appearance.font_size, settings.appearance.line_height]);
+  }, [settings.appearance.font_family, settings.appearance.font_size, settings.appearance.line_height, settings.appearance.letter_spacing]);
+
+  useEffect(() => {
+    const preview = (event: Event) => {
+      const { letterSpacing } = (event as CustomEvent<{ letterSpacing: number }>).detail;
+      if (Number.isFinite(letterSpacing)) monacoRef.current?.updateOptions({ letterSpacing });
+    };
+    window.addEventListener('zeditor-typography-preview', preview);
+    return () => window.removeEventListener('zeditor-typography-preview', preview);
+  }, []);
 
   useEffect(() => {
     const handleFontSizePreview = (event: Event) => {
@@ -1600,6 +1609,14 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     <div className={`editor-container monaco-editor-container ${className || ''}`} style={style}>
       <div className="editor-document-card monaco-document-card">
         <div ref={editorRef} className="editor-content monaco-host" />
+        {!content && (
+          <div className="editor-empty-guide" aria-hidden="true">
+            <AppIcon name="pen" size={20}  />
+            <strong>从一个想法开始</strong>
+            <p>写下文字，让思路自然展开。</p>
+            <div><span><kbd>/</kbd> 插入内容</span><span><kbd>{formatShortcut('Ctrl P')}</kbd> 切换文档</span></div>
+          </div>
+        )}
       </div>
       {selectionToolbar && !settings.editor.pin_toolbar && (
         <div
@@ -1704,29 +1721,29 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
           </button>
           <div className="editor-context-menu-divider" role="separator" />
           <button type="button" role="menuitem" disabled={!contextMenu.canUndo} onClick={() => void runContextMenuAction('undo')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="undo" /></span><span className="editor-context-menu-label">{t('撤销', language)}</span><kbd>Ctrl+Z</kbd>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="undo" /></span><span className="editor-context-menu-label">{t('撤销', language)}</span><kbd>{formatShortcut('Ctrl+Z')}</kbd>
           </button>
           <button type="button" role="menuitem" disabled={!contextMenu.canRedo} onClick={() => void runContextMenuAction('redo')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="redo" /></span><span className="editor-context-menu-label">{t('重做', language)}</span><kbd>Ctrl+Y</kbd>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="redo" /></span><span className="editor-context-menu-label">{t('重做', language)}</span><kbd>{formatShortcut('Ctrl+Y')}</kbd>
           </button>
           <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('cut')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="cut" /></span><span className="editor-context-menu-label">{t('剪切', language)}</span><kbd>Ctrl+X</kbd>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="cut" /></span><span className="editor-context-menu-label">{t('剪切', language)}</span><kbd>{formatShortcut('Ctrl+X')}</kbd>
           </button>
           <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('copy')}>
-            <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="copy" /></span><span className="editor-context-menu-label">{t('复制', language)}</span><kbd>Ctrl+C</kbd>
+            <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="copy" /></span><span className="editor-context-menu-label">{t('复制', language)}</span><kbd>{formatShortcut('Ctrl+C')}</kbd>
           </button>
           <ContextSubmenu label="复制为" icon="copyAs" direction={contextMenu.submenuDirection} disabled={!contextMenu.hasSelection} {...submenuHandlers('copyAs')}>
             <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyHtml')}><span>HTML</span></button>
             <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyPlain')}><span>纯文本</span></button>
           </ContextSubmenu>
           <button type="button" role="menuitem" onClick={() => void runContextMenuAction('paste')}>
-            <span className="editor-context-menu-icon tone-green"><ContextMenuIcon name="paste" /></span><span className="editor-context-menu-label">{t('粘贴', language)}</span><kbd>Ctrl+V</kbd>
+            <span className="editor-context-menu-icon tone-green"><ContextMenuIcon name="paste" /></span><span className="editor-context-menu-label">{t('粘贴', language)}</span><kbd>{formatShortcut('Ctrl+V')}</kbd>
           </button>
           <button type="button" role="menuitem" onClick={() => void runContextMenuAction('paste')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="text" /></span><span className="editor-context-menu-label">粘贴为纯文本</span><kbd>Ctrl+Shift+V</kbd>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="text" /></span><span className="editor-context-menu-label">粘贴为纯文本</span><kbd>{formatShortcut('Ctrl+Shift+V')}</kbd>
           </button>
           <button type="button" role="menuitem" onClick={() => void runContextMenuAction('selectAll')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="selectAll" /></span><span className="editor-context-menu-label">{t('全选', language)}</span><kbd>Ctrl+A</kbd>
+            <span className="editor-context-menu-icon"><ContextMenuIcon name="selectAll" /></span><span className="editor-context-menu-label">{t('全选', language)}</span><kbd>{formatShortcut('Ctrl+A')}</kbd>
           </button>
 
           <div className="editor-context-menu-divider" role="separator" />

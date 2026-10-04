@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
 import { useEffect, useRef, useState } from 'react';
 
 type ActivityView = 'explorer' | 'search';
@@ -16,19 +18,17 @@ interface ActivityBarProps {
   onSelectImmersive: () => void;
   onSelectZen: () => void;
   onExitImmersive: () => void;
+  toolbarPinned: boolean;
+  onToggleToolbar: () => void;
 }
 
-function ActivityIcon({ name }: { name: 'explorer' | 'search' | 'ai' | 'immersive' | 'zen' | 'theme' | 'settings' }) {
-  if (name === 'explorer') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 3.5h9.5L19 8v12.5H5zM14 3.5V8h5M8 12h8M8 16h8" /></svg>;
-  if (name === 'search') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="10.5" cy="10.5" r="5.8" /><path d="m15 15 4.5 4.5" /></svg>;
-  if (name === 'ai') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 1.5 5.1L18.5 10l-5 1.6L12 17l-1.5-5.4-5-1.6 5-1.9zM18.4 15.4l.6 2.1 2.1.6-2.1.7-.6 2.1-.7-2.1-2.1-.7 2.1-.6z" /></svg>;
-  if (name === 'immersive') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M3 12s3.2-5 9-5 9 5 9 5-3.2 5-9 5-9-5-9-5Z" /><circle cx="12" cy="12" r="2.4" /></svg>;
-  if (name === 'zen') return <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M7 5h10M7 9h10M7 13h7M5 19h14" /><path d="M4 4v5M20 4v5M4 20v-5M20 20v-5" /></svg>;
-  if (name === 'theme') return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="3" /><path d="M12 3v2M12 19v2M21 12h-2M5 12H3m15.4-6.4-1.4 1.4M7 17.4l-1.4 1.4m0-13.2L7 7m10 10 1.4 1.4" /></svg>;
-  return <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="2.2" /><path d="M19 13.5a7.3 7.3 0 0 0 .05-3L21 9l-2-3.45-1.8.7a7.5 7.5 0 0 0-2.55-1.48L14.4 3h-4l-.28 1.77A7.5 7.5 0 0 0 7.6 6.25l-1.82-.7L3.8 9l1.95 1.5a7.3 7.3 0 0 0 0 3L3.8 15l1.98 3.45 1.82-.7a7.5 7.5 0 0 0 2.52 1.48L10.4 21h4l.25-1.77a7.5 7.5 0 0 0 2.55-1.48l1.8.7L21 15z" /></svg>;
+const ActivityIconNames = {"explorer":"folder","search":"search","ai":"assistant","immersive":"book","zen":"penLine","theme":"sun","settings":"settings","format":"format"} as const satisfies Record<string, IconName>;
+
+function ActivityIcon({ name }: { name: 'explorer' | 'search' | 'ai' | 'immersive' | 'zen' | 'theme' | 'settings' | 'format' }) {
+  return <AppIcon name={ActivityIconNames[name]} />;
 }
 
-export function ActivityBar({ activeView, chatbotVisible, settingsOpen, immersive, zen, theme, onSelectView, onOpenChat, onOpenSettings, onToggleTheme, onSelectImmersive, onSelectZen, onExitImmersive }: ActivityBarProps) {
+export function ActivityBar({ activeView, chatbotVisible, settingsOpen, immersive, zen, theme, onSelectView, onOpenChat, onOpenSettings, onToggleTheme, onSelectImmersive, onSelectZen, onExitImmersive, toolbarPinned, onToggleToolbar }: ActivityBarProps) {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const modePickerRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'system'
@@ -62,6 +62,9 @@ export function ActivityBar({ activeView, chatbotVisible, settingsOpen, immersiv
         <button type="button" className={`activity-bar-button ${chatbotVisible ? 'active' : ''}`} onClick={onOpenChat} title="AI 对话" aria-label="AI 对话" aria-pressed={chatbotVisible}>
           <ActivityIcon name="ai" />
         </button>
+        <button type="button" className={`activity-bar-button ${toolbarPinned ? 'active' : ''}`} onClick={onToggleToolbar} title={toolbarPinned ? '隐藏格式工具栏' : '显示格式工具栏'} aria-label={toolbarPinned ? '隐藏格式工具栏' : '显示格式工具栏'} aria-pressed={toolbarPinned}>
+          <ActivityIcon name="format" />
+        </button>
         <div className="activity-immersive-picker" ref={modePickerRef}>
           <button
             type="button"
@@ -80,12 +83,12 @@ export function ActivityBar({ activeView, chatbotVisible, settingsOpen, immersiv
               <button type="button" className={`immersive-mode-option ${immersive ? 'selected' : ''}`} role="menuitemradio" aria-checked={immersive} onClick={() => { onSelectImmersive(); setModeMenuOpen(false); }}>
                 <span className="immersive-mode-option-icon"><ActivityIcon name="immersive" /></span>
                 <span><strong>沉浸阅读</strong><small>隐藏编辑器，专注阅读预览</small></span>
-                <span className="immersive-mode-check">{immersive ? '✓' : ''}</span>
+                <span className="immersive-mode-check">{immersive ? <AppIcon name="check" size={14} /> : ''}</span>
               </button>
               <button type="button" className={`immersive-mode-option ${zen ? 'selected' : ''}`} role="menuitemradio" aria-checked={zen} onClick={() => { onSelectZen(); setModeMenuOpen(false); }}>
                 <span className="immersive-mode-option-icon"><ActivityIcon name="zen" /></span>
                 <span><strong>沉浸写作</strong><small>隐藏预览与侧栏，专注写作</small></span>
-                <span className="immersive-mode-check">{zen ? '✓' : ''}</span>
+                <span className="immersive-mode-check">{zen ? <AppIcon name="check" size={14} /> : ''}</span>
               </button>
               {(immersive || zen) && <button type="button" className="immersive-mode-exit" role="menuitem" onClick={() => { onExitImmersive(); setModeMenuOpen(false); }}>返回分屏模式</button>}
             </div>

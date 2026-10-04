@@ -1,3 +1,5 @@
+import { AppIcon } from './components/Icons/AppIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useCallback, useState, lazy, Suspense } from 'react';
 import { useAppStore } from './stores/appStore';
 import { useAIStore } from './stores/aiStore';
@@ -5,7 +7,8 @@ import { useWebDavStore } from './stores/webdavStore';
 import { useS3Store } from './stores/s3Store';
 import { TabsBar } from './components/TabsBar/TabsBar';
 import { Toolbar } from './components/Toolbar/Toolbar';
-import { Editor } from './components/Editor/Editor';
+// 编辑器内核单独加载，使标题栏、资源管理器和预览先完成渲染。
+const Editor = lazy(() => import('./components/Editor/Editor').then(m => ({ default: m.Editor })));
 import { Preview } from './components/Preview/Preview';
 import { StatusBar } from './components/StatusBar/StatusBar';
 import { Sidebar } from './components/Sidebar/Sidebar';
@@ -25,6 +28,8 @@ const UnsavedChangesDialog = lazy(() => import('./components/UnsavedChangesDialo
 const ConverterDialog = lazy(() => import('./components/ConverterDialog/ConverterDialog').then(m => ({ default: m.ConverterDialog })));
 const PresentationView = lazy(() => import('./components/Presentation/PresentationView').then(m => ({ default: m.PresentationView })));
 const AIPalette = lazy(() => import('./components/AIPalette/AIPalette').then(m => ({ default: m.AIPalette })));
+const DocumentSwitcher = lazy(() => import('./components/DocumentSwitcher/DocumentSwitcher').then(m => ({ default: m.DocumentSwitcher })));
+const EncodingDialog = lazy(() => import('./components/Encoding/EncodingDialog').then(m => ({ default: m.EncodingDialog })));
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { initMcpDispatcher } from './services/mcpDispatcher';
 import { getCurrentWindow } from '@tauri-apps/api/window';
@@ -42,7 +47,10 @@ import { insertImageFromPath } from './services/imageAssets';
 import { isImageFilePath } from './utils/imageSyntax';
 import './styles/main.css';
 import './styles/workbench.css';
-import { contentFontStack } from './utils/appearanceSettings';
+import './styles/comfort.css';
+import './styles/icons.css';
+import './styles/typography.css';
+import { contentFontStack, typographyCssVariables } from './utils/appearanceSettings';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
 
 interface DragDropPayload {
@@ -67,10 +75,11 @@ function App() {
     setSidebarVisible,
     setSettingsOpen,
     openFile
-  } = useAppStore();
+  } = useAppStore(useShallow(state => ({ mode: state.mode, settingsOpen: state.settingsOpen, sidebarVisible: state.sidebarVisible, sidebarWidth: state.sidebarWidth, outlineVisible: state.outlineVisible, loadSettings: state.loadSettings, settings: state.settings, splitRatio: state.splitRatio, setSplitRatio: state.setSplitRatio, setSidebarWidth: state.setSidebarWidth, setSidebarVisible: state.setSidebarVisible, setSettingsOpen: state.setSettingsOpen, openFile: state.openFile })));
   const editorView = useAppStore(state => state.editorView);
   const converterDialog = useAppStore(state => state.converterDialog);
-  const { proofreadResults, setProofreadPanelVisible, translationPosition, translationOriginal, translationResult, setTranslationVisible, chatbotVisible, setChatbotVisible, companionVisible, pendingEdit } = useAIStore();
+  const encodingDialog = useAppStore(state => state.encodingDialog);
+  const { proofreadResults, setProofreadPanelVisible, translationPosition, translationOriginal, translationResult, setTranslationVisible, chatbotVisible, setChatbotVisible, companionVisible, pendingEdit } = useAIStore(useShallow(state => ({ proofreadResults: state.proofreadResults, setProofreadPanelVisible: state.setProofreadPanelVisible, translationPosition: state.translationPosition, translationOriginal: state.translationOriginal, translationResult: state.translationResult, setTranslationVisible: state.setTranslationVisible, chatbotVisible: state.chatbotVisible, setChatbotVisible: state.setChatbotVisible, companionVisible: state.companionVisible, pendingEdit: state.pendingEdit })));
 
   const dividerRef = useRef<HTMLDivElement>(null);
   const sidebarDividerRef = useRef<HTMLDivElement>(null);
@@ -110,6 +119,25 @@ function App() {
   const closePresentation = useCallback(() => setPresentationVisible(false), []);
   const [aiPaletteVisible, setAiPaletteVisible] = useState(false);
   const closeAiPalette = useCallback(() => setAiPaletteVisible(false), []);
+  const [documentSwitcherVisible, setDocumentSwitcherVisible] = useState(false);
+  const closeDocumentSwitcher = useCallback(() => setDocumentSwitcherVisible(false), []);
+
+  useEffect(() => {
+    const openSwitcher = () => setDocumentSwitcherVisible(true);
+    const onKeyDown = (event: KeyboardEvent) => {
+      if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !event.isComposing && event.key.toLowerCase() === 'p') {
+        event.preventDefault();
+        if (document.querySelector('.settings-overlay, .unsaved-dialog-overlay, .modal-overlay, [aria-modal="true"]:not(.document-switcher)')) return;
+        setDocumentSwitcherVisible(visible => !visible);
+      }
+    };
+    window.addEventListener('zeditor-switch-document', openSwitcher);
+    window.addEventListener('keydown', onKeyDown);
+    return () => {
+      window.removeEventListener('zeditor-switch-document', openSwitcher);
+      window.removeEventListener('keydown', onKeyDown);
+    };
+  }, []);
 
   // AI 指令面板：Ctrl/Cmd+J 快捷键或菜单事件打开（VMark 精灵选择器的等价入口）。
   useEffect(() => {
@@ -476,11 +504,14 @@ function App() {
     root.style.setProperty('--font-content', contentFontStack(settings.appearance.font_family));
     root.style.setProperty('--font-content-size', `${settings.appearance.font_size}px`);
     root.style.setProperty('--font-content-line-height', String(settings.appearance.line_height));
+    for (const [key, value] of Object.entries(typographyCssVariables({ ui_font_size: settings.appearance.ui_font_size, letter_spacing: settings.appearance.letter_spacing }))) root.style.setProperty(key, value);
   }, [
     settings.appearance.font_family,
     settings.appearance.font_size,
     settings.appearance.line_height,
     settings.appearance.ui_font_family,
+    settings.appearance.ui_font_size,
+    settings.appearance.letter_spacing,
   ]);
 
   useEffect(() => {
@@ -543,7 +574,7 @@ function App() {
           await openFile(path);
         } catch (error) {
           console.error('Failed to open dropped file:', error);
-          window.alert(`打开文件失败：${String(error)}`);
+          if (!String(error).includes('text_encoding_required:')) window.alert(`打开文件失败：${String(error)}`);
         }
       }
     });
@@ -936,6 +967,12 @@ function App() {
           onOpenChat={() => setChatbotVisible(!chatbotVisible)}
           onOpenSettings={() => setSettingsOpen(true)}
           onToggleTheme={toggleThemeVariant}
+          toolbarPinned={Boolean(settings.editor.pin_toolbar)}
+          onToggleToolbar={() => {
+            const latest = useAppStore.getState();
+            void latest.saveSettings({ ...latest.settings, editor: { ...latest.settings.editor, pin_toolbar: !latest.settings.editor.pin_toolbar } })
+              .catch(error => useAIStore.getState().setStatus('error', `保存工具栏设置失败：${String(error)}`));
+          }}
           onSelectImmersive={() => useAppStore.getState().setMode('immersive')}
           onSelectZen={() => useAppStore.getState().setMode('zen')}
           onExitImmersive={() => useAppStore.getState().setMode('split')}
@@ -965,11 +1002,13 @@ function App() {
                     <Toolbar />
                   </div>
                 )}
-                <Editor
-                  className="editor-pane"
-                  onActiveLineChange={setActiveEditorLine}
-                  onActiveLineReveal={handleEditorLineReveal}
-                />
+                <Suspense fallback={<div className="editor-container editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
+                  <Editor
+                    className="editor-pane"
+                    onActiveLineChange={setActiveEditorLine}
+                    onActiveLineReveal={handleEditorLineReveal}
+                  />
+                </Suspense>
               </section>
               <div
                 ref={dividerRef}
@@ -980,7 +1019,12 @@ function App() {
                 <div className="document-pane-tabs">
                   <TabsBar />
                 </div>
-                {settings.editor.pin_toolbar && <div className="preview-toolbar-offset" aria-hidden="true" />}
+                {settings.editor.pin_toolbar && (
+                  <div className="preview-toolbar-offset preview-pane-actions">
+                    <span><span className="preview-live-dot" aria-hidden="true" />实时预览</span>
+                    <button type="button" onClick={() => useAppStore.getState().setMode('immersive')} title="隐藏编辑器，专注阅读预览">专注阅读 <span aria-hidden="true"><AppIcon name="arrowUpRight" size={16} /></span></button>
+                  </div>
+                )}
                 <div className="preview-with-panel">
                   <Preview
                     className="preview-pane"
@@ -1003,7 +1047,7 @@ function App() {
                           <button className="close-btn" onClick={() => {
                             setProofreadPanelVisible(false);
                             useAIStore.getState().clearResults();
-                          }}>×</button>
+                          }}><AppIcon name="close" size={16} /></button>
                         </div>
                         <div className="proofread-side-list">
                           {proofreadResults.map((result, index) => (
@@ -1082,7 +1126,7 @@ function App() {
                     </div>
                   ) : (
                     <div className="immersive-reading-label">
-                      <span aria-hidden="true">◫</span>
+                      <span aria-hidden="true"><AppIcon name="book" size={16} /></span>
                       <strong>沉浸阅读</strong>
                     </div>
                   )}
@@ -1110,11 +1154,13 @@ function App() {
                 </header>
                 <div className="immersive-document-surface">
                   {mode === 'zen' ? (
-                    <Editor
-                      className="zen-editor-pane"
-                      onActiveLineChange={setActiveEditorLine}
-                      onActiveLineReveal={handleEditorLineReveal}
-                    />
+                    <Suspense fallback={<div className="editor-container zen-editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
+                      <Editor
+                        className="zen-editor-pane"
+                        onActiveLineChange={setActiveEditorLine}
+                        onActiveLineReveal={handleEditorLineReveal}
+                      />
+                    </Suspense>
                   ) : (
                     <Preview
                       className="immersive-preview"
@@ -1205,6 +1251,10 @@ function App() {
           <PresentationView onExit={closePresentation} />
         </Suspense>
       )}
+      {documentSwitcherVisible && (
+        <Suspense fallback={null}><DocumentSwitcher onClose={closeDocumentSwitcher} /></Suspense>
+      )}
+      {encodingDialog && <Suspense fallback={null}><EncodingDialog key={`${encodingDialog.mode}-${encodingDialog.tabId || encodingDialog.path || encodingDialog.title}`} request={encodingDialog} /></Suspense>}
       <Suspense fallback={null}>
         <AIPalette visible={aiPaletteVisible} onClose={closeAiPalette} />
       </Suspense>

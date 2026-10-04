@@ -1,5 +1,8 @@
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback, useEffect, useState, type CSSProperties } from 'react';
-import { AI_PROVIDER_DEFINITIONS, providerNeedsKey, useAppStore, type AIProviderId, type ConverterModuleStatus, type SettingsTab } from '../../stores/appStore';
+import { AI_PROVIDER_DEFINITIONS, providerNeedsKey, useAppStore, type AIProviderId, type ConverterModuleStatus, type SettingsTab, type Settings } from '../../stores/appStore';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { FontFamilyPicker } from './FontFamilyPicker';
@@ -11,8 +14,13 @@ import {
   FONT_SIZE_RANGE_THUMB,
   contentFontStack,
   getRangeMarkerGeometry,
+  normalizeTypography,
+  typographyCssVariables,
+  UI_FONT_SIZE_MIN,
+  UI_FONT_SIZE_MAX,
 } from '../../utils/appearanceSettings';
 import { LANGUAGE_OPTIONS, normalizeLanguage } from '../../i18n';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import { THEMES } from '../../themes/apply';
 import type { AgentBackendId, AgentBackendStatus } from '../../types/agent';
 import { parseAIProviderProfiles } from '../../utils/aiProviderProfiles';
@@ -203,35 +211,10 @@ const fetchModelsFromApi = async (apiKey: string, apiEndpoint: string, provider?
   });
 };
 
+const SettingsNavIconNames = {"appearance":"palette","editor":"penLine","image":"image","export":"download","web_search":"webSearch","explorer":"folder","workflow":"workflow","converter":"fileConvert","cloud":"cloudSync","ai":"assistant","mcp":"plug"} as const satisfies Record<string, IconName>;
+
 function SettingsNavIcon({ type }: { type: SettingsTab }) {
-  if (type === 'appearance') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="3" fill="none" stroke="currentColor" strokeWidth="1.5" /><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.7 4.7l1.4 1.4M13.9 13.9l1.4 1.4M15.3 4.7l-1.4 1.4M6.1 13.9l-1.4 1.4" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'editor') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 2.5h7l3 3v12H5zM12 2.5V6h3M7.5 9h5M7.5 12h5M7.5 15h3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'image') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.8" y="3.5" width="14.4" height="13" rx="2" fill="none" stroke="currentColor" strokeWidth="1.5" /><circle cx="7" cy="7.7" r="1.3" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m4.5 14 3.4-3.5 2.4 2.1 2.3-2.7 2.9 4.1" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'export') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v9M6.7 8.7 10 12l3.3-3.3M4 13v3.5h12V13" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'web_search') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="10" cy="10" r="7.2" fill="none" stroke="currentColor" strokeWidth="1.5" /><path d="M2.8 10h14.4M10 2.8c2 2 2 12.4 0 14.4M10 2.8c-2 2-2 12.4 0 14.4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'explorer') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M1.8 4.5h5.3l1.5 1.5h8.6v9.5H1.8z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" strokeLinecap="round" /><path d="M4.5 13.5h7M4.5 10.5h5" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'workflow') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="2.5" y="3" width="6" height="5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" /><rect x="11.5" y="12" width="6" height="5" rx="1.2" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="M5.5 8v2.5h9V12M5.5 10.5h6" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'converter') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 3h7l3 3v11H5zM12 3v3h3M7.5 10h5M10 8v4M7.5 14h5" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'cloud') {
-    return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5.8 15.5h8.5a3 3 0 0 0 .6-5.95 5.1 5.1 0 0 0-10.1.9 3.25 3.25 0 0 0 1 5.05Z" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinejoin="round" /></svg>;
-  }
-  return <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 2.6 11.5 7l4.4 1.5-4.4 1.5-1.5 4.4L8.5 10 4.1 8.5 8.5 7zM15.5 13l.7 2 .8.3-.8.3-.7 2-.7-2-.8-.3.8-.3z" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinejoin="round" /></svg>;
+  return <AppIcon name={SettingsNavIconNames[type]} />;
 }
 
 interface McpClientStatus {
@@ -303,7 +286,7 @@ function McpIntegrationStatus() {
             return (
               <div key={client} className="mcp-client-row">
                 <span className="mcp-client-name">{label}</span>
-                {entry?.configured && !entry.path_mismatch && <span className="mcp-client-status ok">✓ 已安装</span>}
+                {entry?.configured && !entry.path_mismatch && <span className="mcp-client-status ok"><AppIcon name="check" size={14} /> 已安装</span>}
                 {entry?.path_mismatch && <span className="mcp-client-status warn">⚠ 路径不匹配</span>}
                 <button
                   type="button"
@@ -326,7 +309,7 @@ function McpIntegrationStatus() {
 }
 
 export function SettingsPanel() {
-  const { settings, settingsTab, saveSettings, setSettingsOpen } = useAppStore();
+  const { settings, settingsTab, saveSettings, setSettingsOpen } = useAppStore(useShallow(state => ({ settings: state.settings, settingsTab: state.settingsTab, saveSettings: state.saveSettings, setSettingsOpen: state.setSettingsOpen })));
   const [localSettings, setLocalSettings] = useState(settings);
   const [activeTab, setActiveTab] = useState<SettingsTab>(settingsTab);
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
@@ -357,19 +340,25 @@ export function SettingsPanel() {
     FONT_SIZE_RANGE_THUMB,
   );
 
-  const previewContentFontSize = (fontSize: number) => {
+  const previewContentFontSize = (fontSize: number, fontFamily = localSettings.appearance.font_family) => {
     document.documentElement.style.setProperty('--font-content-size', `${fontSize}px`);
     // 同时广播 fontFamily 变更：预览与 AI 面板是普通 DOM（沿用 --font-content
     // 变量，随设置实时更新），但 Monaco 的折行测量以 fontFamily 字符串为缓存
     // 键，必须用真实字体名重新测量，否则换字体后行文字会按旧字体宽度折行、
     // 溢出编辑框。拖动字号预览与更换字体共用此事件。
     window.dispatchEvent(new CustomEvent('zeditor-content-font-size-preview', {
-      detail: { fontSize, fontFamily: contentFontStack(localSettings.appearance.font_family) },
+      detail: { fontSize, fontFamily: contentFontStack(fontFamily) },
     }));
   };
 
+  const previewTypography = (appearance: Settings['appearance']) => {
+    for (const [key, value] of Object.entries(typographyCssVariables(appearance))) document.documentElement.style.setProperty(key, value);
+    window.dispatchEvent(new CustomEvent('zeditor-typography-preview', { detail: normalizeTypography(appearance) }));
+  };
+
   const handleCancel = () => {
-    previewContentFontSize(settings.appearance.font_size);
+    previewContentFontSize(settings.appearance.font_size, settings.appearance.font_family);
+    previewTypography(settings.appearance);
     setSettingsOpen(false);
   };
 
@@ -495,7 +484,7 @@ export function SettingsPanel() {
         <aside className="settings-navigation">
           <div className="settings-navigation-header">
             <button className="close-btn" onClick={handleCancel} aria-label="关闭设置">
-              <svg viewBox="0 0 20 20" aria-hidden="true"><path d="m5 5 10 10M15 5 5 15" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" /></svg>
+              <AppIcon name="close" size={20}  />
             </button>
             <span>设置</span>
           </div>
@@ -581,6 +570,14 @@ export function SettingsPanel() {
                   </button>
                   <small className="font-setting-notice">{fontNotice}</small>
                 </div>
+              </div>
+              <div className="setting-item">
+                <label>界面字号<small>菜单、侧栏、标签与设置面板；与正文大小独立</small></label>
+                <div className="typography-control"><input type="range" min={UI_FONT_SIZE_MIN} max={UI_FONT_SIZE_MAX} step="1" aria-label="界面字号" value={normalizeTypography(localSettings.appearance).uiFontSize} onChange={event => { const appearance = { ...localSettings.appearance, ui_font_size: Number(event.target.value) }; setLocalSettings({ ...localSettings, appearance }); previewTypography(appearance); }} /><output>{normalizeTypography(localSettings.appearance).uiFontSize} px</output></div>
+              </div>
+              <div className="setting-item">
+                <label>字间距<small>界面、编辑器、预览与 AI 正文，默认 0.6 px</small></label>
+                <div className="typography-control"><input type="range" min="0" max="5" step="0.1" aria-label="字间距" value={normalizeTypography(localSettings.appearance).letterSpacing} onChange={event => { const appearance = { ...localSettings.appearance, letter_spacing: Number(event.target.value) }; setLocalSettings({ ...localSettings, appearance }); previewTypography(appearance); }} /><output>{normalizeTypography(localSettings.appearance).letterSpacing.toFixed(1)} px</output></div>
               </div>
               <div className="setting-item font-setting-item">
                 <label>
@@ -735,7 +732,7 @@ export function SettingsPanel() {
               />
               <SettingToggle
                 label="启用内联弹窗"
-                description="点击链接、图片、公式、脚注或 Wiki 链接时，在原位弹出编辑窗：Ctrl+K 编辑链接，Ctrl+点击直接打开，公式带实时预览"
+                description={`点击链接、图片、公式、脚注或 Wiki 链接时，在原位弹出编辑窗：${formatShortcut('Ctrl+K')} 编辑链接，${formatShortcut('Ctrl+')}点击直接打开，公式带实时预览`}
                 checked={Boolean(localSettings.editor.inline_popups ?? true)}
                 onChange={(checked) => setLocalSettings({
                   ...localSettings,

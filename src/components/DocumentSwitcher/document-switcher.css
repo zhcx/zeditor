@@ -1,0 +1,56 @@
+.document-switcher-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 13000;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: clamp(60px, 14vh, 140px) 20px 20px;
+  background: rgb(10 15 25 / 42%);
+}
+
+.document-switcher {
+  width: min(560px, 100%);
+  max-height: calc(100vh - 100px);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border-strong);
+  border-radius: 16px;
+  background: var(--surface-raised);
+  color: var(--text-color);
+  font-family: var(--font-sans);
+  box-shadow: var(--ui-shadow-dialog);
+}
+
+.document-switcher-header { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 22px 22px 16px; }
+.document-switcher-header h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.document-switcher-header p { margin: 6px 0 0; font-size: 12px; color: var(--text-secondary); }
+.document-switcher-close { width: 32px; height: 32px; border: 0; border-radius: 8px; background: transparent; color: var(--text-secondary); font-size: 22px; cursor: pointer; }
+.document-switcher-close:hover { background: var(--bg-hover); color: var(--text-color); }
+.document-switcher-search { display: flex; align-items: center; gap: 10px; margin: 0 20px 12px; padding: 0 12px; height: 42px; flex-shrink: 0; border: 1px solid var(--border-strong); border-radius: 9px; background: var(--bg-input); }
+.document-switcher-search:focus-within { border-color: var(--accent-color); box-shadow: 0 0 0 3px var(--accent-soft); }
+.document-switcher-search svg { width: 18px; height: 18px; flex-shrink: 0; fill: none; stroke: var(--text-muted); stroke-width: 1.5; }
+.document-switcher-search input { flex: 1; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; font: inherit; font-size: 14px; color: var(--text-color); }
+.document-switcher-search input::placeholder { color: var(--text-muted); }
+.document-switcher-results { overflow: auto; padding: 0 10px 10px; min-height: 0; max-height: min(380px, 45vh); }
+.document-switcher-item { display: flex; align-items: center; gap: 12px; width: 100%; min-height: 64px; padding: 10px 12px; border: 1px solid transparent; border-radius: 9px; background: transparent; color: var(--text-color); text-align: left; cursor: pointer; }
+.document-switcher-item[aria-selected="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent-color) 24%, transparent); }
+.document-switcher-item > svg { flex-shrink: 0; width: 20px; height: 20px; }
+.document-switcher-document { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 5px; }
+.document-switcher-document strong { font-size: 13px; font-weight: 500; }
+.document-switcher-document small { font-size: 11px; color: var(--text-secondary); }
+.document-switcher-document :is(strong, small) { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.document-switcher-dirty { width: 6px; height: 6px; border-radius: 50%; background: var(--accent-color); flex-shrink: 0; }
+.document-switcher-current { padding: 3px 7px; border-radius: 5px; color: var(--text-secondary); font-size: 11px; background: var(--bg-hover); white-space: nowrap; }
+.document-switcher-empty { padding: 40px 20px; text-align: center; font-size: 14px; color: var(--text-secondary); }
+.document-switcher-empty small { display: block; margin-top: 9px; font-size: 12px; color: var(--text-muted); }
+.document-switcher-footer { display: flex; justify-content: space-between; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--text-secondary); }
+.document-switcher-footer kbd { padding: 2px 4px; margin-right: 3px; border: 1px solid var(--border-soft); border-radius: 4px; font-family: inherit; background: var(--bg-hover); }
+.document-switcher button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+
+@media (max-width: 600px) {
+  .document-switcher-overlay { padding: 56px 12px 12px; }
+  .document-switcher-header { padding: 18px 16px 14px; }
+  .document-switcher-footer { padding-inline: 16px; }
+}

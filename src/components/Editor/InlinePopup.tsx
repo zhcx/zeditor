@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import katex from 'katex';
@@ -152,7 +153,7 @@ export function InlinePopup({
     >
       <div className="inline-popup-header">
         <span className="inline-popup-kind">{t(KIND_LABELS[target.kind], language)}</span>
-        <button type="button" className="inline-popup-close" aria-label={t('关闭', language)} onClick={onClose}>✕</button>
+        <button type="button" className="inline-popup-close" aria-label={t('关闭', language)} onClick={onClose}><AppIcon name="close" size={16} /></button>
       </div>
 
       <div className="inline-popup-fields">

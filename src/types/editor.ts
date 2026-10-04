@@ -47,6 +47,8 @@ export interface EditorController {
   };
   dispatch: (spec: EditorDispatchSpec) => void;
   getValue: () => string;
+  /** 重新按文件编码读取时替换内容并清空撤销历史。 */
+  resetValue?: (content: string) => void;
   getSelection: () => EditorSelectionRange;
   getText: (from: number, to: number) => string;
   replaceRange: (from: number, to: number, text: string, selection?: { from: number; to: number }) => void;

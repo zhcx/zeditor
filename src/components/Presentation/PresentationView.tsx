@@ -1,3 +1,5 @@
+import { useShallow } from 'zustand/react/shallow';
+import { AppIcon } from '../Icons/AppIcon';
 import { useEffect, useRef, useCallback } from 'react';
 import Reveal, { type RevealApi } from 'reveal.js';
 import 'reveal.js/reveal.css';
@@ -71,7 +73,7 @@ export function PresentationView({ onExit }: PresentationViewProps) {
   const revealRef = useRef<RevealApi | null>(null);
   const mermaidSequenceRef = useRef(0);
   const onExitRef = useRef(onExit);
-  const { content } = useAppStore();
+  const { content } = useAppStore(useShallow(state => ({ content: state.content })));
 
   // 保持最新的退出回调，避免父组件重渲染时演示 deck 被反复重建
   useEffect(() => {
@@ -254,7 +256,7 @@ export function PresentationView({ onExit }: PresentationViewProps) {
         title="退出演示模式 (Esc)"
         aria-label="退出演示模式"
       >
-        ✕ 退出
+        <AppIcon name="close" size={16} /> 退出
       </button>
       <div className="reveal" ref={deckRef}>
         <div className="slides" />

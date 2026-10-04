@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 
@@ -112,7 +113,7 @@ export function ToolbarMenu({ label, title, items }: ToolbarMenuProps) {
         onClick={() => (open ? close() : setOpen(true))}
       >
         {label}
-        <span className="toolbar-menu-caret" aria-hidden="true">▾</span>
+        <span className="toolbar-menu-caret" aria-hidden="true"><AppIcon name="chevronDown" size={14} /></span>
       </button>
       {open && createPortal(
         <div

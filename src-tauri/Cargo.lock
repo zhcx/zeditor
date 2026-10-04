@@ -6124,11 +6124,12 @@ dependencies = [
 
 [[package]]
 name = "zeditor"
-version = "0.5.7"
+version = "0.5.8"
 dependencies = [
  "base64 0.22.1",
  "chrono",
  "ed25519-dalek",
+ "encoding_rs",
  "font-kit",
  "futures",
  "futures-util",

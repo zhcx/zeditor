@@ -1,0 +1,23 @@
+.encoding-overlay { position: fixed; inset: 0; z-index: 13000; display: grid; place-items: center; padding: 20px; background: rgb(10 15 25 / 42%); }
+.encoding-dialog { display: flex; flex-direction: column; width: min(500px, 100%); max-height: calc(100vh - 48px); overflow: hidden; border: 1px solid var(--border-strong); border-radius: 14px; background: var(--surface-raised); color: var(--text-color); font-family: var(--font-sans); box-shadow: var(--ui-shadow-dialog); }
+.encoding-dialog header { display: flex; justify-content: space-between; align-items: center; gap: 16px; padding: 20px 22px 12px; }
+.encoding-dialog h2 { margin: 0; font-size: 17px; font-weight: 600; }
+.encoding-dialog header p { margin: 6px 0 0; color: var(--text-secondary); font-size: 12px; max-width: 360px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.encoding-dialog button { font-family: inherit; cursor: pointer; }
+.encoding-dialog header > button { width: 30px; height: 30px; border: 0; border-radius: 6px; background: transparent; color: var(--text-secondary); }
+.encoding-modes { display: flex; gap: 4px; margin: 0 20px; padding: 4px; border-radius: 8px; background: var(--bg-hover); }
+.encoding-modes button { flex: 1; min-height: 32px; border: 0; border-radius: 5px; background: transparent; color: var(--text-secondary); font-size: 12px; }
+.encoding-modes button[aria-pressed="true"] { background: var(--surface-raised); color: var(--accent-color); }
+.encoding-description { padding: 0 22px; margin: 12px 0; font-size: 12px; line-height: 1.6; color: var(--text-secondary); }
+.encoding-options { overflow: auto; padding: 0 12px 12px; min-height: 0; }
+.encoding-options button { display: flex; justify-content: space-between; align-items: center; width: 100%; padding: 10px 12px; border: 1px solid transparent; border-radius: 7px; background: transparent; color: var(--text-color); text-align: left; }
+.encoding-options button[aria-selected="true"] { background: var(--accent-soft); color: var(--accent-color); }
+.encoding-options strong, .encoding-options small { display: block; }
+.encoding-options strong { font-size: 13px; font-weight: 500; }
+.encoding-options small { margin-top: 4px; font-size: 11px; color: var(--text-secondary); }
+.encoding-error { margin: 0 22px 12px; color: var(--danger-color); font-size: 12px; line-height: 1.6; }
+.encoding-dialog footer { display: flex; justify-content: flex-end; gap: 8px; padding: 14px 20px; border-top: 1px solid var(--border-soft); }
+.encoding-dialog footer button { min-height: 34px; padding: 0 14px; border: 1px solid var(--border-soft); border-radius: 7px; background: transparent; color: var(--text-color); }
+.encoding-dialog footer .encoding-confirm { background: var(--accent-color); border-color: transparent; color: white; }
+.encoding-dialog button:disabled { opacity: .45; cursor: not-allowed; }
+.encoding-dialog button:focus-visible { outline: 2px solid var(--accent-color); outline-offset: -2px; }

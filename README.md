@@ -14,7 +14,7 @@
 
 **完整的图文使用教程**：安装上手 · 编辑与格式 · 图表渲染 · AI 助手 · 本地 Agent · MCP 集成 · 文档转换 · 多格式导出 · 云备份 · 快捷键与故障排除
 
-<img src="docs/banner.png" alt="Zeditor" width="900">
+<img src="docs/banner.png" alt="Zeditor：现代 Markdown 编辑器，支持本地 Agent 与 AI 助手" width="900">
 
 </div>
 
@@ -179,35 +179,34 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.5.7 更新
+## v0.5.8 更新
 
 ### 更新日志
 
-- **AI 服务商选择修正**：AI 对话框不再默认显示从未配置密钥的 OpenAI，改为落到真正生效的服务商；只配置一个服务商时隐藏下拉菜单、只读显示其名称，配置多个时才提供下拉选择。配套修复「拿 A 服务商的密钥去打 B 服务商默认端点」导致请求全部失败的问题。
-- **校对失败不再被误报为「未发现问题」**：分块失败时透出真实原因（如 `API错误 (401)` / `429`），专为限流设计的顺序回退兜底恢复生效；部分分块成功时直接返回已有结果，不再要求重跑整篇。
-- **校对速度优化**：并发上限 4 → 8（7 块文档从 2 波降到 1 波），连接池复用避免反复 TLS 握手，顺序回退仅在失败后等待；并修复中文分块因 `max_tokens` 估算偏低被静默截断、白跑一整轮生成的问题。
-- **失效系统代理自动绕行**：系统代理未运行时（Clash / V2Ray 退出后环境变量残留），AI 请求会自动切换直连并给出可诊断报错，不再整篇失败于一句 `error sending request`。
-- **本地 Agent 总开关与每后端启用停用**：新增「AI 未配置时回退本地 AI Agent」总开关；Claude Code / Codex / OpenCode / Pi 可各自停用；AI 助手关闭时聊天栏只显示 Agent 运行时；启动预热使首次调用零等待。
-- **界面：日语 / 韩语支持**：语言库新增日本語 / 한국어，系统语言自动检测，菜单栏「功能」新增语言子菜单，切换即时生效。
-- **表格列宽拖动修复**：修正列数计算错误导致拖不到真实列的问题，每列一个右边界手柄，最右侧边框也能拖动。
+- **打开旧文件**：新增 UTF-8、UTF-16、GBK、GB18030、Big5、Shift-JIS、Windows-1252 等 11 种编码。打开时可选编码，保存会沿用文档编码；无法表示的字符会阻止写入，避免损坏原文。
+- **调整界面排版**：在「设置 → 外观」独立调整界面字号与字间距。字号 11–20 px，字间距默认 0.6 px、可调 0–5 px；编辑器、预览和 AI 正文即时同步预览。
+- **让操作入口更清楚**：菜单、侧栏、工具栏和弹窗使用统一几何图标；AI 助手恢复原来的双星图标。应用图标换成蓝底白色 Z，并同步用于安装包与标题栏。
+- **更快启动与更流畅写作**：编辑器内核改为延迟加载，按需加载大型组件，精简无关状态订阅与重复文件读取；长文统计与资源缓存减少开销，后台操作不会误插入当前文档。
+- **加强文件保护**：原子保存避免写入中断截断原文件；异步导入和转换编码前会核对文档状态；云端历史恢复保留原始字节。
+- **改善日常操作**：可用 `Ctrl/Cmd+P` 搜索已打开文档，标签支持键盘切换和未保存关闭保护，窄窗口工具栏会整理到更多菜单中。
 
-### v0.5.7 平台安装包对照
+### v0.5.8 平台安装包对照
 
-> 以下链接指向 v0.5.7 Release 资产；安装包由 GitHub Actions 根据 v0.5.7 标签源码构建。
+> 以下链接指向 v0.5.8 Release 资产；安装包由 GitHub Actions 根据 v0.5.8 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor-0.5.7-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.7/Zeditor_0.5.7_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor-0.5.8-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.7.md`](docs/releases/v0.5.7.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.8.md`](docs/releases/v0.5.8.md)。
 
 ## Contributors
 

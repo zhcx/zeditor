@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { workflowEdgePath, type WorkflowGraph, type WorkflowGraphNode } from '../../utils/workflowGraph';
 import { displayWidth } from '../../utils/markdownTable.ts';
@@ -232,7 +233,7 @@ export function WorkflowCanvas({ graph, selectedJobId, onSelectJob, diagnostics,
         <div className="workflow-canvas-zoom">
           <button type="button" onClick={() => applyScale(scale - SCALE_STEP)} aria-label="缩小">−</button>
           <span>{Math.round(scale * 100)}%</span>
-          <button type="button" onClick={() => applyScale(scale + SCALE_STEP)} aria-label="放大">+</button>
+          <button type="button" onClick={() => applyScale(scale + SCALE_STEP)} aria-label="放大"><AppIcon name="plus" size={16} /></button>
           <button type="button" onClick={() => applyScale(1)} aria-label="重置缩放">重置</button>
         </div>
       </div>

@@ -22,11 +22,13 @@ test('desktop close requests inspect all tabs and only destroy after the close g
 
 test('closing a dirty tab uses the themed dialog instead of a native ask dialog', async () => {
   const source = await readFile(new URL('../src/components/TabsBar/TabsBar.tsx', import.meta.url), 'utf8');
+  const hook = await readFile(new URL('../src/hooks/useTabClose.ts', import.meta.url), 'utf8');
 
   assert.doesNotMatch(source, /import \{ ask,/);
   assert.doesNotMatch(source, /await ask\(/);
   assert.match(source, /<UnsavedChangesDialog/);
-  assert.match(source, /saveTab\(tab\.id,/);
+  assert.match(source, /useTabClose\(\)/);
+  assert.match(hook, /saveTab\(tab\.id,/);
 });
 
 test('tab-specific save persists the selected tab content', async () => {

@@ -1,4 +1,7 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
+import { useShallow } from 'zustand/react/shallow';
+import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { confirm as confirmDialog, open } from '@tauri-apps/plugin-dialog';
 import { useAppStore, type TimelineEntry } from '../../stores/appStore';
@@ -17,6 +20,9 @@ import {
 import { refreshWorkspaceFolderTree, replaceNodeChildren, type FileNode } from '../../utils/workspaceTree';
 import { deleteDocument } from '../../utils/documentSafety';
 import { FileTypeIcon } from './FileTypeIcon';
+import { useTabClose } from '../../hooks/useTabClose';
+
+const UnsavedChangesDialog = lazy(() => import('../UnsavedChangesDialog/UnsavedChangesDialog').then(m => ({ default: m.UnsavedChangesDialog })));
 
 interface WorkspaceFolder {
   name: string;
@@ -137,39 +143,14 @@ const normalizeNode = (node: RawFileNode): FileNode => ({
   children: node.children?.map(normalizeNode),
 });
 
-function Chevron({ expanded }: { expanded: boolean }) {
-  return <span className={`explorer-chevron ${expanded ? 'expanded' : ''}`} aria-hidden="true" />;
-}
+function Chevron({ expanded }: { expanded: boolean }) { return <span className={`explorer-chevron ${expanded ? "expanded" : ""}`} aria-hidden="true"><AppIcon name="chevronRight" size={14} /></span>; }
 
-function FolderIcon({ open: isOpen = false }: { open?: boolean }) {
-  return <span className={`explorer-icon folder-icon ${isOpen ? 'open' : ''}`} aria-hidden="true" />;
-}
+function FolderIcon({ open: isOpen = false }: { open?: boolean }) { return <AppIcon name={isOpen ? "folderOpen" : "folder"} className={`explorer-icon folder-icon ${isOpen ? "open" : ""}`} size={18} />; }
+
+const ExplorerActionIconNames = {"newFile":"filePlus","openFile":"fileOpen","openFolder":"folderOpen","expandAll":"expand","collapseAll":"collapse"} as const satisfies Record<string, IconName>;
 
 function ExplorerActionIcon({ type }: { type: 'newFile' | 'openFile' | 'openFolder' | 'expandAll' | 'collapseAll' }) {
-  if (type === 'newFile') {
-    return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M8 3v10M3 8h10" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'openFile') {
-    return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.8h5l3 3v9.4H4zM9 1.8v3.3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'expandAll') {
-    return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 2.2h11.6v11.6H2.2zM5.8 6.6 8 8.8l2.2-2.2" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'collapseAll') {
-    return <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.2 2.2h11.6v11.6H2.2zM5.8 9.4 8 7.2l2.2 2.2" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  return (
-    <svg className="explorer-action-icon" viewBox="0 0 16 16" aria-hidden="true">
-      <path
-        d="M1.75 4.25h4.1l1.4 1.5h7v6.5H1.75z"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="1.35"
-        strokeLinecap="round"
-        strokeLinejoin="round"
-      />
-    </svg>
-  );
+  return <AppIcon name={ExplorerActionIconNames[type]} className={`explorer-action-icon explorer-action-icon-${type}`} />;
 }
 
 function FileIcon({ filename }: { filename: string }) {
@@ -177,7 +158,7 @@ function FileIcon({ filename }: { filename: string }) {
 }
 
 function SearchSidebar({ style }: SidebarProps) {
-  const { openFile } = useAppStore();
+  const { openFile } = useAppStore(useShallow(state => ({ openFile: state.openFile })));
   const [query, setQuery] = useState('');
   const [replaceWith, setReplaceWith] = useState('');
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -215,9 +196,13 @@ function SearchSidebar({ style }: SidebarProps) {
   };
 
   const openResult = async (result: typeof results[number]) => {
-    await openFile(result.path);
+    try {
+      await openFile(result.path);
+    } catch { return; /* store 已显示打开失败原因。 */ }
     window.setTimeout(() => {
-      const view = useAppStore.getState().editorView; if (!view) return;
+      const current = useAppStore.getState();
+      const view = current.editorView;
+      if (!view || current.currentFile !== result.path) return;
       const line = view.state.doc.line(Math.min(result.line_number, view.state.doc.lines));
       view.dispatch({ selection: { anchor: Math.min(line.from + result.column - 1, line.to) }, scrollIntoView: true }); view.focus();
     }, 0);
@@ -270,6 +255,7 @@ export function Sidebar({ style, view = 'explorer' }: SidebarProps) {
 }
 
 function ExplorerSidebar({ style }: SidebarProps) {
+  const { requestTabClose, pendingCloseTab, saving, resolveTabClose } = useTabClose();
   const {
     sidebarVisible,
     outlineVisible,
@@ -285,7 +271,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
     restoreTimelineEntry,
     deleteTimelineEntry,
     cleanupTimeline,
-  } = useAppStore();
+  } = useAppStore(useShallow(state => ({ sidebarVisible: state.sidebarVisible, outlineVisible: state.outlineVisible, setOutlineVisible: state.setOutlineVisible, content: state.content, settings: state.settings, openFile: state.openFile, convertDocument: state.convertDocument, tabs: state.tabs, activeTabId: state.activeTabId, currentFile: state.currentFile, timeline: state.timeline, restoreTimelineEntry: state.restoreTimelineEntry, deleteTimelineEntry: state.deleteTimelineEntry, cleanupTimeline: state.cleanupTimeline })));
   const [workspaceFolders, setWorkspaceFolders] = useState<WorkspaceFolder[]>([]);
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set([OPEN_EDITORS_ID]));
   const [loadedFolders, setLoadedFolders] = useState<Set<string>>(new Set());
@@ -305,6 +291,8 @@ function ExplorerSidebar({ style }: SidebarProps) {
   const recentlyRemovedRootsRef = useRef<Set<string>>(new Set());
   const activeTimeline = activeTabId ? timeline[activeTabId] || [] : [];
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
+  const activePath = activeTab?.path;
+  const activeTitle = activeTab?.title;
   const outlineContent = selectActiveDocumentContent(tabs, activeTabId, content);
   const headings = useMemo(() => parseMarkdownHeadings(outlineContent), [outlineContent]);
   const hasOutlineHeadings = headings.length > 0;
@@ -549,11 +537,12 @@ function ExplorerSidebar({ style }: SidebarProps) {
   }, [loadHistory]);
 
   useEffect(() => {
-    const activeTab = tabs.find(tab => tab.id === activeTabId);
-    if (!activeTab?.path) return;
-    void invoke('update_recent_file', { path: activeTab.path, title: activeTab.title }).catch(() => undefined);
-    queueMicrotask(() => addToHistory(activeTab.path as string, activeTab.title, 'file'));
-  }, [activeTabId, tabs, addToHistory]);
+    if (!activePath || !activeTitle) return;
+    if (isTauriRuntime()) {
+      void invoke('update_recent_file', { path: activePath, title: activeTitle }).catch(() => undefined);
+    }
+    queueMicrotask(() => addToHistory(activePath, activeTitle, 'file'));
+  }, [activeTabId, activePath, activeTitle, addToHistory]);
 
   useEffect(() => {
     if (!currentFile || currentFile.startsWith('web://')) return;
@@ -857,7 +846,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
     if (node.file && isDirectOpenFile(node.name)) {
       useAppStore.getState().addTab({ path: node.path, title: node.name, content: await node.file.text(), modified: false });
     } else if (isDirectOpenFile(node.name)) {
-      await openFile(node.path);
+      try { await openFile(node.path); } catch { /* store 已显示打开失败原因。 */ }
     } else if (node.file) {
       // Browser folders have no native file path, so conversion must run in the
       // desktop application where the optional Zeditor converter module is available.
@@ -1000,8 +989,8 @@ function ExplorerSidebar({ style }: SidebarProps) {
                       className="explorer-close"
                       role="button"
                       aria-label="关闭编辑器"
-                      onClick={event => { event.stopPropagation(); useAppStore.getState().closeTab(tab.id); }}
-                    >×</span>
+                      onClick={event => { event.stopPropagation(); requestTabClose(tab.id); }}
+                    ><AppIcon name="close" size={16} /></span>
                   </button>
                 )) : <div className="explorer-empty-state">没有打开的编辑器</div>}
               </div>
@@ -1043,7 +1032,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
                           aria-label="关闭文件夹"
                           title="关闭文件夹"
                           onClick={event => { event.stopPropagation(); removeWorkspaceFolder(folder.path); }}
-                        >×</span>
+                        ><AppIcon name="close" size={16} /></span>
                       </button>
                       {expanded && <div role="group" className="explorer-list">{renderNodes(folder.tree)}</div>}
                     </div>
@@ -1054,7 +1043,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
               <div className="workspace-empty-state">
                 <p>尚未打开文件夹。</p>
                 <button className="open-workspace-button" onClick={() => void handleOpenFolder()}>打开文件夹</button>
-                <p className="workspace-hint">可一次选择多个文件夹，也可再次点击文件夹按钮继续添加。</p>
+                <p className="workspace-hint">可同时打开多个文件夹。</p>
               </div>
             ))}
           </section>
@@ -1098,7 +1087,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
                     style={{ paddingLeft: 12 }}
                     onClick={() => {
                       if (entry.type === 'file') {
-                        void openFile(entry.path);
+                        void openFile(entry.path).catch(() => undefined);
                       } else {
                         if (!workspaceFolders.some(f => f.path === entry.path)) {
                           void addWorkspaceFolder(entry.path);
@@ -1170,7 +1159,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
                     <span className="timeline-row-actions" aria-label="版本操作">
                       <button onClick={(event) => { event.stopPropagation(); setTimelineDialog({ entry, mode: 'diff' }); }} title="与当前内容对比" aria-label="与当前内容对比">≠</button>
                       <button onClick={(event) => { event.stopPropagation(); if (activeTabId) restoreTimelineEntry(activeTabId, entry.id); }} title="恢复此版本" aria-label="恢复此版本">↶</button>
-                      <button onClick={(event) => { event.stopPropagation(); if (activeTabId) deleteTimelineEntry(activeTabId, entry.id); }} title="删除此记录" aria-label="删除此记录">×</button>
+                      <button onClick={(event) => { event.stopPropagation(); if (activeTabId) deleteTimelineEntry(activeTabId, entry.id); }} title="删除此记录" aria-label="删除此记录"><AppIcon name="close" size={16} /></button>
                     </span>
                   </div>
                 )) : <div className="explorer-empty-state">编辑后将在此保留版本记录</div>}
@@ -1199,7 +1188,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
                 <strong>历史版本</strong>
                 <small>{new Date(timelineDialog.entry.timestamp).toLocaleString()} · {timelineDialog.entry.content.length} 字符</small>
               </div>
-              <button onClick={() => setTimelineDialog(null)} title="关闭" aria-label="关闭">×</button>
+              <button onClick={() => setTimelineDialog(null)} title="关闭" aria-label="关闭"><AppIcon name="close" size={16} /></button>
             </header>
             <div className="timeline-version-operation">{timelineDialog.entry.operation || timelineDialog.entry.label}</div>
             <div className="timeline-version-tabs">
@@ -1347,6 +1336,16 @@ function ExplorerSidebar({ style }: SidebarProps) {
         </div>
       )}
 
+      {pendingCloseTab && (
+        <Suspense fallback={null}>
+          <UnsavedChangesDialog
+            tabs={[pendingCloseTab]}
+            scope="tab"
+            busy={saving}
+            onAction={action => { void resolveTabClose(action); }}
+          />
+        </Suspense>
+      )}
       {creating && (
         <div className="inline-rename-overlay" onClick={() => setCreating(null)}>
           <div className="inline-rename-dialog" onClick={event => event.stopPropagation()}>

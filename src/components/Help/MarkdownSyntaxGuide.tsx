@@ -1,4 +1,6 @@
 import { useMemo, useState } from 'react';
+import { AppIcon } from '../Icons/AppIcon';
+import { formatShortcut } from '../../utils/platformShortcuts';
 
 interface SyntaxItem {
   id: string;
@@ -102,7 +104,7 @@ export function MarkdownSyntaxGuide() {
       <main className="syntax-guide-main">
         <div className="syntax-guide-toolbar">
           <label className="syntax-guide-search">
-            <span aria-hidden="true">⌕</span>
+            <span aria-hidden="true"><AppIcon name="search" size={18} /></span>
             <input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索语法，例如：表格、流程图、图片" aria-label="搜索 Markdown 语法" />
           </label>
           <button className="syntax-copy-all" onClick={() => void copy('all', fullExample)}>{copiedId === 'all' ? '已复制完整示例' : '复制完整示例'}</button>
@@ -120,13 +122,13 @@ export function MarkdownSyntaxGuide() {
                 <div><span>{item.group}</span><h4>{item.title}</h4></div>
                 <button onClick={() => void copy(item.id, item.code)} aria-label={`复制${item.title}语法`}>{copiedId === item.id ? '已复制' : '复制语法'}</button>
               </div>
-              <p className="syntax-card-summary">{item.summary}</p>
+              <p className="syntax-card-summary">{formatShortcut(item.summary)}</p>
               <div className="syntax-card-example">
                 <div className="syntax-code-label">MARKDOWN</div>
                 <pre><code>{item.code}</code></pre>
               </div>
-              <div className="syntax-card-result"><strong>你会看到</strong><span>{item.result}</span></div>
-              {item.tip && <div className="syntax-card-tip"><strong>提示</strong><span>{item.tip}</span></div>}
+              <div className="syntax-card-result"><strong>你会看到</strong><span>{formatShortcut(item.result)}</span></div>
+              {item.tip && <div className="syntax-card-tip"><strong>提示</strong><span>{formatShortcut(item.tip)}</span></div>}
             </section>
           ))}
           {visibleItems.length === 0 && <div className="syntax-guide-empty"><strong>没有找到相关语法</strong><span>试试“标题”“列表”“图片”或“Mermaid”。</span></div>}

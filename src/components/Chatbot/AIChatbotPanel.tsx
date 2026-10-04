@@ -1,3 +1,6 @@
+import { AppIcon } from '../Icons/AppIcon';
+import type { IconName } from '../Icons/iconGeometry';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useState, useCallback, useMemo, type PointerEvent as ReactPointerEvent } from 'react';
 import { useAIStore, type ChatMessage, type ReasoningEffort, type WorkspaceContextPayload } from '../../stores/aiStore';
 import { AI_PROVIDER_DEFINITIONS, useAppStore, type AIProviderId } from '../../stores/appStore';
@@ -30,51 +33,16 @@ interface PendingAttachment {
   content?: string;
 }
 
+const ComposerIconNames = {"attach":"paperclip","document":"fileText","image":"image","chat":"assistant","send":"send","stop":"stop","search":"webSearch","reasoning":"brain","chevronDown":"chevronDown","newChat":"chatPlus","history":"history"} as const satisfies Record<string, IconName>;
+
 function ComposerIcon({ type }: { type: 'attach' | 'document' | 'image' | 'chat' | 'send' | 'stop' | 'search' | 'reasoning' | 'chevronDown' | 'newChat' | 'history' }) {
-  if (type === 'attach') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="M5.2 8.8 9.7 4.3a2.35 2.35 0 1 1 3.3 3.3l-5.4 5.4a3.6 3.6 0 0 1-5.1-5.1l5-5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'document') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="M4 1.8h5l3 3v9.4H4zM9 1.8v3.3h3M6 8h4M6 10.5h4" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'image') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><rect x="1.8" y="2.5" width="12.4" height="11" rx="1" fill="none" stroke="currentColor" strokeWidth="1.25" /><circle cx="5.2" cy="6" r="1.1" fill="none" stroke="currentColor" strokeWidth="1.1" /><path d="m2.8 12 3.4-3.3 2.2 2 2.2-2.4 2.7 2.8" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'chat') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="M2 2.5h12v8H7l-3.5 3v-3H2z" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinejoin="round" /><path d="M5 6.5h6" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'send') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="m2.2 2.5 11.2 5.1-11.2 5.1 2-5.1z" fill="currentColor" /><path d="M4.2 7.6h8.2" fill="none" stroke="var(--bg-elevated)" strokeWidth="1.15" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'stop') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" /></svg>;
-  }
-  if (type === 'search') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><circle cx="7" cy="7" r="4.2" fill="none" stroke="currentColor" strokeWidth="1.4" /><path d="m10.2 10.2 3.2 3.2" fill="none" stroke="currentColor" strokeWidth="1.4" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'reasoning') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="M2.3 10.9a5.7 5.7 0 1 1 11.4 0" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /><path d="M8 10.8 10.65 7.9M4.4 11.05h.01M11.6 11.05h.01" fill="none" stroke="currentColor" strokeWidth="1.35" strokeLinecap="round" strokeLinejoin="round" /><path d="M3.5 13.1h9" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /></svg>;
-  }
-  if (type === 'newChat') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="M2.4 2.8h8.7v7H6.4l-2.7 2.3V9.8H2.4zM12.2 5.2v5.6M9.4 8h5.6" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  if (type === 'history') {
-    return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="M3.1 4.5A5.5 5.5 0 1 1 2.5 8M3.1 4.5V1.8M3.1 4.5h2.7M8 4.7v3.6l2.4 1.4" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" strokeLinejoin="round" /></svg>;
-  }
-  return <svg className={`composer-icon composer-icon-${type}`} viewBox="0 0 16 16" aria-hidden="true"><path d="m4 6 4 4 4-4" fill="none" stroke="currentColor" strokeWidth="1.45" strokeLinecap="round" strokeLinejoin="round" /></svg>;
+  return <AppIcon name={ComposerIconNames[type]} className={`composer-icon composer-icon-${type}`} />;
 }
 
+const ReasoningOptionIconNames = {"off":"ban","fast":"bolt","balanced":"sliders","deep":"brain"} as const satisfies Record<string, IconName>;
+
 function ReasoningOptionIcon({ effort }: { effort: ReasoningEffort }) {
-  if (effort === 'off') {
-    return <svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="5.2" fill="none" stroke="currentColor" strokeWidth="1.2" /><path d="m4.3 4.3 7.4 7.4" fill="none" stroke="currentColor" strokeWidth="1.3" strokeLinecap="round" /></svg>;
-  }
-  if (effort === 'fast') {
-    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="m9.45 1.8-4.55 6h3.15L6.9 14.2l4.6-6H8.3z" fill="currentColor" /></svg>;
-  }
-  if (effort === 'balanced') {
-    return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M3 5.2h10M3 8h10M3 10.8h10" fill="none" stroke="currentColor" strokeWidth="1.25" strokeLinecap="round" /><path d="M5 3.4v9.2M11 3.4v9.2" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" opacity=".65" /></svg>;
-  }
-  return <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4.1 7.4c-.55-1.65.55-3.35 2.2-3.45.52-1.3 2.86-1.36 3.4 0 1.8-.05 2.8 1.95 1.8 3.35 1.12.72.72 2.53-.5 2.7-.35 1.45-2.45 1.85-3.2.55-1.28.75-2.9-.3-2.45-1.7-1.05-.22-1.55-.9-1.25-1.45Z" fill="none" stroke="currentColor" strokeWidth="1.05" strokeLinejoin="round" /><path d="M6.7 6.1v1.1M9.4 5.9v1.15M7.9 8.6v1.15" fill="none" stroke="currentColor" strokeWidth="1" strokeLinecap="round" /></svg>;
+  return <AppIcon name={ReasoningOptionIconNames[effort]} />;
 }
 
 export function AIChatbotPanel() {
@@ -112,9 +80,9 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
     linkedDocument,
     setLinkedDocument,
     toggleLinkDocument,
-  } = useAIStore();
+  } = useAIStore(useShallow(state => ({ chatbotMessages: state.chatbotMessages, chatbotConversations: state.chatbotConversations, activeChatConversationId: state.activeChatConversationId, chatbotLoading: state.chatbotLoading, stopChatMessage: state.stopChatMessage, setChatbotVisible: state.setChatbotVisible, sendChatMessage: state.sendChatMessage, clearChatHistory: state.clearChatHistory, newChatConversation: state.newChatConversation, selectChatConversation: state.selectChatConversation, reasoningEffort: state.reasoningEffort, setReasoningEffort: state.setReasoningEffort, linkedDocument: state.linkedDocument, setLinkedDocument: state.setLinkedDocument, toggleLinkDocument: state.toggleLinkDocument })));
 
-  const { settings, activeTabId, tabs, content, currentFile } = useAppStore();
+  const { settings, activeTabId, tabs, content, currentFile } = useAppStore(useShallow(state => ({ settings: state.settings, activeTabId: state.activeTabId, tabs: state.tabs, content: state.content, currentFile: state.currentFile })));
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const automaticContext = useMemo(() => buildAutomaticEditorContext({
     id: activeTabId,
@@ -464,7 +432,7 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
               )}
             </div>
             <button className="chatbot-close-btn" onClick={() => setChatbotVisible(false)} title="关闭" aria-label="关闭 AI 对话">
-              <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+              <AppIcon name="close" size={20}  />
             </button>
           </div>
         </div>
@@ -546,7 +514,7 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
             <div key={i} className="chatbot-attachment-chip">
               <ComposerIcon type={att.type === 'image' ? 'image' : 'document'} />
               <span className="chatbot-attachment-name">{att.name}</span>
-              <button className="chatbot-attachment-remove" onClick={() => removeAttachment(i)}>×</button>
+              <button className="chatbot-attachment-remove" onClick={() => removeAttachment(i)} aria-label="关闭"><AppIcon name="close" size={16} /></button>
             </div>
           ))}
         </div>
@@ -556,7 +524,7 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
         <div className="chatbot-linked-doc-bar">
           <span className="chatbot-linked-doc-icon"><ComposerIcon type="document" /></span>
           <span className="chatbot-linked-doc-name">{linkedDocument.title}</span>
-          <button className="chatbot-linked-doc-unlink" onClick={toggleCurrentDocumentLink} title="取消关联">×</button>
+          <button className="chatbot-linked-doc-unlink" onClick={toggleCurrentDocumentLink} title="取消关联"><AppIcon name="close" size={16} /></button>
         </div>
       )}
 
@@ -623,7 +591,7 @@ function ApiChatPanel({ onRuntimeChange }: { onRuntimeChange: (runtime: AIRuntim
                     <span className="reasoning-menu-desc">
                       {effort === 'off' ? '不额外设置' : effort === 'fast' ? '快速响应' : effort === 'balanced' ? '均衡兼顾' : '深度思考'}
                     </span>
-                    {effort === reasoningEffort && <span className="reasoning-menu-check">✓</span>}
+                    {effort === reasoningEffort && <span className="reasoning-menu-check"><AppIcon name="check" size={14} /></span>}
                   </button>
                 ))}
               </div>
@@ -713,7 +681,7 @@ function WebSearchPreview({ response }: { response: WebSearchResponse }) {
                   {result.content && <span>{result.content.replace(/\s+/g, ' ').trim()}</span>}
                   <small>{getSearchDomain(result.url)} · {result.published_at ? `发布：${result.published_at}` : '发布时间未提供'} · 访问：{response.accessed_at}</small>
                 </span>
-                <span className="chatbot-search-result-arrow" aria-hidden="true">↗</span>
+                <span className="chatbot-search-result-arrow" aria-hidden="true"><AppIcon name="arrowUpRight" size={16} /></span>
               </a>
             ))}
             {response.results.length === 0 && <div className="chatbot-search-empty">没有找到相关结果</div>}
@@ -740,8 +708,8 @@ function ChatBubble({ message }: { message: ChatMessage }) {
   const [reasoningExpanded, setReasoningExpanded] = useState(false);
   const userToggledRef = useRef(false);
 
-  const { chatbotLoading, chatbotStreamingPhase, chatbotMessages } = useAIStore();
-  const { editorView, content, setContent } = useAppStore();
+  const { chatbotLoading, chatbotStreamingPhase, chatbotMessages } = useAIStore(useShallow(state => ({ chatbotLoading: state.chatbotLoading, chatbotStreamingPhase: state.chatbotStreamingPhase, chatbotMessages: state.chatbotMessages })));
+  const { editorView, content, setContent } = useAppStore(useShallow(state => ({ editorView: state.editorView, content: state.content, setContent: state.setContent })));
   const isStreaming = chatbotLoading && !isUser &&
     chatbotMessages.length > 0 &&
     chatbotMessages[chatbotMessages.length - 1].id === message.id;
@@ -807,7 +775,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
                 className="chatbot-reasoning-toggle"
                 onClick={handleToggleReasoning}
               >
-                <span className="chatbot-reasoning-arrow">{reasoningExpanded ? '▼' : '▶'}</span>
+                <span className="chatbot-reasoning-arrow">{reasoningExpanded ? <AppIcon name="chevronDown" size={14} /> : <AppIcon name="chevronRight" size={14} />}</span>
                 <span>{isStreaming && chatbotStreamingPhase === 'reasoning' ? '正在思考…' : '思考过程'}</span>
               </button>
               {reasoningExpanded && (
@@ -835,7 +803,7 @@ function ChatBubble({ message }: { message: ChatMessage }) {
               <>
                 <button className="chatbot-insert-btn" onClick={insertIntoEditor} title="插入当前编辑器">插入编辑器</button>
                 <button className="chatbot-copy-btn" onClick={handleCopy} title="复制">
-                  {copied ? '✓' : '📋'}
+                  {copied ? <AppIcon name="check" size={14} /> : '📋'}
                 </button>
               </>
             )}

@@ -17,6 +17,7 @@ mod image;
 mod imaging;
 mod mcp;
 mod pdf;
+mod text_encoding;
 pub mod webdav;
 
 #[tauri::command]
@@ -193,6 +194,9 @@ fn main() {
             commands::export_html,
             commands::export_word,
             commands::get_file_content,
+            commands::read_text_document,
+            commands::decode_text_document,
+            commands::save_file_bytes,
             commands::get_text_attachment_content,
             converter::convert_document,
             converter::get_converter_module_status,

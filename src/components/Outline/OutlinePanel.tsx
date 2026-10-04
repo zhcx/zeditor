@@ -1,38 +1,17 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { useMemo } from 'react';
 import { useAppStore } from '../../stores/appStore';
-
-interface HeadingItem {
-  level: number;
-  text: string;
-  line: number;
-}
-
-function parseHeadings(content: string): HeadingItem[] {
-  const headings: HeadingItem[] = [];
-  const lines = content.split('\n');
-  let lineNum = 0;
-  for (const line of lines) {
-    lineNum++;
-    const match = line.match(/^(#{1,6})\s+(.+)$/);
-    if (match) {
-      headings.push({
-        level: match[1].length,
-        text: match[2].trim(),
-        line: lineNum,
-      });
-    }
-  }
-  return headings;
-}
+import { parseMarkdownHeadings } from '../../utils/markdownOutline';
 
 interface OutlinePanelProps {
   style?: React.CSSProperties;
 }
 
 export function OutlinePanel({ style }: OutlinePanelProps) {
-  const { content, outlineVisible, setOutlineVisible } = useAppStore();
+  const { content, outlineVisible, setOutlineVisible } = useAppStore(useShallow(state => ({ content: state.content, outlineVisible: state.outlineVisible, setOutlineVisible: state.setOutlineVisible })));
 
-  const headings = useMemo(() => parseHeadings(content), [content]);
+  const headings = useMemo(() => parseMarkdownHeadings(content), [content]);
 
   if (!outlineVisible) return null;
 
@@ -53,8 +32,7 @@ export function OutlinePanel({ style }: OutlinePanelProps) {
       <div className="outline-panel-header">
         <h3>大纲</h3>
         <button className="outline-close-btn" onClick={() => setOutlineVisible(false)} title="关闭大纲">
-          ×
-        </button>
+          <AppIcon name="close" size={16} /></button>
       </div>
       <div className="outline-panel-content">
         {headings.length === 0 ? (

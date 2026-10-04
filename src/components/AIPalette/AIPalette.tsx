@@ -1,3 +1,4 @@
+import { useShallow } from 'zustand/react/shallow';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore } from '../../stores/appStore';
@@ -11,6 +12,8 @@ import {
   type GenieScope,
 } from '../../utils/aiGenies';
 import '../../styles/ai-palette.css';
+import { AppIcon } from '../Icons/AppIcon';
+import { getCommandIcon } from '../Icons/iconGeometry';
 
 const PROMPT_HISTORY_KEY = 'zeditor.ai-prompt-history';
 const PROMPT_HISTORY_LIMIT = 20;
@@ -64,7 +67,7 @@ function customGenieToDefinition(payload: CustomGeniePayload): GenieDefinition {
 
 export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () => void }) {
   const editorView = useAppStore(state => state.editorView);
-  const { runGenie, status, statusMessage } = useAIStore();
+  const { runGenie, status, statusMessage } = useAIStore(useShallow(state => ({ runGenie: state.runGenie, status: state.status, statusMessage: state.statusMessage })));
 
   const [query, setQuery] = useState('');
   const [scope, setScope] = useState<GenieScope>('selection');
@@ -293,7 +296,7 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
         </div>
 
         <div className="ai-palette-input-row">
-          <span className="ai-palette-search-icon" aria-hidden="true">⌕</span>
+          <span className="ai-palette-search-icon" aria-hidden="true"><AppIcon name="search" size={18} /></span>
           <input
             ref={inputRef}
             className="ai-palette-input"
@@ -339,7 +342,7 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
               <div className="ai-palette-quick">
                 {quickGenies.map(genie => (
                   <button key={`quick-${genie.id}`} type="button" onClick={() => executeGenie(genie)}>
-                    {genie.icon} {genie.name}
+                    <AppIcon name={getCommandIcon(genie.id)} size={16} /> {genie.name}
                   </button>
                 ))}
               </div>
@@ -359,7 +362,7 @@ export function AIPalette({ visible, onClose }: { visible: boolean; onClose: () 
                       onMouseEnter={() => setSelectedIndex(index)}
                       onClick={() => executeGenie(genie)}
                     >
-                      <span className="ai-palette-item-icon" aria-hidden="true">{genie.icon}</span>
+                      <span className="ai-palette-item-icon" aria-hidden="true"><AppIcon name={getCommandIcon(genie.id)} /></span>
                       <span className="ai-palette-item-body">
                         <span className="ai-palette-item-name">
                           {genie.name}

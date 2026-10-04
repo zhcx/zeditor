@@ -1,3 +1,5 @@
+import { AppIcon } from '../Icons/AppIcon';
+import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { open } from '@tauri-apps/plugin-dialog';
 import MarkdownIt from 'markdown-it';
@@ -43,8 +45,8 @@ interface AgentPanelProps {
 }
 
 export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
-  const { settings, content, currentFile, editorView, setContent, activeTabId, tabs } = useAppStore();
-  const { setChatbotVisible } = useAIStore();
+  const { settings, content, currentFile, editorView, setContent, activeTabId, tabs } = useAppStore(useShallow(state => ({ settings: state.settings, content: state.content, currentFile: state.currentFile, editorView: state.editorView, setContent: state.setContent, activeTabId: state.activeTabId, tabs: state.tabs })));
+  const { setChatbotVisible } = useAIStore(useShallow(state => ({ setChatbotVisible: state.setChatbotVisible })));
   const {
     backends, modelCatalogs, modelsLoading, sessions, activeSessionId, timeline, pendingApproval, changes, loading, diagnostic,
     initialize, detectBackends, loadModels, startTurn, cancelTurn, respondApproval, setApprovalMode,
@@ -286,7 +288,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
             </div>
           </div>
           <button className="chatbot-close-btn" onClick={() => setChatbotVisible(false)} title="关闭" aria-label="关闭 Agent 对话">
-            <svg viewBox="0 0 16 16" aria-hidden="true"><path d="M4 4l8 8M12 4l-8 8" /></svg>
+            <AppIcon name="close" size={20}  />
           </button>
         </div>
         <div className="chatbot-ai-selectors agent-controls">
@@ -324,7 +326,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
             onChange={(value) => value ? resumeSession(value) : beginNewSession()}
             ariaLabel="选择 Agent 会话"
           />
-          <button type="button" className="agent-new-session-button" onClick={beginNewSession} disabled={loading} title="新建 Agent 对话" aria-label="新建 Agent 对话">+</button>
+          <button type="button" className="agent-new-session-button" onClick={beginNewSession} disabled={loading} title="新建 Agent 对话" aria-label="新建 Agent 对话"><AppIcon name="plus" size={16} /></button>
         </div>
         <div className={`agent-health ${backendStatus?.compatible ? 'ready' : 'unavailable'}`}>
           <span aria-hidden="true" />
@@ -418,13 +420,13 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
                 setEditorContext(null);
               }}
               aria-label="移除编辑器引用"
-            >×</button>
+            ><AppIcon name="close" size={16} /></button>
           </div>
         )}
         {contextPaths.length > 0 && (
           <div className="agent-context-files">
             {contextPaths.map((path) => (
-              <span key={path} title={path}>{fileName(path)}<button onClick={() => setContextPaths((items) => items.filter((item) => item !== path))} aria-label={`移除 ${fileName(path)}`}>×</button></span>
+              <span key={path} title={path}>{fileName(path)}<button onClick={() => setContextPaths((items) => items.filter((item) => item !== path))} aria-label={`移除 ${fileName(path)}`}><AppIcon name="close" size={16} /></button></span>
             ))}
           </div>
         )}
@@ -439,7 +441,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
           disabled={!workspaceRoot || !backendStatus?.compatible}
         />
         <div className="chatbot-input-toolbar agent-composer-toolbar">
-          <button className="agent-icon-button" onClick={() => void chooseContextFiles()} disabled={!workspaceRoot || loading} title="添加当前目录中的文件" aria-label="添加文件">+</button>
+          <button className="agent-icon-button" onClick={() => void chooseContextFiles()} disabled={!workspaceRoot || loading} title="添加当前目录中的文件" aria-label="添加文件"><AppIcon name="plus" size={16} /></button>
           <button className="agent-reference-button" onClick={referenceEditor} disabled={!content || loading} title="引用当前选区或文档" aria-label="引用当前选区或文档">@ 引用</button>
           <ChatSelectMenu
             className={`agent-permission-menu ${effectiveApprovalMode === 'allow_all_session' ? 'unrestricted' : ''}`}
@@ -485,7 +487,7 @@ export function AgentPanel({ onRuntimeChange }: AgentPanelProps) {
             title={loading ? '停止任务' : '发送任务'}
             aria-label={loading ? '停止任务' : '发送任务'}
           >
-            {loading ? '■' : '↑'}
+            <AppIcon name={loading ? 'stop' : 'send'} size={18} />
           </button>
         </div>
       </div>
@@ -501,14 +503,14 @@ export function RuntimeTabs({ active, onChange }: { active: 'api' | 'agent'; onC
       {aiEnabled && (
         <button className={`ai-runtime-tab api ${active === 'api' ? 'active' : ''}`} onClick={() => onChange('api')} role="tab" aria-selected={active === 'api'}>
           <span className="ai-runtime-tab-icon" aria-hidden="true">
-            <svg viewBox="0 0 16 16"><path d="M3 3.2h10v7.5H8l-3.2 2.4v-2.4H3z" /><path d="M5.4 6.9h5.2" /></svg>
+            <AppIcon name="assistant" size={20}  />
           </span>
           <span className="ai-runtime-tab-label">AI 对话</span>
         </button>
       )}
       <button className={`ai-runtime-tab agent ${active === 'agent' ? 'active' : ''}`} onClick={() => onChange('agent')} role="tab" aria-selected={active === 'agent'}>
         <span className="ai-runtime-tab-icon" aria-hidden="true">
-          <svg viewBox="0 0 16 16"><rect x="2.4" y="3" width="11.2" height="10" rx="1.5" /><path d="m4.7 6 2 1.6-2 1.6M8.5 9.4h2.8" /></svg>
+          <AppIcon name="terminal" size={20}  />
         </span>
         <span className="ai-runtime-tab-label">Agent</span>
         <small>Beta</small>
@@ -614,7 +616,7 @@ function AgentActivity({ items }: { items: AgentTimelineItem[] }) {
 
   return (
     <details className="agent-activity">
-      <summary><span className="agent-activity-icon" aria-hidden="true">›</span>{summary}</summary>
+      <summary><span className="agent-activity-icon" aria-hidden="true"><AppIcon name="chevronRight" size={14} /></span>{summary}</summary>
       <div className="agent-activity-content">
         {visibleItems.map((item) => (
           <section key={item.id} className={`agent-activity-${item.kind}`}>

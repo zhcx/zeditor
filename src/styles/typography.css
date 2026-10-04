@@ -1,0 +1,52 @@
+/* 界面字号独立缩放；正文继续使用内容字号，字间距在两类文字上统一应用。 */
+:root {
+  --ui-font-scale: 1;
+  --ui-font-base-size: 13px;
+  --text-letter-spacing: .6px;
+  --ui-font-size-xs: calc(11px * var(--ui-font-scale));
+  --ui-font-size-sm: calc(12px * var(--ui-font-scale));
+  --ui-font-size-md: var(--ui-font-base-size);
+  --ui-font-size-lg: calc(14px * var(--ui-font-scale));
+  --ui-titlebar-height: calc(40px * var(--ui-font-scale));
+  --ui-tab-height: calc(40px * var(--ui-font-scale));
+  --ui-statusbar-height: calc(30px * var(--ui-font-scale));
+  --ui-sidebar-header-height: calc(44px * var(--ui-font-scale));
+  --ui-tree-row-height: calc(30px * var(--ui-font-scale));
+  --ui-control-height-md: calc(30px * var(--ui-font-scale));
+}
+.app, .document-switcher, .encoding-dialog { letter-spacing: var(--text-letter-spacing); }
+.monaco-editor { letter-spacing: normal; }
+.preview-document, .preview-document pre code, .chatbot-bubble, .agent-timeline, .ai-proofread-panel { letter-spacing: var(--text-letter-spacing); }
+.preview-document.markdown-body :is(h1, h2, h3, h4, h5, h6, p, li, table, pre, code),
+.titlebar, .vscode-explorer-header, .editor-pane-toolbar .toolbar-btn, .toolbar-floating .toolbar-btn,
+.settings-panel :is(button, input, select, textarea), .encoding-dialog button { letter-spacing: var(--text-letter-spacing); }
+.titlebar .menu-trigger, .titlebar .titlebar-command-center, .vscode-explorer-header, .vscode-explorer .explorer-section-heading,
+.preview-pane-actions, .statusbar .status-item, .editor-pane-toolbar .toolbar-btn, .toolbar-floating .toolbar-btn,
+.toolbar-menu .toolbar-menu-item, .toolbar-overflow-menu button { font-size: var(--ui-font-size-sm); }
+.vscode-explorer .explorer-row, .vscode-explorer .outline-explorer-row, .document-pane-tabs .tab,
+.settings-navigation .settings-tabs .tab-btn, .document-switcher-item strong, .encoding-options strong { font-size: var(--ui-font-size-md); }
+.titlebar .menu-trigger { height: calc(30px * var(--ui-font-scale)); }
+.titlebar .titlebar-command-center { height: calc(29px * var(--ui-font-scale)); }
+.vscode-explorer .open-editor-row { min-height: calc(32px * var(--ui-font-scale)); }
+.vscode-explorer .explorer-section-heading { min-height: calc(31px * var(--ui-font-scale)); }
+.activity-bar-button { height: calc(40px * var(--ui-font-scale)); }
+.editor-pane-toolbar .toolbar, .preview-toolbar-offset { min-height: calc(44px * var(--ui-font-scale)); height: calc(44px * var(--ui-font-scale)); flex-basis: calc(44px * var(--ui-font-scale)); }
+.editor-pane-toolbar .toolbar-btn, .toolbar-floating .toolbar-btn { height: calc(32px * var(--ui-font-scale)); min-height: calc(32px * var(--ui-font-scale)); }
+.editor-pane-toolbar .toolbar-item, .toolbar-floating .toolbar-item { height: calc(34px * var(--ui-font-scale)); }
+.statusbar .status-item { min-height: calc(24px * var(--ui-font-scale)); }
+.statusbar .status-statistics { max-width: min(24vw, 340px); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.statusbar-right { min-width: 0; flex-shrink: 1; }
+.settings-panel .settings-main .setting-item label, .settings-panel .settings-tabs .tab-btn { font-size: var(--ui-font-size-md); }
+.settings-panel .settings-main .setting-item :is(input[type="text"], input[type="number"], input[type="password"], input[type="url"], .settings-select-trigger) { font-size: var(--ui-font-size-md) !important; }
+.settings-header h2 { font-size: calc(20px * var(--ui-font-scale)); }
+.settings-panel :is(.settings-section-header h3, .settings-footer button, .font-load-btn),
+.menu-dropdown, .submenu-dropdown, .context-menu, .immersive-mode-option strong,
+.encoding-dialog footer button, .unsaved-file-name, .unsaved-action-button { font-size: var(--ui-font-size-md); }
+.encoding-dialog h2, .unsaved-dialog-heading h2 { font-size: calc(17px * var(--ui-font-scale)); }
+.encoding-dialog :is(header p, .encoding-description, .encoding-modes button, .encoding-error),
+.unsaved-dialog-heading p, .unsaved-dialog-note, .immersive-mode-option small { font-size: var(--ui-font-size-sm); }
+.settings-navigation .settings-tabs .tab-btn, .encoding-modes button, .encoding-dialog footer button { min-height: calc(34px * var(--ui-font-scale)); }
+.settings-panel .setting-item small, .workspace-hint, .encoding-options small, .document-switcher-document small { font-size: var(--ui-font-size-xs); }
+.typography-control { display: flex; align-items: center; gap: 14px; min-width: 0; width: min(100%, 420px); justify-self: end; }
+.typography-control input[type="range"] { min-width: 80px; flex: 1; accent-color: var(--accent-color); }
+.typography-control output { min-width: 55px; font-size: var(--ui-font-size-sm); color: var(--text-secondary); text-align: right; font-variant-numeric: tabular-nums; }

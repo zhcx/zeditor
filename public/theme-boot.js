@@ -25,5 +25,10 @@
     document.documentElement.style.colorScheme = theme.endsWith('-dark') ? 'dark' : 'light';
     document.documentElement.style.setProperty('--font-sans', toFontStack(saved?.appearance?.ui_font_family));
     document.documentElement.style.setProperty('--font-content', toFontStack(saved?.appearance?.font_family));
+    const clamp = (value, fallback, min, max) => typeof value === 'number' && Number.isFinite(value) ? Math.max(min, Math.min(max, value)) : fallback;
+    const uiSize = clamp(saved?.appearance?.ui_font_size, 13, 11, 20);
+    document.documentElement.style.setProperty('--ui-font-scale', String(uiSize / 13));
+    document.documentElement.style.setProperty('--ui-font-base-size', `${uiSize}px`);
+    document.documentElement.style.setProperty('--text-letter-spacing', `${clamp(saved?.appearance?.letter_spacing, 0.6, 0, 5)}px`);
   } catch { /* Use the stylesheet default when cached data is unavailable. */ }
 })();

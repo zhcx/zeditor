@@ -1,3 +1,4 @@
+import { AppIcon } from '../Icons/AppIcon';
 import { useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import type { WebDavConnectionResult, WebDavSettings } from '../../types/webdav';
@@ -110,15 +111,9 @@ export function WebDavSettings({ value, onChange, onBrowseHistory }: WebDavSetti
                 onClick={() => setPasswordVisible(visible => !visible)}
               >
                 {passwordVisible ? (
-                  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M2.5 10s2.8-4.5 7.5-4.5 7.5 4.5 7.5 4.5-2.8 4.5-7.5 4.5S2.5 10 2.5 10Z" />
-                    <path d="M10 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5ZM4.2 15.8 15.8 4.2" />
-                  </svg>
+                  <AppIcon name="eyeOff" size={20}  />
                 ) : (
-                  <svg viewBox="0 0 20 20" width="16" height="16" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
-                    <path d="M2.5 10s2.8-4.5 7.5-4.5 7.5 4.5 7.5 4.5-2.8 4.5-7.5 4.5S2.5 10 2.5 10Z" />
-                    <path d="M10 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z" />
-                  </svg>
+                  <AppIcon name="eye" size={20}  />
                 )}
                 <span>{passwordVisible ? '隐藏' : '显示'}</span>
               </button>
