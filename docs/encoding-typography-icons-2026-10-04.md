@@ -33,13 +33,13 @@
 
 根据最新反馈，**AI 助手恢复为原来的双星样式**，侧栏、状态栏、设置、工具栏与对话入口一致使用该轮廓。
 
-应用图标使用用户提供的“深蓝渐变折叠白色 Z”原图，保存为 `src-tauri/icons/app-icon.png`，未重新绘制。原图与项目源图 SHA-256 一致：
+应用图标使用用户提供的“深蓝渐变立体字母 Z”原图，保存为 `src-tauri/icons/app-icon.png`，未重新绘制。原图与项目源图 SHA-256 一致：
 
 ```text
-cbacfba48172ee55adc17d3ade095fa5ea0ed42442e1599ce36fdddbd8d34454
+c3db27a8cbb52a1272e6347336ae1c76dc5ab8b3dfb2e940062544ddc720ae6b
 ```
 
-Windows ICO、macOS ICNS、桌面各尺寸 PNG、Android/iOS 资源、启动标识、标题栏和 favicon 均由该原图生成。再次生成使用 `npm run icons:app`；Markdown 文件关联图标使用 `npm run icons:markdown`。
+Windows ICO、macOS ICNS、桌面各尺寸 PNG、Android/iOS 资源、启动标识、标题栏、软件与文档站 favicon 均由该原图生成。再次生成使用 `npm run icons:app`；Markdown 文件关联图标使用 `npm run icons:markdown`。
 
 ## 验证
 
