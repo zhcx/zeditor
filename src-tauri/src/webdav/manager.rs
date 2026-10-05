@@ -116,9 +116,11 @@ impl S3SyncManager {
         }
     }
 
-    /// Build the S3 client for this provider from saved settings.
+    /// Build an S3 client for paths that the sync manager has already mapped.
     pub fn client_for(&self, settings: &S3Settings) -> Result<RemoteClient, String> {
-        Ok(RemoteClient::S3(super::S3Client::new(settings)?))
+        Ok(RemoteClient::S3(super::S3Client::new_for_mapped_paths(
+            settings,
+        )?))
     }
 
     pub async fn enqueue(

@@ -12,9 +12,9 @@ use super::sigv4::{
 /// S3-compatible object storage client.
 ///
 /// Maps absolute `/`-prefixed paths to object keys under the configured
-/// bucket, signing every request with AWS Signature Version 4. Supports both
-/// path-style (`host/bucket/key`, MinIO and self-hosted) and virtual-hosted
-/// style (`bucket.host/key`, AWS and most clouds).
+/// bucket, signing every request with AWS Signature Version 4. Standalone
+/// clients add the configured root; sync-manager clients receive paths already
+/// mapped below that root. Supports both path-style and virtual-hosted style.
 #[derive(Debug, Clone)]
 pub struct S3Client {
     client: reqwest::Client,
@@ -29,8 +29,17 @@ pub struct S3Client {
 }
 
 impl S3Client {
-    /// Build a client from application settings.
+    /// Build a standalone client that applies the configured root to relative paths.
     pub fn new(settings: &S3Settings) -> Result<Self, String> {
+        Self::build(settings, true)
+    }
+
+    /// Build a sync-manager client for paths that already include the configured root.
+    pub(super) fn new_for_mapped_paths(settings: &S3Settings) -> Result<Self, String> {
+        Self::build(settings, false)
+    }
+
+    fn build(settings: &S3Settings, prefix_remote_root: bool) -> Result<Self, String> {
         if settings.endpoint.is_empty() {
             return Err("S3 服务端点（endpoint）不能为空".to_string());
         }
@@ -68,12 +77,15 @@ impl S3Client {
             access_key: settings.access_key.clone(),
             secret_key: settings.secret_key.clone(),
             path_style: settings.path_style,
-            remote_root: settings.remote_root.trim_matches('/').to_string(),
+            remote_root: if prefix_remote_root {
+                settings.remote_root.trim_matches('/').to_string()
+            } else {
+                String::new()
+            },
         })
     }
 
-    /// Map an absolute `/`-prefixed path to a bucket object key, joining it
-    /// under the configured remote root prefix.
+    /// Map a path to its bucket key. The sync manager already includes its root.
     fn object_key(&self, path: &str) -> String {
         let relative = path.trim_start_matches('/');
         if self.remote_root.is_empty() {

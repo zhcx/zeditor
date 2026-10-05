@@ -41,6 +41,8 @@ c3db27a8cbb52a1272e6347336ae1c76dc5ab8b3dfb2e940062544ddc720ae6b
 
 Windows ICO、macOS ICNS、桌面各尺寸 PNG、Android/iOS 资源、启动标识、标题栏、软件与文档站 favicon 均由该原图生成。再次生成使用 `npm run icons:app`；Markdown 文件关联图标使用 `npm run icons:markdown`。
 
+Windows 版 `.md` / `.markdown` 文件关联采用 `src-tauri/icons/markdown-file.png`，由 `npm run icons:markdown` 生成安装程序所需 ICO。
+
 ## 验证
 
 - 前端 430 项测试通过；Rust 171 项通过，3 项依赖本地外部 CLI/代理环境的测试保持忽略。

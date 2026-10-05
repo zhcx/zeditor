@@ -488,7 +488,7 @@ Zeditor 内置 MCP 服务器，让 **Claude Desktop、Claude Code、Codex CLI、
 ### 16.1 配置
 
 - **WebDAV**：开启「启用 WebDAV 自动备份」，填服务器地址（如 `https://example.com/dav`）、用户名、密码/应用密码、远端根目录（默认 `/Zeditor`），点「测试连接」验证。凭据仅保存在本地设备。
-- **S3 云同步**：填服务端点、存储桶、地域、Access Key / Secret Key、路径风格（自建 MinIO 等启用 Path-Style）、远端根目录。
+- **S3 云同步**：填服务端点、存储桶、地域、Access Key / Secret Key、路径风格（自建 MinIO 等启用 Path-Style）、远端根目录；根目录只在桶内路径前添加一次，`/Zeditor` 会生成 `Zeditor/工作区/文档.md`。
 
 ### 16.2 行为
 

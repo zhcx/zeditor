@@ -21,6 +21,8 @@ title: 文件与工作区
 
 macOS 界面将快捷键显示为 ⌘（Command）、⇧（Shift）、⌥（Option）；Windows 和 Linux 显示 Ctrl、Shift、Alt。
 
+Windows 安装版关联 `.md` / `.markdown` 后，资源管理器会显示专属 Markdown 图标。桌面版图标来自 `src-tauri/icons/markdown-file.png`，由构建脚本生成 ICO 后随安装程序注册。
+
 ::: tip 未保存保护
 有未保存修改的标签会显示 `●` 标记；关闭时弹窗让你选择「保存 / 不保存 / 取消」，不会静默丢失内容。
 :::

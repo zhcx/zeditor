@@ -223,6 +223,7 @@ graph TD
 - 应用图标采用深蓝渐变立体字母 Z，界面图标统一为几何轮廓
 - 优化编辑器加载、文件读取、文档统计与安全保存
 - macOS 界面显示 ⌘、⇧、⌥，检查更新会选择匹配芯片架构的安装包
+- Windows 的 Markdown 文件关联采用专属图标；S3 远端根目录不会重复创建
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it

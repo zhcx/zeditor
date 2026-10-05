@@ -3,7 +3,7 @@ const path = require('node:path');
 const sharp = require('sharp');
 
 const projectRoot = path.resolve(__dirname, '..');
-const source = path.join(projectRoot, 'src-tauri', 'icons', 'markdown-file.svg');
+const source = path.join(projectRoot, 'src-tauri', 'icons', 'markdown-file.png');
 const destination = path.join(projectRoot, 'src-tauri', 'icons', 'markdown-file.ico');
 const sizes = [16, 24, 32, 48, 64, 128, 256];
 
