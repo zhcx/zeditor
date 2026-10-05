@@ -179,36 +179,30 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.5.8 更新
+## v0.5.9 更新
 
 ### 更新日志
 
-- **打开旧文件**：新增 UTF-8、UTF-16、GBK、GB18030、Big5、Shift-JIS、Windows-1252 等 11 种编码。打开时可选编码，保存会沿用文档编码；无法表示的字符会阻止写入，避免损坏原文。
-- **调整界面排版**：在「设置 → 外观」独立调整界面字号与字间距。字号 11–20 px，字间距默认 0.6 px、可调 0–5 px；编辑器、预览和 AI 正文即时同步预览。
-- **让操作入口更清楚**：菜单、侧栏、工具栏和弹窗使用统一几何图标；AI 助手恢复原来的双星图标。应用图标采用深蓝渐变立体字母 Z，并同步用于安装包与标题栏。
-- **更快启动与更流畅写作**：编辑器内核改为延迟加载，按需加载大型组件，精简无关状态订阅与重复文件读取；长文统计与资源缓存减少开销，后台操作不会误插入当前文档。
-- **加强文件保护**：原子保存避免写入中断截断原文件；异步导入和转换编码前会核对文档状态；云端历史恢复保留原始字节。
-- **修复 S3 远端路径**：每个对象键只应用一次「远端根目录」，避免同步在存储桶内重复创建 `zeditor/zeditor`。
-- **Windows Markdown 关联图标**：`.md` 和 `.markdown` 文件使用新版蓝色 Markdown 文档图标。
-- **改善日常操作**：可用 `Ctrl/Cmd+P` 搜索已打开文档，标签支持键盘切换和未保存关闭保护，窄窗口工具栏会整理到更多菜单中。
+- **Markdown 文件图标**：Windows 安装程序将 `.md` / `.markdown` 文件关联到新的蓝底白色 Md + Z 图标。
+- **修复 S3 远端路径**：根目录只应用一次；远端根目录设为 `/Zeditor` 时，新对象路径不会再重复为 `Zeditor/Zeditor/...`。已有云端副本保留在原处。
 
-### v0.5.8 平台安装包对照
+### v0.5.9 平台安装包对照
 
-> 以下链接指向 v0.5.8 Release 资产；安装包由 GitHub Actions 根据 v0.5.8 标签源码构建。
+> 以下链接指向 v0.5.9 Release 资产；安装包由 GitHub Actions 根据 v0.5.9 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor-0.5.8-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.8/Zeditor_0.5.8_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor-0.5.9-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.8.md`](docs/releases/v0.5.8.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.9.md`](docs/releases/v0.5.9.md)。
 
 ## Contributors
 

@@ -199,7 +199,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.5.8**
+**Zeditor v0.5.9**
 
 一款现代化的 Markdown 编辑器
 
@@ -218,12 +218,9 @@ graph TD
 - GitHub Release 自动检查更新
 
 **本版本更新**
-- 支持 11 种文字编码，旧编码文档可选择编码打开和保存
-- 可调整界面字号与字间距；默认字间距 0.6 px
-- 应用图标采用深蓝渐变立体字母 Z，界面图标统一为几何轮廓
-- 优化编辑器加载、文件读取、文档统计与安全保存
-- macOS 界面显示 ⌘、⇧、⌥，检查更新会选择匹配芯片架构的安装包
-- Windows 的 Markdown 文件关联采用专属图标；S3 远端根目录不会重复创建
+- 更新 Windows Markdown 文档关联图标，使用新版蓝底白色 Md 与 Z 图案
+- 修复 S3 云同步重复添加远端根目录，桶内不再生成“zeditor/zeditor”路径
+- 保留已有云端文件；后续同步统一使用单层根目录
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it
