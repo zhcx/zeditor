@@ -86,7 +86,7 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
         className="titlebar-drag-spacer"
         data-tauri-drag-region
       >
-        <button type="button" className="titlebar-command-center" data-tauri-drag-region="false" aria-label={`${t('当前文档：', language)}${activeDocumentTitle} · ${t('切换文档', language)}`} aria-haspopup="dialog" aria-keyshortcuts="Control+P Meta+P" title={formatShortcut(t('切换文档（Ctrl+P）', language))} onClick={() => window.dispatchEvent(new CustomEvent('zeditor-switch-document'))}>
+        <button type="button" className="titlebar-command-center" data-tauri-drag-region="false" aria-label={`${t('当前文档：', language)}${activeDocumentTitle} · ${t('搜索文档与文件内容', language)}`} aria-haspopup="listbox" aria-keyshortcuts="Control+P Meta+P" title={formatShortcut(t('搜索文档与文件内容（Ctrl+P）', language))} onClick={() => window.dispatchEvent(new CustomEvent('zeditor-switch-document'))}>
           <AppIcon name="search" size={14}  />
           <span>{activeDocumentTitle}</span>
           {modified && <span className="titlebar-document-dirty" aria-label={t('未保存修改', language)} />}

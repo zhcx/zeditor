@@ -179,6 +179,33 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
+## v0.6.0 更新
+
+### 更新日志
+
+- **侧边栏密度优化**：压缩资源管理器各分组行高与分组间距，整体更紧凑，视觉密度贴近 VS Code。
+- **修复「近期记录」空状态**：分组为空时的占位文案原先缺少缩进、紧贴左边缘；现已与「近期记录」标题文字对齐，避免换行。
+- **重构文档切换器与文件树**：重写多标签页文档切换器，精简侧边栏文件树交互，提升多文档导航与切换体验。
+- **界面与本地化打磨**：完善活动栏、标题栏与多语言文案细节。
+
+### v0.6.0 平台安装包对照
+
+> 以下链接指向 v0.6.0 Release 资产；安装包由 GitHub Actions 根据 v0.6.0 标签源码构建。
+
+| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
+| --- | --- | --- | --- | --- |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor-0.6.0-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.0.md`](docs/releases/v0.6.0.md)。
+
 ## v0.5.9 更新
 
 ### 更新日志

@@ -11,7 +11,7 @@
   --ui-tab-height: calc(40px * var(--ui-font-scale));
   --ui-statusbar-height: calc(30px * var(--ui-font-scale));
   --ui-sidebar-header-height: calc(44px * var(--ui-font-scale));
-  --ui-tree-row-height: calc(30px * var(--ui-font-scale));
+  --ui-tree-row-height: calc(22px * var(--ui-font-scale));
   --ui-control-height-md: calc(30px * var(--ui-font-scale));
 }
 .app, .document-switcher, .encoding-dialog { letter-spacing: var(--text-letter-spacing); }
@@ -27,8 +27,8 @@
 .settings-navigation .settings-tabs .tab-btn, .document-switcher-item strong, .encoding-options strong { font-size: var(--ui-font-size-md); }
 .titlebar .menu-trigger { height: calc(30px * var(--ui-font-scale)); }
 .titlebar .titlebar-command-center { height: calc(29px * var(--ui-font-scale)); }
-.vscode-explorer .open-editor-row { min-height: calc(32px * var(--ui-font-scale)); }
-.vscode-explorer .explorer-section-heading { min-height: calc(31px * var(--ui-font-scale)); }
+.vscode-explorer .open-editor-row { min-height: calc(24px * var(--ui-font-scale)); }
+.vscode-explorer .explorer-section-heading { min-height: calc(24px * var(--ui-font-scale)); }
 .activity-bar-button { height: calc(40px * var(--ui-font-scale)); }
 .editor-pane-toolbar .toolbar, .preview-toolbar-offset { min-height: calc(44px * var(--ui-font-scale)); height: calc(44px * var(--ui-font-scale)); flex-basis: calc(44px * var(--ui-font-scale)); }
 .editor-pane-toolbar .toolbar-btn, .toolbar-floating .toolbar-btn { height: calc(32px * var(--ui-font-scale)); min-height: calc(32px * var(--ui-font-scale)); }

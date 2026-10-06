@@ -8,7 +8,7 @@
   --ui-sidebar-header-height: 44px;
   --ui-tab-height: 40px;
   --ui-statusbar-height: 30px;
-  --ui-tree-row-height: 30px;
+  --ui-tree-row-height: 22px;
   --ui-control-height-md: 30px;
 }
 
@@ -49,11 +49,11 @@
 .vscode-explorer-header { font-size: 12px; letter-spacing: 0; padding-inline: 14px 8px; }
 .vscode-explorer-actions { gap: 1px; }
 .vscode-explorer-actions button { width: 28px; height: 28px; }
-.vscode-explorer-tree { padding-top: 6px; }
-.vscode-explorer .explorer-section { margin-bottom: 8px; border: 0; }
-.vscode-explorer .explorer-section-heading { min-height: 31px; padding-block: 3px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
+.vscode-explorer-tree { padding-top: 4px; }
+.vscode-explorer .explorer-section { margin-bottom: 4px; border: 0; }
+.vscode-explorer .explorer-section-heading { min-height: 24px; padding-block: 2px; color: var(--text-secondary); font-size: 12px; font-weight: 600; }
 .vscode-explorer .explorer-row, .vscode-explorer .outline-explorer-row { font-size: 13px; color: var(--text-secondary); }
-.vscode-explorer .open-editor-row { min-height: 32px; }
+.vscode-explorer .open-editor-row { min-height: 24px; }
 .vscode-explorer .explorer-row.active { color: var(--text-color); background: var(--accent-soft); }
 .vscode-explorer .explorer-count { padding: 1px 6px; border-radius: 5px; font-size: 10px; background: var(--bg-hover); color: var(--text-secondary); }
 .vscode-explorer .outline-level { font-size: 9px; opacity: .8; }

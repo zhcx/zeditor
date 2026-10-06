@@ -98,7 +98,7 @@ function App() {
   const [previewScrollElement, setPreviewScrollElement] = useState<HTMLDivElement | null>(null);
   const [previewRenderVersion, setPreviewRenderVersion] = useState(0);
   const [activeEditorLine, setActiveEditorLine] = useState(1);
-  const [activityView, setActivityView] = useState<'explorer' | 'search'>('explorer');
+
   const [immersiveOutlineCollapsed, setImmersiveOutlineCollapsed] = useState(false);
   const [immersivePreviewScrollElement, setImmersivePreviewScrollElement] = useState<HTMLDivElement | null>(null);
   const [closePromptTabs, setClosePromptTabs] = useState<CloseGuardTab[] | null>(null);
@@ -667,14 +667,9 @@ function App() {
     };
   }, [balanceDocumentPanes, chatbotPanelWidth, chatbotVisible, outlineVisible, proofreadPanelWidth, proofreadResults.length, setSplitRatio, sidebarVisible, sidebarWidth]);
 
-  const selectActivityView = useCallback((view: 'explorer' | 'search') => {
-    if (sidebarVisible && activityView === view) {
-      setSidebarVisible(false);
-      return;
-    }
-    setActivityView(view);
-    if (!sidebarVisible) setSidebarVisible(true);
-  }, [activityView, setSidebarVisible, sidebarVisible]);
+  const toggleExplorerView = useCallback(() => {
+    setSidebarVisible(!sidebarVisible);
+  }, [setSidebarVisible, sidebarVisible]);
 
   const toggleThemeVariant = useCallback(() => {
     const currentSettings = useAppStore.getState().settings;
@@ -957,13 +952,13 @@ function App() {
       <TitleBar onRequestClose={requestAppClose} />
       <div className="app-workbench">
         <ActivityBar
-          activeView={activityView}
+          explorerVisible={sidebarVisible}
           chatbotVisible={chatbotVisible}
           settingsOpen={settingsOpen}
           immersive={mode === 'immersive'}
           zen={mode === 'zen'}
           theme={settings.appearance.theme}
-          onSelectView={selectActivityView}
+          onToggleExplorer={toggleExplorerView}
           onOpenChat={() => setChatbotVisible(!chatbotVisible)}
           onOpenSettings={() => setSettingsOpen(true)}
           onToggleTheme={toggleThemeVariant}
@@ -981,7 +976,7 @@ function App() {
           <div className="app-body">
           {mode === 'split' && (sidebarVisible || outlineVisible) && (
           <>
-            <Sidebar style={{ width: sidebarWidth }} view={activityView} />
+            <Sidebar style={{ width: sidebarWidth }} />
             <div
               ref={sidebarDividerRef}
               className="sidebar-divider resizable"

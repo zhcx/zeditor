@@ -6960,30 +6960,6 @@ textarea:focus-visible {
 }
 
 
-.search-sidebar { padding-top: 10px; }
-.document-search-panel { padding: 4px 10px 12px; overflow: auto; }
-.document-search-panel input {
-  width: 100%;
-  height: 31px;
-  padding: 0 9px;
-  border: 1px solid var(--border-color);
-  border-radius: 5px;
-  color: var(--text-primary);
-  background: var(--bg-elevated);
-  font-size: 12px;
-}
-.document-search-panel > input { display: block; box-sizing: border-box; margin-bottom: 6px; }
-.document-search-options { display: flex; align-items: center; gap: 14px; min-height: 28px; margin: 2px 0 6px; }
-.document-search-options label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; cursor: pointer; }
-.document-search-panel .document-search-options input[type="checkbox"] { width: 14px; height: 14px; min-width: 14px; margin: 0; padding: 0; accent-color: var(--accent-color); }
-.document-search-actions { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0 6px; }
-.document-search-actions button { min-height: 27px; padding: 4px 8px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); background: var(--bg-elevated); font-size: 12px; cursor: pointer; }
-.document-search-actions button:first-child, .document-search-actions button:last-child { border-color: var(--accent-color); }
-.document-search-actions button:disabled { opacity: .55; cursor: default; }
-.document-search-history { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin: 6px 0; color: var(--text-muted); font-size: 11px; }
-.document-search-history button { max-width: 120px; overflow: hidden; border: 0; border-radius: 3px; padding: 2px 5px; color: var(--text-secondary); background: var(--bg-hover); text-overflow: ellipsis; white-space: nowrap; cursor: pointer; font-size: 11px; }
-.document-search-diff { margin: 8px 0; padding: 8px; overflow: auto; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-secondary); background: var(--bg-elevated); font: 11px/1.45 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
-
 .wechat-export-modal { width: min(980px, calc(100vw - 40px)); max-height: calc(100vh - 40px); }
 .wechat-theme-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; margin-bottom: 16px; }
 .wechat-theme-grid button { display: grid; gap: 4px; min-height: 78px; padding: 10px; border: 1px solid var(--border-color); border-top: 4px solid var(--wechat-primary); border-radius: 7px; background: var(--wechat-pale); color: var(--text-primary); text-align: left; cursor: pointer; }
@@ -7028,28 +7004,6 @@ textarea:focus-visible {
 .update-toast-error { position: fixed; z-index: 1200; right: 20px; bottom: 20px; max-width: min(420px, calc(100vw - 40px)); padding: 10px 13px; border: 1px solid color-mix(in srgb, var(--danger-color) 45%, transparent); border-radius: var(--radius-sm); color: var(--danger-color); background: color-mix(in srgb, var(--danger-color) 9%, var(--bg-elevated)); box-shadow: var(--shadow-card); font-size: 12px; line-height: 1.45; }
 [data-theme$="dark"] .update-toast-error { color: color-mix(in srgb, var(--danger-color) 80%, #fff); background: color-mix(in srgb, var(--danger-color) 16%, var(--bg-elevated)); border-color: color-mix(in srgb, var(--danger-color) 42%, transparent); }
 @media (max-width: 680px) { .wechat-theme-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
-.document-search-empty { padding: 18px 4px; color: var(--text-muted); font-size: 12px; line-height: 1.5; }
-.document-search-results { margin-top: 9px; }
-.document-search-count { padding: 0 4px 6px; color: var(--text-muted); font-size: 11px; }
-.document-search-result {
-  width: 100%;
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 8px;
-  padding: 7px 6px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--text-secondary);
-  background: transparent;
-  text-align: left;
-}
-.document-search-result:hover,
-.document-search-result.active { color: var(--text-primary); background: var(--bg-hover); }
-.document-search-result strong,
-.document-search-result span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.document-search-result strong { font-size: 12px; font-weight: 600; }
-.document-search-result small { color: var(--text-muted); font-size: 10px; }
-.document-search-result span { grid-column: 1 / -1; color: var(--text-muted); font-size: 11px; }
 
 .vscode-explorer .sidebar-surface {
   border: 0;
@@ -7120,15 +7074,15 @@ textarea:focus-visible {
   box-shadow: 0 3px 0 currentColor, 0 6px 0 currentColor;
 }
 
-.vscode-explorer-tree { padding: 0 0 10px; overflow: auto; }
+.vscode-explorer-tree { padding: 0 0 6px; overflow: auto; }
 .vscode-explorer .explorer-section { border: 0; padding: 0; }
-.vscode-explorer .explorer-section + .explorer-section { margin-top: 7px; }
+.vscode-explorer .explorer-section + .explorer-section { margin-top: 2px; }
 .explorer-section-heading {
   width: 100%;
-  min-height: 27px;
+  min-height: 22px;
   display: flex;
   align-items: center;
-  gap: 5px;
+  gap: 4px;
   padding: 0 8px;
   border: 0;
   color: var(--text-primary);
@@ -7147,7 +7101,7 @@ textarea:focus-visible {
   letter-spacing: .02em;
   text-transform: uppercase;
 }
-.workspace-folder-root + .workspace-folder-root { margin-top: 2px; }
+.workspace-folder-root + .workspace-folder-root { margin-top: 0; }
 /* 「工作区」分组标题下的根文件夹：缩进一级以体现层级从属关系。 */
 .workspace-section .workspace-folder-root .workspace-heading { padding-left: 20px; }
 .explorer-count { margin-left: auto; padding-right: 4px; color: var(--text-muted); font-size: 12px; }
@@ -7178,10 +7132,10 @@ textarea:focus-visible {
   width: 100%;
   max-width: 100%;
   box-sizing: border-box;
-  min-height: 24px;
+  min-height: 22px;
   display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
   padding-right: 8px;
   border: 0;
   border-radius: 0;
@@ -7212,24 +7166,9 @@ textarea:focus-visible {
 .explorer-row.active .explorer-name { font-weight: 400; }
 
 .explorer-icon { flex: 0 0 16px; display: inline-block; }
-.explorer-icon.folder-icon {
-  width: 16px;
-  height: 12px;
-  position: relative;
-  border-radius: 1px 2px 2px 2px;
-  background: #d7a63d;
-}
-.explorer-icon.folder-icon::before {
-  content: '';
-  position: absolute;
-  top: -3px;
-  left: 1px;
-  width: 7px;
-  height: 4px;
-  border-radius: 2px 2px 0 0;
-  background: #e2b64f;
-}
-.explorer-icon.folder-icon.open { background: #e2b64f; }
+/* 文件夹图标改由 AppIcon（SVG）绘制，旧的 CSS 绘制背景已移除。
+   保留 .open 规则会以更高的选择器权重盖掉 icons.css 的 background: none，
+   导致展开态文件夹出现异常黄色色块。 */
 .explorer-icon.file-icon {
   width: 22px;
   height: 18px;
@@ -7412,8 +7351,8 @@ textarea:focus-visible {
 
 /* Explorer refinements: compact open editors and an outline section like VS Code. */
 .vscode-explorer .open-editor-row {
-  min-height: 30px;
-  gap: 7px;
+  min-height: 26px;
+  gap: 5px;
   padding-right: 8px;
 }
 .vscode-explorer .open-editor-row .explorer-icon.file-icon {
@@ -9030,7 +8969,7 @@ html[data-theme] .preview-container,
 .history-section { border: 0; padding: 0; }
 .history-section + .explorer-section { margin-top: 7px; }
 .history-explorer-list { padding: 2px 0 7px; }
-.history-explorer-list .explorer-empty-state { padding-left: 12px; } /* 与历史条目行对齐，而非默认的 36px */
+.history-explorer-list .explorer-empty-state { padding-left: 26px; } /* 与「近期记录」标题文字对齐，兼顾 250px 侧边栏内不折行 */
 .history-row { display: flex; align-items: center; gap: 4px; cursor: pointer; }
 .history-row:hover { color: var(--text-primary); background: var(--bg-hover); }
 .history-row .history-time {

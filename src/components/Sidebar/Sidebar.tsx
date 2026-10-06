@@ -40,7 +40,6 @@ interface RawFileNode {
 
 interface SidebarProps {
   style?: React.CSSProperties;
-  view?: 'explorer' | 'search';
 }
 
 type ContextMenuState = { x: number; y: number; node: FileNode; targetType: 'file' | 'folder' | 'root' } | null;
@@ -157,101 +156,8 @@ function FileIcon({ filename }: { filename: string }) {
   return <FileTypeIcon filename={filename} />;
 }
 
-function SearchSidebar({ style }: SidebarProps) {
-  const { openFile } = useAppStore(useShallow(state => ({ openFile: state.openFile })));
-  const [query, setQuery] = useState('');
-  const [replaceWith, setReplaceWith] = useState('');
-  const [caseSensitive, setCaseSensitive] = useState(false);
-  const [useRegex, setUseRegex] = useState(false);
-  const [extensions, setExtensions] = useState('md,markdown,txt');
-  const [ignoreDirs, setIgnoreDirs] = useState('.git,node_modules,target,dist');
-  const [results, setResults] = useState<Array<{ path: string; line_number: number; column: number; line: string }>>([]);
-  const [diffs, setDiffs] = useState<Array<{ path: string; replacements: number; diff: string }>>([]);
-  const [status, setStatus] = useState('');
-  const [searching, setSearching] = useState(false);
-  const searchSequence = useRef(0);
-  const [history, setHistory] = useState<string[]>(() => readStoredStringArray('zeditor.workspace-search-history'));
-
-  const options = (applyReplace = false) => ({
-    roots: readStoredStringArray(WORKSPACE_ROOTS_KEY), query,
-    caseSensitive, useRegex,
-    extensions: extensions.split(',').map(value => value.trim()).filter(Boolean),
-    ignoreDirs: ignoreDirs.split(',').map(value => value.trim()).filter(Boolean),
-    replaceWith: replaceWith || undefined, applyReplace,
-  });
-
-  const runSearch = async (applyReplace = false) => {
-    if (!query.trim()) return;
-    const currentRequest = ++searchSequence.current;
-    setSearching(true); setStatus('');
-    try {
-      if (!isTauriRuntime()) throw new Error('工作区搜索仅在桌面应用中可用');
-      const response = await invoke<{ matches: typeof results; diffs: typeof diffs; scanned_files: number; truncated: boolean; applied: boolean }>('workspace_search', { options: options(applyReplace) });
-      if (currentRequest !== searchSequence.current) return;
-      setResults(response.matches); setDiffs(response.diffs);
-      setStatus(`${response.scanned_files} 个文件，${response.matches.length} 处匹配${response.truncated ? '（结果已截断）' : ''}${response.applied ? '；替换已写入' : ''}`);
-      const next = [query, ...history.filter(item => item !== query)].slice(0, 12);
-      setHistory(next); writeStoredStringArray('zeditor.workspace-search-history', next);
-    } catch (error) { setStatus(String(error)); } finally { setSearching(false); }
-  };
-
-  const openResult = async (result: typeof results[number]) => {
-    try {
-      await openFile(result.path);
-    } catch { return; /* store 已显示打开失败原因。 */ }
-    window.setTimeout(() => {
-      const current = useAppStore.getState();
-      const view = current.editorView;
-      if (!view || current.currentFile !== result.path) return;
-      const line = view.state.doc.line(Math.min(result.line_number, view.state.doc.lines));
-      view.dispatch({ selection: { anchor: Math.min(line.from + result.column - 1, line.to) }, scrollIntoView: true }); view.focus();
-    }, 0);
-  };
-
-  return (
-    <aside className="sidebar search-sidebar" style={style}>
-      <div className="sidebar-surface">
-        <header className="vscode-explorer-header"><span>搜索</span></header>
-        <div className="document-search-panel">
-          <input
-            value={query}
-            onChange={(event) => setQuery(event.target.value)}
-            onKeyDown={(event) => { if (event.key === 'Enter') void runSearch(); }}
-            placeholder="搜索工作区"
-            aria-label="搜索工作区"
-            autoFocus
-          />
-          <input value={replaceWith} onChange={(event) => setReplaceWith(event.target.value)} placeholder="替换为（先生成 Diff）" aria-label="替换为" />
-          <div className="document-search-options">
-            <label><input type="checkbox" checked={caseSensitive} onChange={event => setCaseSensitive(event.target.checked)} /> 区分大小写</label>
-            <label><input type="checkbox" checked={useRegex} onChange={event => setUseRegex(event.target.checked)} /> 正则</label>
-          </div>
-          <input value={extensions} onChange={event => setExtensions(event.target.value)} placeholder="文件类型，如 md,ts" aria-label="文件类型筛选" />
-          <input value={ignoreDirs} onChange={event => setIgnoreDirs(event.target.value)} placeholder="忽略目录，如 node_modules" aria-label="忽略目录" />
-          <div className="document-search-actions"><button onClick={() => void runSearch()} disabled={searching}>{searching ? '搜索中…' : '搜索'}</button><button onClick={() => { searchSequence.current += 1; setSearching(false); setStatus('已取消显示结果'); }}>取消</button>{replaceWith && <button onClick={() => void runSearch(false)} disabled={searching}>预览 Diff</button>}{diffs.length > 0 && <button onClick={() => { if (window.confirm(`确认写入 ${diffs.length} 个文件的替换？`)) void runSearch(true); }} disabled={searching}>确认替换</button>}</div>
-          {history.length > 0 && <div className="document-search-history">历史：{history.map(item => <button key={item} onClick={() => setQuery(item)}>{item}</button>)}</div>}
-          {status && <div className="document-search-count">{status}</div>}
-          {query.trim() ? (
-            <div className="document-search-results" role="list">
-              {results.map((result) => (
-                <button key={`${result.path}-${result.line_number}-${result.column}`} className="document-search-result" onClick={() => void openResult(result)} role="listitem">
-                  <strong>{getFolderName(result.path)}</strong>
-                  <small>{result.path} · 第 {result.line_number} 行，第 {result.column} 列</small>
-                  <span>{result.line || '空行'}</span>
-                </button>
-              ))}
-              {diffs.map(diff => <pre className="document-search-diff" key={diff.path}>{diff.diff}</pre>)}
-              {!results.length && !diffs.length && !searching && <div className="explorer-empty-state">没有匹配结果</div>}
-            </div>
-          ) : <div className="document-search-empty">输入关键词，在已打开的工作区中递归搜索。</div>}
-        </div>
-      </div>
-    </aside>
-  );
-}
-
-export function Sidebar({ style, view = 'explorer' }: SidebarProps) {
-  return view === 'search' ? <SearchSidebar style={style} /> : <ExplorerSidebar style={style} />;
+export function Sidebar({ style }: SidebarProps) {
+  return <ExplorerSidebar style={style} />;
 }
 
 function ExplorerSidebar({ style }: SidebarProps) {
@@ -909,7 +815,9 @@ function ExplorerSidebar({ style }: SidebarProps) {
   const renderNodes = (nodes: FileNode[], depth = 0) => nodes.map(node => {
     const expanded = expandedNodes.has(node.path);
     const active = currentFile === node.path;
-    const indent = 16 + depth * 20;
+    // 基准 28px = 工作区根目录标题缩进（CSS padding-left: 20px）+ 一级层级 8px，
+    // 保证根目录标题下的子项始终比标题更靠右；每级再增加 20px。
+    const indent = 28 + depth * 20;
     return (
       <div key={node.path} role="treeitem" aria-expanded={node.isDirectory ? expanded : undefined}>
         <button
@@ -934,7 +842,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
         {node.isDirectory && expanded && (
           <div role="group" className="explorer-children">
             {node.children?.length ? renderNodes(node.children, depth + 1) : (
-              <div className="explorer-empty-folder" style={{ paddingLeft: `${46 + depth * 20}px` }}>空文件夹</div>
+              <div className="explorer-empty-folder" style={{ paddingLeft: `${58 + depth * 20}px` }}>空文件夹</div>
             )}
           </div>
         )}

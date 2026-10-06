@@ -411,11 +411,6 @@ body {
 .explorer-row.active::before { width: 2px; background: var(--ui-accent); }
 .explorer-dirty { background: var(--ui-accent); }
 
-.document-search-panel input {
-  height: var(--ui-control-height-md);
-  border-radius: var(--ui-radius-sm) !important;
-}
-
 /* Tabs, editor and pane boundaries ----------------------------------- */
 
 .document-pane { background: var(--ui-bg-editor); }
@@ -1324,7 +1319,6 @@ body {
 }
 
 .explorer-empty-state,
-.document-search-empty,
 .font-picker-empty {
   color: var(--ui-text-muted);
   font-size: var(--ui-font-size-sm);
