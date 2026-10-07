@@ -31,6 +31,11 @@
   cursor: pointer;
 }
 .titlebar .titlebar-command-center:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text-color); }
+
+/* 搜索进行中：标题栏入口原地变成输入框，面板里不再有第二个输入框。 */
+.titlebar .titlebar-command-center.titlebar-command-center-open { cursor: text; border-color: var(--accent-color); background: var(--bg-input); color: var(--text-color); }
+.titlebar .titlebar-search-input { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }
+.titlebar .titlebar-search-input::placeholder { color: var(--text-muted); }
 .titlebar-command-center > svg { width: 14px; height: 14px; flex-shrink: 0; fill: none; stroke: currentColor; stroke-width: 1.5; }
 .titlebar-command-center > span:first-of-type { flex: 1; text-align: left; }
 .titlebar-command-center kbd { flex-shrink: 0; font: inherit; font-size: 10px; color: var(--text-muted); }

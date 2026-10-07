@@ -85,6 +85,7 @@ const entries: Record<string, Translation> = {
   '近期文件': { 'zh-CN': '近期文件', 'zh-TW': '近期檔案', en: 'Recent files' },
   '近期记录': { 'zh-CN': '近期记录', 'zh-TW': '近期記錄', en: 'Recent' },
   '输入 > 查看快捷命令': { 'zh-CN': '输入 > 查看快捷命令', 'zh-TW': '輸入 > 檢視快捷命令', en: 'Type > for quick commands' },
+  '输入关键词即可搜索文档与文件内容': { 'zh-CN': '输入关键词即可搜索文档与文件内容', 'zh-TW': '輸入關鍵字即可搜尋文件與檔案內容', en: 'Type to search documents and file contents' },
   '演示模式': { 'zh-CN': '演示模式', 'zh-TW': '簡報模式', en: 'Presentation mode' },
   'AI 指令面板': { 'zh-CN': 'AI 指令面板', 'zh-TW': 'AI 指令面板', en: 'AI command palette' },
   '导出为 HTML': { 'zh-CN': '导出为 HTML', 'zh-TW': '匯出為 HTML', en: 'Export as HTML' },

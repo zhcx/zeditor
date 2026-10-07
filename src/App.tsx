@@ -121,15 +121,22 @@ function App() {
   const closeAiPalette = useCallback(() => setAiPaletteVisible(false), []);
   const [activityView, setActivityView] = useState<'explorer' | 'search'>('explorer');
   const [documentSwitcherVisible, setDocumentSwitcherVisible] = useState(false);
-  const closeDocumentSwitcher = useCallback(() => setDocumentSwitcherVisible(false), []);
+  // 查询值由 App 持有：输入框本身在标题栏（面板内不再放第二个输入框）。
+  const [switcherQuery, setSwitcherQuery] = useState('');
+  const switcherInputRef = useRef<HTMLInputElement>(null);
+  const closeDocumentSwitcher = useCallback(() => {
+    setDocumentSwitcherVisible(false);
+    setSwitcherQuery('');
+  }, []);
 
   useEffect(() => {
-    const openSwitcher = () => setDocumentSwitcherVisible(true);
+    const openSwitcher = () => { setSwitcherQuery(''); setDocumentSwitcherVisible(true); };
     const onKeyDown = (event: KeyboardEvent) => {
       if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && !event.isComposing && event.key.toLowerCase() === 'p') {
         event.preventDefault();
         if (document.querySelector('.settings-overlay, .unsaved-dialog-overlay, .modal-overlay, [aria-modal="true"]:not(.document-switcher)')) return;
         setDocumentSwitcherVisible(visible => !visible);
+        setSwitcherQuery('');
       }
     };
     window.addEventListener('zeditor-switch-document', openSwitcher);
@@ -139,6 +146,13 @@ function App() {
       window.removeEventListener('keydown', onKeyDown);
     };
   }, []);
+
+  // 面板展开后焦点直接落在标题栏输入框上，输入不再经过面板内部。
+  useEffect(() => {
+    if (!documentSwitcherVisible) return undefined;
+    const frame = window.requestAnimationFrame(() => switcherInputRef.current?.focus());
+    return () => window.cancelAnimationFrame(frame);
+  }, [documentSwitcherVisible]);
 
   // AI 指令面板：Ctrl/Cmd+J 快捷键或菜单事件打开（VMark 精灵选择器的等价入口）。
   useEffect(() => {
@@ -964,7 +978,13 @@ function App() {
   return (
     <div className={`app ${immersivePolicy.active ? 'immersive-mode-active' : ''} ${mode === 'zen' ? 'zen-mode' : ''}`}>
       <UiLanguageBridge />
-      <TitleBar onRequestClose={requestAppClose} />
+      <TitleBar
+        onRequestClose={requestAppClose}
+        searchOpen={documentSwitcherVisible}
+        searchQuery={switcherQuery}
+        onSearchQueryChange={setSwitcherQuery}
+        searchInputRef={switcherInputRef}
+      />
       <div className="app-workbench">
         <ActivityBar
           chatbotVisible={chatbotVisible}
@@ -1263,7 +1283,15 @@ function App() {
         </Suspense>
       )}
       {documentSwitcherVisible && (
-        <Suspense fallback={null}><DocumentSwitcher onClose={closeDocumentSwitcher} onRevealActivityView={revealActivityView} /></Suspense>
+        <Suspense fallback={null}>
+          <DocumentSwitcher
+            onClose={closeDocumentSwitcher}
+            onRevealActivityView={revealActivityView}
+            query={switcherQuery}
+            onQueryChange={setSwitcherQuery}
+            searchInputRef={switcherInputRef}
+          />
+        </Suspense>
       )}
       {encodingDialog && <Suspense fallback={null}><EncodingDialog key={`${encodingDialog.mode}-${encodingDialog.tabId || encodingDialog.path || encodingDialog.title}`} request={encodingDialog} /></Suspense>}
       <Suspense fallback={null}>

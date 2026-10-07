@@ -19,6 +19,10 @@ interface DocumentSwitcherProps {
   onClose: () => void;
   /** 「搜索当前文档」命令需要把侧边栏切到搜索视图，该状态由 App 持有，故以回调注入。 */
   onRevealActivityView?: (view: 'explorer' | 'search') => void;
+  /** 查询值与输入框都在标题栏（App 持有），面板只负责展示结果。 */
+  query: string;
+  onQueryChange: (value: string) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
 /** 快捷命令：复用应用里已有的动作（store 方法或既有 CustomEvent），不另造一套处理链。 */
@@ -225,12 +229,11 @@ function toWorkspaceSearchPayload(options: DropdownSearchOptions, replaceWith: s
   };
 }
 
-export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwitcherProps) {
+export function DocumentSwitcher({ onClose, onRevealActivityView, query, onQueryChange, searchInputRef }: DocumentSwitcherProps) {
   const tabs = useAppStore(state => state.tabs);
   const activeTabId = useAppStore(state => state.activeTabId);
   const language = useAppStore(state => state.settings.appearance.language);
   const historyRetentionDays = useAppStore(state => state.settings.explorer.history_retention_days);
-  const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
   const [caseSensitive, setCaseSensitive] = useState(false);
@@ -242,7 +245,12 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
   const [position, setPosition] = useState<DropdownPosition>(measure);
   const [workspaceSearch, setWorkspaceSearch] = useState<WorkspaceSearchState | null>(null);
   const [diffState, setDiffState] = useState<DiffState | null>(null);
-  const inputRef = useRef<HTMLInputElement>(null);
+  // 输入框在标题栏，面板只借用同一个 ref 做聚焦与键位归属判断。
+  const focusSearchInput = () => searchInputRef?.current?.focus();
+  const isSearchInput = useCallback(
+    (target: EventTarget | null) => Boolean(searchInputRef?.current) && target === searchInputRef?.current,
+    [searchInputRef],
+  );
   const panelRef = useRef<HTMLElement>(null);
   const previousFocusRef = useRef<HTMLElement | null>(null);
   const searchSequence = useRef(0);
@@ -358,8 +366,8 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
   }, []);
 
   useLayoutEffect(() => {
+    // 记住打开前的焦点，收起时交还；输入框本身由 App 负责聚焦。
     previousFocusRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    inputRef.current?.focus();
   }, []);
 
   useEffect(() => {
@@ -501,9 +509,9 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
 
   // 「更多命令…」：切到命令模式（输入 `>`），随后可继续输入按名称筛选全部命令。
   const revealAllCommands = () => {
-    setQuery('>');
+    onQueryChange('>');
     setActiveIndex(0);
-    inputRef.current?.focus();
+    focusSearchInput();
   };
 
   const activateRow = (row: SwitchRow) => {
@@ -516,49 +524,43 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
     else void revealLocation(row.match.path, row.match.line_number, row.match.column);
   };
 
-  const handleKeyDown = (event: React.KeyboardEvent) => {
-    // 输入法组合阶段保留候选选择与确认，不触发文档导航或后台快捷键。
-    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) {
-      event.stopPropagation();
-      return;
-    }
-    if (event.ctrlKey || event.metaKey) {
-      event.stopPropagation();
-      if (event.key.toLowerCase() === 'p') { event.preventDefault(); dismiss(); }
-      return;
-    }
-    if (event.key === 'Escape') {
-      event.preventDefault(); event.stopPropagation(); dismiss();
-      return;
-    }
-    // 高级选项里的输入框保留各自的默认键位（光标、Tab 跳格）。
-    if (event.target !== inputRef.current) return;
-    if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-      event.preventDefault();
-      if (rows.length) setActiveIndex((selectedIndex + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
-    } else if (event.key === 'Enter') {
-      event.preventDefault();
-      if (selected) activateRow(selected);
-    }
-  };
+  // 输入框在标题栏而不在面板 DOM 内，因此键位改为监听 window。
+  // 依赖里带着 rows / activateRow / dismiss：它们每次渲染都会更新，等价于始终使用最新闭包。
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      // Ctrl/Cmd 组合交给 App（Ctrl+P 开关面板）；高级选项里的输入框保留各自默认键位。
+      if (event.ctrlKey || event.metaKey || event.altKey) return;
+      if (!isSearchInput(event.target)) return;
+      if (event.isComposing || event.keyCode === 229) return;
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        dismiss();
+      } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+        event.preventDefault();
+        if (rows.length) setActiveIndex((selectedIndex + (event.key === 'ArrowDown' ? 1 : -1) + rows.length) % rows.length);
+      } else if (event.key === 'Enter') {
+        event.preventDefault();
+        if (selected) activateRow(selected);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+    // activateRow / dismiss 每次渲染都会重建，放进依赖只会让监听反复注册；
+    // 监听在行数据或选中项变化时都会重新注册，用的始终是不过期的闭包。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isSearchInput, rows, selected, selectedIndex]);
 
   // 点到标题、路径等非交互区域时把焦点留在搜索框，保持「边输边选」的连续感。
   const handlePanelMouseDown = (event: React.MouseEvent) => {
     const target = event.target as HTMLElement;
     if (target.closest('button, input, label, pre')) return;
-    inputRef.current?.focus();
-  };
-
-  // 焦点离开面板（Tab 跳格或点到别处）时收起，点击面板内的非聚焦区域不受影响。
-  const handlePanelBlur = (event: React.FocusEvent<HTMLElement>) => {
-    const next = event.relatedTarget as Node | null;
-    if (next && !event.currentTarget.contains(next)) onClose();
+    focusSearchInput();
   };
 
   const hint = commandMode
     ? t('输入名称筛选命令', language)
     : !trimmedQuery
-      ? t('输入关键词即可搜索已打开的文档与工作区文件内容', language)
+      ? t('输入关键词即可搜索文档与文件内容', language)
       : trimmedQuery.length < MIN_WORKSPACE_QUERY
         ? t('输入至少 2 个字符以搜索工作区内容', language)
         : !isTauriRuntime()
@@ -579,14 +581,8 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
       ref={panelRef}
       className="document-switcher"
       style={{ top: position.top, left: position.left, width: position.width, maxHeight: position.maxHeight }}
-      onKeyDown={handleKeyDown}
-      onBlur={handlePanelBlur}
       onMouseDown={handlePanelMouseDown}
     >
-      <div className="document-switcher-search">
-        <AppIcon name="search" size={16} />
-        <input ref={inputRef} value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} placeholder={t('搜索文档或文件内容…', language)} aria-label={t('搜索已打开的文档', language)} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="document-switcher-results" aria-activedescendant={selected ? `switch-row-${selectedIndex}` : undefined} />
-      </div>
       {hint && (
         <div className="document-switcher-hint">
           <span>{hint}</span>

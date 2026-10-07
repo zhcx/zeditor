@@ -10,9 +10,14 @@ const APP_NAME = 'Zeditor';
 
 interface TitleBarProps {
   onRequestClose: () => void | Promise<void>;
+  /** 顶部搜索面板打开时，入口原地变成输入框（面板里不再有第二个输入框）。 */
+  searchOpen?: boolean;
+  searchQuery?: string;
+  onSearchQueryChange?: (value: string) => void;
+  searchInputRef?: React.RefObject<HTMLInputElement | null>;
 }
 
-export function TitleBar({ onRequestClose }: TitleBarProps) {
+export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '', onSearchQueryChange, searchInputRef }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
   const mountedRef = useRef(true);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
@@ -86,12 +91,34 @@ export function TitleBar({ onRequestClose }: TitleBarProps) {
         className="titlebar-drag-spacer"
         data-tauri-drag-region
       >
-        <button type="button" className="titlebar-command-center" data-tauri-drag-region="false" aria-label={`${t('当前文档：', language)}${activeDocumentTitle} · ${t('搜索文档与文件内容', language)}`} aria-haspopup="listbox" aria-keyshortcuts="Control+P Meta+P" title={formatShortcut(t('搜索文档与文件内容（Ctrl+P）', language))} onClick={() => window.dispatchEvent(new CustomEvent('zeditor-switch-document'))}>
-          <AppIcon name="search" size={14}  />
-          <span>{activeDocumentTitle}</span>
-          {modified && <span className="titlebar-document-dirty" aria-label={t('未保存修改', language)} />}
-          <kbd>{formatShortcut('Ctrl P')}</kbd>
-        </button>
+        {searchOpen ? (
+          <span className="titlebar-command-center titlebar-command-center-open" data-tauri-drag-region="false">
+            <AppIcon name="search" size={14} />
+            <input
+              ref={searchInputRef}
+              className="titlebar-search-input"
+              value={searchQuery}
+              onChange={event => onSearchQueryChange?.(event.target.value)}
+              placeholder={t('搜索文档或文件内容…', language)}
+              aria-label={t('搜索文档与文件内容', language)}
+              aria-keyshortcuts="Control+P Meta+P"
+              aria-controls="document-switcher-results"
+              aria-expanded="true"
+              aria-autocomplete="list"
+              role="combobox"
+              autoComplete="off"
+              spellCheck={false}
+            />
+            <kbd>{formatShortcut('Ctrl P')}</kbd>
+          </span>
+        ) : (
+          <button type="button" className="titlebar-command-center" data-tauri-drag-region="false" aria-label={`${t('当前文档：', language)}${activeDocumentTitle} · ${t('搜索文档与文件内容', language)}`} aria-haspopup="listbox" aria-keyshortcuts="Control P Meta P" title={formatShortcut(t('搜索文档与文件内容（Ctrl+P）', language))} onClick={() => window.dispatchEvent(new CustomEvent('zeditor-switch-document'))}>
+            <AppIcon name="search" size={14}  />
+            <span>{activeDocumentTitle}</span>
+            {modified && <span className="titlebar-document-dirty" aria-label={t('未保存修改', language)} />}
+            <kbd>{formatShortcut('Ctrl P')}</kbd>
+          </button>
+        )}
       </div>
       <div className="titlebar-controls" data-tauri-drag-region="false">
         <button
