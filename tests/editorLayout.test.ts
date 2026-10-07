@@ -24,6 +24,21 @@ test('wrapped editor does not reserve or display horizontal scrolling', async ()
   assert.equal(options.scrollbar?.verticalSliderSize, 10);
 });
 
+test('editor measures wrap columns including letter spacing', async () => {
+  type OverflowOptions = { wrappingStrategy?: string };
+  let options: OverflowOptions = {};
+
+  try {
+    ({ EDITOR_OVERFLOW_OPTIONS: options } = await import('../src/utils/editorLayout.ts'));
+  } catch {
+    // 断言会给出预期的回归失败。
+  }
+
+  // 'simple' 策略按缓存的字符宽度估算折行列，不计入 letterSpacing（本应用默认 0.6px），
+  // 于是长行渲染宽度大于折行列，尾部溢出编辑框；横向滚动条又被隐去，用户无法看到尾部。
+  assert.equal(options.wrappingStrategy, 'advanced');
+});
+
 test('editor wraps against the viewport without shrinking from rendered font measurements', async () => {
   const source = await readFile(new URL('../src/components/Editor/Editor.tsx', import.meta.url), 'utf8');
 
