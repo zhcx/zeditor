@@ -80,6 +80,8 @@ const entries: Record<string, Translation> = {
   '文档内容': { 'zh-CN': '文档内容', 'zh-TW': '文件內容', en: 'Document contents' },
   '搜索当前文档': { 'zh-CN': '搜索当前文档', 'zh-TW': '搜尋目前文件', en: 'Search current document' },
   '快捷命令': { 'zh-CN': '快捷命令', 'zh-TW': '快捷命令', en: 'Quick commands' },
+  '更多命令…': { 'zh-CN': '更多命令…', 'zh-TW': '更多命令…', en: 'More commands…' },
+  '输入名称筛选命令': { 'zh-CN': '输入名称筛选命令', 'zh-TW': '輸入名稱篩選命令', en: 'Type to filter commands' },
   '近期文件': { 'zh-CN': '近期文件', 'zh-TW': '近期檔案', en: 'Recent files' },
   '近期记录': { 'zh-CN': '近期记录', 'zh-TW': '近期記錄', en: 'Recent' },
   '输入 > 查看快捷命令': { 'zh-CN': '输入 > 查看快捷命令', 'zh-TW': '輸入 > 檢視快捷命令', en: 'Type > for quick commands' },

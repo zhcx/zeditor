@@ -90,6 +90,7 @@ interface DiffState {
 
 type SwitchRow =
   | { kind: 'command'; key: string; command: QuickCommand }
+  | { kind: 'commandMore'; key: string }
   | { kind: 'recent'; key: string; entry: RecentHistoryEntry }
   | { kind: 'document'; key: string; tab: Tab }
   | { kind: 'docContent'; key: string; hit: DocumentContentHit }
@@ -114,7 +115,10 @@ const MAX_MATCH_ROWS = 60;
 // 各分组的展示上限：即时层（打开的文档）优先，磁盘检索结果按预算截断。
 const MAX_DOC_CONTENT_ROWS = 30;
 const MAX_FILE_ROWS = 40;
-const MAX_COMMAND_ROWS = 12;
+// 空输入只列前 5 条常用命令，其余通过末尾「更多命令…」进入命令模式查看；
+// 命令模式（输入 `>`）上限放宽到全部命令数之上，避免再有截断。
+const COLLAPSED_COMMAND_ROWS = 5;
+const MAX_COMMAND_ROWS = 40;
 const MAX_RECENT_ROWS = 8;
 // 单个文档只扫描前 1MB：打开超大文件时仍能保证每次输入瞬间出结果。
 const MAX_DOC_CONTENT_CHARS = 1_000_000;
@@ -278,14 +282,16 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
     { id: 'export-word', label: t('导出为 Word', language), run: () => window.dispatchEvent(new CustomEvent('zeditor-export-request', { detail: { format: 'word' } })) },
     { id: 'settings', label: t('设置', language), run: () => useAppStore.getState().setSettingsOpen(true) },
   ], [language, onRevealActivityView]);
-  // 空输入展示全部命令，输入 `>` 后按命令名过滤；正常搜索时不占用结果区。
+  // 空输入只列前几条常用命令，输入 `>` 后按命令名过滤并放开条数；正常搜索时不占用结果区。
   const visibleCommands = useMemo(() => {
     if (trimmedQuery && !commandMode) return [];
     const filtered = commandQuery
       ? commands.filter(command => command.label.toLowerCase().includes(commandQuery) || command.id.includes(commandQuery))
       : commands;
-    return filtered.slice(0, MAX_COMMAND_ROWS);
+    return filtered.slice(0, commandMode ? MAX_COMMAND_ROWS : COLLAPSED_COMMAND_ROWS);
   }, [commands, commandMode, commandQuery, trimmedQuery]);
+  // 折叠态下若还有更多命令，末尾给出「更多命令…」入口（切到命令模式后可筛选全部）。
+  const showMoreCommands = !commandMode && commands.length > COLLAPSED_COMMAND_ROWS;
   // 近期文件与侧边栏「近期记录」共用同一份 localStorage 数据；这里只取文件，打开文件夹仍走资源管理器。
   const recentFiles = useMemo(() => {
     if (trimmedQuery) return [];
@@ -308,6 +314,7 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
   // 键盘上下键在「快捷命令 + 近期文件 + 打开的文档 + 文档内容 + 工作区文件 + 工作区内容」同一条扁平轨道上移动。
   const rows = useMemo<SwitchRow[]>(() => [
     ...visibleCommands.map(command => ({ kind: 'command' as const, key: `cmd:${command.id}`, command })),
+    ...(showMoreCommands ? [{ kind: 'commandMore' as const, key: 'cmd:more' }] : []),
     ...recentFiles.map(entry => ({ kind: 'recent' as const, key: `recent:${entry.path}`, entry })),
     ...documents.map(tab => ({ kind: 'document' as const, key: `doc:${tab.id}`, tab })),
     ...docContentHits.map(hit => ({ kind: 'docContent' as const, key: `content:${hit.tabId}:${hit.line}:${hit.column}`, hit })),
@@ -317,7 +324,7 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
       key: `match:${match.path}\u0000${match.line_number}\u0000${match.column}`,
       match,
     }))),
-  ], [visibleCommands, recentFiles, documents, docContentHits, workspaceFiles, visibleGroups]);
+  ], [visibleCommands, showMoreCommands, recentFiles, documents, docContentHits, workspaceFiles, visibleGroups]);
   // 文档内容命中按文档分组展示（各文档的命中在数组里本就是连续的）。
   const docContentGroups = useMemo(() => {
     const byTab = new Map<string, DocumentContentHit[]>();
@@ -335,6 +342,7 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
     return map;
   }, [rows]);
   const rowIndex = (key: string) => rowIndexOf.get(key) ?? 0;
+  const moreRowIndex = rowIndex('cmd:more');
   const selectedIndex = Math.min(activeIndex, Math.max(0, rows.length - 1));
   const selected = rows[selectedIndex];
   const workspaceSearchEnabled = !commandMode && canSearchWorkspace && trimmedQuery.length >= MIN_WORKSPACE_QUERY;
@@ -491,8 +499,16 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
     command.run();
   };
 
+  // 「更多命令…」：切到命令模式（输入 `>`），随后可继续输入按名称筛选全部命令。
+  const revealAllCommands = () => {
+    setQuery('>');
+    setActiveIndex(0);
+    inputRef.current?.focus();
+  };
+
   const activateRow = (row: SwitchRow) => {
     if (row.kind === 'command') runCommand(row.command);
+    else if (row.kind === 'commandMore') revealAllCommands();
     else if (row.kind === 'recent') void openRecentFile(row.entry.path);
     else if (row.kind === 'document') openDocument(row.tab.id);
     else if (row.kind === 'docContent') openDocumentContent(row.hit);
@@ -540,7 +556,7 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
   };
 
   const hint = commandMode
-    ? ''
+    ? t('输入名称筛选命令', language)
     : !trimmedQuery
       ? t('输入关键词即可搜索已打开的文档与工作区文件内容', language)
       : trimmedQuery.length < MIN_WORKSPACE_QUERY
@@ -591,6 +607,12 @@ export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwit
                 </button>
               );
             })}
+            {showMoreCommands && (
+              <button key="cmd:more" id={`switch-row-${moreRowIndex}`} type="button" role="option" aria-selected={moreRowIndex === selectedIndex} tabIndex={-1} className="document-switcher-item document-switcher-command document-switcher-more" onMouseEnter={() => setActiveIndex(moreRowIndex)} onClick={revealAllCommands}>
+                <span className="document-switcher-command-label">{t('更多命令…', language)}</span>
+                <span className="document-switcher-more-count">{commands.length}<AppIcon name="chevronRight" size={12} /></span>
+              </button>
+            )}
           </div>
         )}
         {/* 近期文件：与侧边栏「近期记录」共用同一份 localStorage 数据。 */}
