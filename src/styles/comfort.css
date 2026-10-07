@@ -32,8 +32,9 @@
 }
 .titlebar .titlebar-command-center:hover { border-color: var(--border-strong); background: var(--bg-hover); color: var(--text-color); }
 
-/* 搜索进行中：标题栏入口原地变成输入框，面板里不再有第二个输入框。 */
-.titlebar .titlebar-command-center.titlebar-command-center-open { cursor: text; border-color: var(--accent-color); background: var(--bg-input); color: var(--text-color); }
+/* 搜索进行中：标题栏入口原地变成输入框，面板里不再有第二个输入框。
+   底色沿用应用统一的输入框底色（--bg-elevated），焦点只以边框变色表示，与其它搜索框一致。 */
+.titlebar .titlebar-command-center.titlebar-command-center-open { cursor: text; border-color: var(--accent-color); background: var(--bg-elevated); color: var(--text-color); }
 .titlebar .titlebar-search-input { flex: 1 1 auto; min-width: 0; height: 100%; padding: 0; border: 0; outline: 0; background: transparent; color: inherit; font: inherit; }
 /* 焦点态只保留容器外圈（.titlebar-command-center-open 的蓝色边框），输入框自身不再画第二圈。 */
 .titlebar .titlebar-search-input:focus,

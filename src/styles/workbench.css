@@ -126,17 +126,19 @@ body {
   opacity: .72;
 }
 
-.app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not(.inputarea):not(.ime-text-area) {
+/* 标题栏搜索框的「盒子」由 .titlebar-command-center 容器负责（边框 + 底色），
+   输入框本身必须保持裸样式，否则容器与输入框各画一层，会出现灰块与内圈描边。 */
+.app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not(.inputarea):not(.ime-text-area):not(.titlebar-search-input) {
   border-color: var(--ui-border-default);
   background: var(--ui-bg-input);
   color: var(--ui-text-primary);
 }
 
-.app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not(.inputarea):not(.ime-text-area):hover:not(:disabled) {
+.app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not(.inputarea):not(.ime-text-area):not(.titlebar-search-input):hover:not(:disabled) {
   border-color: var(--ui-border-strong);
 }
 
-.app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not(.inputarea):not(.ime-text-area):focus {
+.app :is(input:not([type="checkbox"]):not([type="radio"]):not([type="range"]), select, textarea):not(.inputarea):not(.ime-text-area):not(.titlebar-search-input):focus {
   border-color: var(--ui-border-focus);
   box-shadow: 0 0 0 3px var(--ui-accent-muted);
 }
