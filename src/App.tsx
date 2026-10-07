@@ -36,7 +36,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import { message, save as chooseSaveFile } from '@tauri-apps/plugin-dialog';
-import { createElementScrollViewport, getSyncedScrollTop, type ObservableScrollViewport, type ScrollAnchor, type ScrollRange } from './utils/scrollSync';
+import { createElementScrollViewport, getMirroredScrollTop, getSyncedScrollTop, getViewportRatio, type ObservableScrollViewport, type ScrollAnchor, type ScrollRange } from './utils/scrollSync';
 import { getImmersiveWorkspacePolicy } from './utils/immersiveWorkspace';
 import { guardWindowClose, type CloseGuardTab, type UnsavedChangesAction } from './utils/windowCloseGuard';
 import { resolveSaveBaseName } from './utils/saveName';
@@ -842,19 +842,18 @@ function App() {
         scrollSyncFrame.current = null;
       }
     };
-    // 跳转定位采用「目标块吸附到窗格上部固定锚点」的模型：双向行为一致、
-    // 目标永远落在可预期的位置，替代原先的镜像对齐公式——长短段混排时
-    // 两侧互相回算容易产生越顶/抖动，且目标常被压在窗格最顶端。
-    const REVEAL_TOP_OFFSET = 88;
+    // 跳转定位采用「镜像对齐」：点击行在编辑器视口内的相对位置（0 = 贴顶、1 = 贴底），
+    // 就是对应块在预览视口内的相对位置——两侧一一对应，而不是把目标一律顶到窗格上沿。
+    // 只有一个很小的呼吸位（minOffset）避免目标恰好贴着上沿；文档首尾由范围钳制自然吸附。
     const revealViewportTo = (
       viewport: ObservableScrollViewport,
-      desiredTop: number,
+      nextTop: number,
       maxTop: number,
     ) => {
-      const nextTop = Math.max(0, Math.min(desiredTop - REVEAL_TOP_OFFSET, maxTop));
-      if (Math.abs(viewport.getScrollTop() - nextTop) < 0.5) return;
+      const clamped = Math.max(0, Math.min(nextTop, maxTop));
+      if (Math.abs(viewport.getScrollTop() - clamped) < 0.5) return;
       markProgrammaticWrite(viewport);
-      viewport.setScrollTop(nextTop);
+      viewport.setScrollTop(clamped);
     };
     const alignEditorLineWithPreview = (lineNumber: number, direction: 'editor-to-preview' | 'preview-to-editor') => {
       const target = findActiveSourceElement(previewScrollElement, lineNumber);
@@ -862,18 +861,37 @@ function App() {
 
       stopPendingScrollSync();
 
+      // 目标块在预览文档坐标系中的绝对 top（含已滚动距离）。
+      const blockDocumentTop = target.getBoundingClientRect().top
+        - previewScrollElement.getBoundingClientRect().top
+        + previewViewport.getScrollTop();
+
       if (direction === 'editor-to-preview') {
         const previewMax = Math.max(0, previewViewport.getScrollHeight() - previewViewport.getClientHeight());
-        // 目标块在预览文档坐标系中的绝对 top（含已滚动距离）。
-        const blockDocumentTop = target.getBoundingClientRect().top
-          - previewScrollElement.getBoundingClientRect().top
-          + previewViewport.getScrollTop();
-        revealViewportTo(previewViewport, blockDocumentTop, previewMax);
+        const ratio = getViewportRatio(
+          editorView.getTopForLineNumber(lineNumber),
+          editorViewport.getScrollTop(),
+          editorViewport.getClientHeight(),
+        );
+        revealViewportTo(
+          previewViewport,
+          getMirroredScrollTop(blockDocumentTop, ratio, previewViewport.getClientHeight(), previewMax),
+          previewMax,
+        );
         return;
       }
 
       const editorMax = Math.max(0, editorViewport.getScrollHeight() - editorViewport.getClientHeight());
-      revealViewportTo(editorViewport, editorView.getTopForLineNumber(lineNumber), editorMax);
+      const ratio = getViewportRatio(
+        blockDocumentTop,
+        previewViewport.getScrollTop(),
+        previewViewport.getClientHeight(),
+      );
+      revealViewportTo(
+        editorViewport,
+        getMirroredScrollTop(editorView.getTopForLineNumber(lineNumber), ratio, editorViewport.getClientHeight(), editorMax),
+        editorMax,
+      );
     };
     const revealPreviewLine = (lineNumber: number) => alignEditorLineWithPreview(lineNumber, 'editor-to-preview');
     const revealEditorLine = (lineNumber: number) => alignEditorLineWithPreview(lineNumber, 'preview-to-editor');

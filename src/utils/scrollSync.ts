@@ -29,6 +29,37 @@ export function getAlignedScrollTop(
   return Math.max(0, Math.min(containerScreenTop + contentTop - targetScreenTop, safeMax));
 }
 
+/**
+ * 内容块在视口内的相对位置：0 表示贴顶、1 表示贴底。
+ * 用于「镜像对齐」——在编辑器里点击哪一行，对应内容就落在预览视口的同一相对位置。
+ */
+export function getViewportRatio(contentTop: number, scrollTop: number, viewportHeight: number): number {
+  if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) return 0;
+  const offset = contentTop - scrollTop;
+  if (!Number.isFinite(offset)) return 0;
+  return Math.max(0, Math.min(offset / viewportHeight, 1));
+}
+
+/**
+ * 镜像对齐后的目标滚动位置：把目标内容放在视口内的 ratio 处。
+ * 会保留一个很小的呼吸位（minOffset），避免目标恰好贴在窗格最上沿；
+ * 结果统一钳制在 [0, maxTop] 内，文档首尾自然吸附。
+ */
+export function getMirroredScrollTop(
+  contentTop: number,
+  ratio: number,
+  viewportHeight: number,
+  maxTop: number,
+  minOffset = 24,
+): number {
+  const safeRatio = Number.isFinite(ratio) ? Math.max(0, Math.min(ratio, 1)) : 0;
+  const safeHeight = Number.isFinite(viewportHeight) ? Math.max(0, viewportHeight) : 0;
+  const safeMax = Number.isFinite(maxTop) ? Math.max(0, maxTop) : 0;
+  const offset = Math.max(safeRatio * safeHeight, Math.max(0, minOffset));
+  const safeContentTop = Number.isFinite(contentTop) ? contentTop : 0;
+  return Math.max(0, Math.min(safeContentTop - offset, safeMax));
+}
+
 const sortedAnchorCache = new WeakMap<ScrollAnchor[], ScrollAnchor[]>();
 
 function getSortedAnchors(anchors: ScrollAnchor[]): ScrollAnchor[] {
