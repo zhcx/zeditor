@@ -119,6 +119,7 @@ function App() {
   const closePresentation = useCallback(() => setPresentationVisible(false), []);
   const [aiPaletteVisible, setAiPaletteVisible] = useState(false);
   const closeAiPalette = useCallback(() => setAiPaletteVisible(false), []);
+  const [activityView, setActivityView] = useState<'explorer' | 'search'>('explorer');
   const [documentSwitcherVisible, setDocumentSwitcherVisible] = useState(false);
   const closeDocumentSwitcher = useCallback(() => setDocumentSwitcherVisible(false), []);
 
@@ -667,9 +668,15 @@ function App() {
     };
   }, [balanceDocumentPanes, chatbotPanelWidth, chatbotVisible, outlineVisible, proofreadPanelWidth, proofreadResults.length, setSplitRatio, sidebarVisible, sidebarWidth]);
 
-  const toggleExplorerView = useCallback(() => {
-    setSidebarVisible(!sidebarVisible);
-  }, [setSidebarVisible, sidebarVisible]);
+  // 活动栏切换侧栏视图：点当前视图收起侧栏，点另一个视图切换过去。
+  const selectActivityView = useCallback((view: 'explorer' | 'search') => {
+    if (sidebarVisible && activityView === view) {
+      setSidebarVisible(false);
+      return;
+    }
+    setActivityView(view);
+    if (!sidebarVisible) setSidebarVisible(true);
+  }, [activityView, setSidebarVisible, sidebarVisible]);
 
   const toggleThemeVariant = useCallback(() => {
     const currentSettings = useAppStore.getState().settings;
@@ -952,13 +959,14 @@ function App() {
       <TitleBar onRequestClose={requestAppClose} />
       <div className="app-workbench">
         <ActivityBar
-          explorerVisible={sidebarVisible}
           chatbotVisible={chatbotVisible}
           settingsOpen={settingsOpen}
           immersive={mode === 'immersive'}
           zen={mode === 'zen'}
           theme={settings.appearance.theme}
-          onToggleExplorer={toggleExplorerView}
+          activeView={activityView}
+          sidebarVisible={sidebarVisible}
+          onSelectView={selectActivityView}
           onOpenChat={() => setChatbotVisible(!chatbotVisible)}
           onOpenSettings={() => setSettingsOpen(true)}
           onToggleTheme={toggleThemeVariant}
@@ -976,7 +984,7 @@ function App() {
           <div className="app-body">
           {mode === 'split' && (sidebarVisible || outlineVisible) && (
           <>
-            <Sidebar style={{ width: sidebarWidth }} />
+            <Sidebar style={{ width: sidebarWidth }} view={activityView} />
             <div
               ref={sidebarDividerRef}
               className="sidebar-divider resizable"

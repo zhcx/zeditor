@@ -200,6 +200,10 @@ select:focus-visible {
   outline-offset: 2px;
 }
 
+/* 编辑器（Monaco）内部控件沿用其自身样式：Ctrl+F 查找框不再出现一圈蓝色描边；
+   选择器权重 (0,2,1) 高于上方通用的 input:focus-visible (0,1,1)。 */
+.monaco-editor :is(input, button, select):focus-visible { outline: none; }
+
 ::selection {
   background: var(--accent-light);
   color: var(--text-color);

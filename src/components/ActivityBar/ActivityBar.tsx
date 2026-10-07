@@ -2,14 +2,17 @@ import { AppIcon } from '../Icons/AppIcon';
 import type { IconName } from '../Icons/iconGeometry';
 import { useEffect, useRef, useState } from 'react';
 
+type ActivityView = 'explorer' | 'search';
+
 interface ActivityBarProps {
-  explorerVisible: boolean;
+  activeView: ActivityView;
+  sidebarVisible: boolean;
   chatbotVisible: boolean;
   settingsOpen: boolean;
   immersive: boolean;
   zen: boolean;
   theme: string;
-  onToggleExplorer: () => void;
+  onSelectView: (view: ActivityView) => void;
   onOpenChat: () => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
@@ -26,7 +29,7 @@ function ActivityIcon({ name }: { name: 'explorer' | 'search' | 'ai' | 'immersiv
   return <AppIcon name={ActivityIconNames[name]} />;
 }
 
-export function ActivityBar({ explorerVisible, chatbotVisible, settingsOpen, immersive, zen, theme, onToggleExplorer, onOpenChat, onOpenSettings, onToggleTheme, onSelectImmersive, onSelectZen, onExitImmersive, toolbarPinned, onToggleToolbar }: ActivityBarProps) {
+export function ActivityBar({ activeView, sidebarVisible, chatbotVisible, settingsOpen, immersive, zen, theme, onSelectView, onOpenChat, onOpenSettings, onToggleTheme, onSelectImmersive, onSelectZen, onExitImmersive, toolbarPinned, onToggleToolbar }: ActivityBarProps) {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const modePickerRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'system'
@@ -51,8 +54,11 @@ export function ActivityBar({ explorerVisible, chatbotVisible, settingsOpen, imm
   return (
     <nav className="activity-bar" aria-label="功能导航">
       <div className="activity-bar-main">
-        <button type="button" className={`activity-bar-button ${explorerVisible ? 'active' : ''}`} onClick={onToggleExplorer} title="资源管理器" aria-label="资源管理器" aria-current={explorerVisible ? 'page' : undefined}>
+        <button type="button" className={`activity-bar-button ${sidebarVisible && activeView === 'explorer' ? 'active' : ''}`} onClick={() => onSelectView('explorer')} title="资源管理器" aria-label="资源管理器" aria-current={sidebarVisible && activeView === 'explorer' ? 'page' : undefined}>
           <ActivityIcon name="explorer" />
+        </button>
+        <button type="button" className={`activity-bar-button ${sidebarVisible && activeView === 'search' ? 'active' : ''}`} onClick={() => onSelectView('search')} title="搜索当前文档（正文查找/替换）" aria-label="搜索当前文档" aria-current={sidebarVisible && activeView === 'search' ? 'page' : undefined}>
+          <ActivityIcon name="search" />
         </button>
         <button type="button" className={`activity-bar-button ${chatbotVisible ? 'active' : ''}`} onClick={onOpenChat} title="AI 对话" aria-label="AI 对话" aria-pressed={chatbotVisible}>
           <ActivityIcon name="ai" />

@@ -4,7 +4,8 @@
   z-index: 13000;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
+  /* 纵向兜底滚动：极窄窗口展开高级选项时宁可滚动，也不要整块被裁掉点不到。 */
+  overflow: hidden auto;
   border: 1px solid var(--border-strong);
   border-radius: 12px;
   background: var(--surface-raised);
@@ -22,7 +23,7 @@
 /* 空输入或工作区不可用时，用一行提示代替复杂表单，降低上手成本。 */
 .document-switcher-hint { flex-shrink: 0; margin: 0 12px 8px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
 
-.document-switcher-results { flex: 1 1 auto; min-height: 0; overflow: auto; padding: 0 8px 8px; }
+.document-switcher-results { flex: 1 1 auto; min-height: 72px; overflow: auto; padding: 0 8px 8px; }
 
 .document-switcher-group + .document-switcher-group { margin-top: 8px; border-top: 1px solid var(--border-soft); padding-top: 8px; }
 .document-switcher-group-title { display: flex; align-items: center; gap: 6px; padding: 2px 6px 6px; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
@@ -68,7 +69,7 @@
 .document-switcher-advanced button { flex: 0 0 auto; min-height: 28px; padding: 3px 9px; border: 1px solid var(--border-strong); border-radius: 6px; color: var(--text-color); background: var(--bg-elevated); font: inherit; font-size: 11px; cursor: pointer; }
 .document-switcher-advanced button:disabled { opacity: .5; cursor: default; }
 
-.document-switcher-footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px 8px 12px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--text-secondary); }
+.document-switcher-footer { flex-shrink: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 10px 8px 12px; border-top: 1px solid var(--border-soft); font-size: 11px; color: var(--text-secondary); }
 .document-switcher-footer kbd { padding: 2px 4px; margin-right: 3px; border: 1px solid var(--border-soft); border-radius: 4px; font-family: inherit; background: var(--bg-hover); }
 .document-switcher-advanced-toggle { display: inline-flex; align-items: center; gap: 5px; padding: 3px 8px; border: 1px solid transparent; border-radius: 6px; color: var(--text-secondary); background: transparent; font: inherit; font-size: 11px; cursor: pointer; }
 .document-switcher-advanced-toggle:hover { border-color: var(--border-soft); background: var(--bg-hover); color: var(--text-color); }

@@ -3,8 +3,9 @@ use base64::{engine::general_purpose, Engine as _};
 use font_kit::source::SystemSource;
 use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager};
 
 pub const VERSION: &str = env!("CARGO_PKG_VERSION");
@@ -1801,6 +1802,12 @@ pub fn is_directory(path: String) -> Result<bool, String> {
         .map_err(|e| e.to_string())
 }
 
+/// 搜索代数：每次发起检索自增一次，用于让旧扫描立刻中止。
+/// 没有它时连续输入会叠加多次全盘扫描，把磁盘与 CPU 打满，表现为整个应用卡死。
+static WORKSPACE_SEARCH_GENERATION: AtomicU64 = AtomicU64::new(0);
+/// 普通检索读盘阶段的耗时上限（替换操作不设限，避免只替换了前缀）。
+const WORKSPACE_SEARCH_TIME_BUDGET: Duration = Duration::from_secs(2);
+
 #[derive(Debug, Clone, Deserialize)]
 pub struct WorkspaceSearchOptions {
     pub roots: Vec<String>,
@@ -1835,6 +1842,8 @@ pub struct WorkspaceSearchDiff {
 pub struct WorkspaceSearchResponse {
     pub matches: Vec<WorkspaceSearchMatch>,
     pub diffs: Vec<WorkspaceSearchDiff>,
+    /// 文件名/路径命中的文件（纯内存匹配，不读磁盘，用于「工作区文件」分组）。
+    pub files: Vec<String>,
     pub scanned_files: usize,
     pub truncated: bool,
     pub applied: bool,
@@ -1878,6 +1887,149 @@ fn is_searchable_workspace_file(path: &Path, extensions: &[String]) -> bool {
             | "cpp"
             | "h"
     )
+}
+
+/// 工作区检索的候选文件（仅元数据，不读内容）。
+struct WorkspaceFileEntry {
+    path: PathBuf,
+    modified: std::time::SystemTime,
+}
+
+/// 文件清单缓存：文件名检索与内容检索的候选排序都基于它。
+/// 没有缓存时每敲一个字符都要重新遍历整个工作区（实测 14.8 万目录项），
+/// 这正是「搜索极慢、整机卡死」的直接原因。
+struct WorkspaceFileCache {
+    key: String,
+    entries: Vec<WorkspaceFileEntry>,
+    built: Instant,
+}
+
+static WORKSPACE_FILE_CACHE: Mutex<Option<WorkspaceFileCache>> = Mutex::new(None);
+/// 缓存有效期：够覆盖一次连续输入，又能在新建文件后较快刷新。
+const WORKSPACE_FILE_CACHE_TTL: Duration = Duration::from_secs(10);
+/// 普通内容检索的硬预算：文件数上限 + 耗时上限，超限即返回部分结果。
+const WORKSPACE_CONTENT_FILE_LIMIT: usize = 1500;
+/// 遍历安全上限，防止异常深/异常的目录结构拖垮遍历。
+const WORKSPACE_WALK_LIMIT: usize = 400_000;
+
+fn workspace_ignored_dirs(extra: &[String]) -> std::collections::HashSet<String> {
+    [".git", "node_modules", "target", "dist", ".idea", ".vscode"]
+        .into_iter()
+        .map(String::from)
+        .chain(extra.iter().map(|value| value.trim().to_string()))
+        .collect()
+}
+
+fn workspace_file_cache_key(
+    roots: &[String],
+    extensions: &[String],
+    ignore_dirs: &[String],
+) -> String {
+    format!(
+        "{}\u{1}{}\u{1}{}",
+        roots.join("\u{2}"),
+        extensions.join(","),
+        ignore_dirs.join(",")
+    )
+}
+
+/// 仅遍历元数据收集候选文件；被更新的检索取代时返回 None（不写入缓存）。
+fn collect_workspace_files(
+    roots: &[String],
+    extensions: &[String],
+    ignored: &std::collections::HashSet<String>,
+    generation: u64,
+) -> Option<Vec<WorkspaceFileEntry>> {
+    let mut pending: Vec<PathBuf> = roots.iter().map(PathBuf::from).collect();
+    let mut files = Vec::new();
+    let mut visited = 0usize;
+    while let Some(path) = pending.pop() {
+        visited += 1;
+        if visited > WORKSPACE_WALK_LIMIT {
+            break;
+        }
+        // 每遍历 512 个节点检查一次代数，避免旧遍历继续占用磁盘。
+        if visited.is_multiple_of(512)
+            && WORKSPACE_SEARCH_GENERATION.load(Ordering::Relaxed) != generation
+        {
+            return None;
+        }
+        let metadata = match std::fs::symlink_metadata(&path) {
+            Ok(value) => value,
+            Err(_) => continue,
+        };
+        if metadata.file_type().is_symlink() {
+            continue;
+        }
+        if metadata.is_dir() {
+            if path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .map(|name| ignored.contains(name))
+                .unwrap_or(false)
+            {
+                continue;
+            }
+            if let Ok(entries) = std::fs::read_dir(&path) {
+                pending.extend(entries.flatten().map(|entry| entry.path()));
+            }
+            continue;
+        }
+        if !metadata.is_file()
+            || metadata.len() > 5 * 1024 * 1024
+            || !is_searchable_workspace_file(&path, extensions)
+        {
+            continue;
+        }
+        files.push(WorkspaceFileEntry {
+            path,
+            modified: metadata.modified().unwrap_or(std::time::UNIX_EPOCH),
+        });
+    }
+    Some(files)
+}
+
+/// 命中缓存则复用，否则重新遍历；返回候选文件与是否为缓存命中。
+fn workspace_candidate_files(
+    options: &WorkspaceSearchOptions,
+    ignored: &std::collections::HashSet<String>,
+    generation: u64,
+) -> Result<(Vec<WorkspaceFileEntry>, bool), String> {
+    let key = workspace_file_cache_key(&options.roots, &options.extensions, &options.ignore_dirs);
+    if let Ok(guard) = WORKSPACE_FILE_CACHE.lock() {
+        if let Some(cache) = guard.as_ref() {
+            if cache.key == key && cache.built.elapsed() < WORKSPACE_FILE_CACHE_TTL {
+                let entries = cache
+                    .entries
+                    .iter()
+                    .map(|entry| WorkspaceFileEntry {
+                        path: entry.path.clone(),
+                        modified: entry.modified,
+                    })
+                    .collect();
+                return Ok((entries, true));
+            }
+        }
+    }
+    let entries =
+        match collect_workspace_files(&options.roots, &options.extensions, ignored, generation) {
+            Some(value) => value,
+            None => return Err("搜索已取消".into()),
+        };
+    if let Ok(mut guard) = WORKSPACE_FILE_CACHE.lock() {
+        *guard = Some(WorkspaceFileCache {
+            key,
+            entries: entries
+                .iter()
+                .map(|entry| WorkspaceFileEntry {
+                    path: entry.path.clone(),
+                    modified: entry.modified,
+                })
+                .collect(),
+            built: Instant::now(),
+        });
+    }
+    Ok((entries, false))
 }
 
 fn short_workspace_diff(before: &str, after: &str, path: &Path) -> String {
@@ -1930,6 +2082,8 @@ pub async fn workspace_search(
     options: WorkspaceSearchOptions,
 ) -> Result<WorkspaceSearchResponse, String> {
     tokio::task::spawn_blocking(move || -> Result<WorkspaceSearchResponse, String> {
+        // 先抢占新代数：任何仍在运行的旧扫描都会在下一次循环检查时立即退出。
+        let generation = WORKSPACE_SEARCH_GENERATION.fetch_add(1, Ordering::Relaxed) + 1;
         let query = options.query.trim().to_string();
         if query.is_empty() {
             return Err("搜索内容不能为空".into());
@@ -1946,56 +2100,55 @@ pub async fn workspace_search(
             .case_insensitive(!options.case_sensitive)
             .build()
             .map_err(|error| format!("正则表达式无效：{error}"))?;
-        let ignored: std::collections::HashSet<String> =
-            [".git", "node_modules", "target", "dist", ".idea", ".vscode"]
-                .into_iter()
-                .map(String::from)
-                .chain(
-                    options
-                        .ignore_dirs
-                        .iter()
-                        .map(|value| value.trim().to_string()),
-                )
-                .collect();
-        let mut pending = options
-            .roots
-            .into_iter()
-            .map(PathBuf::from)
+        let ignored = workspace_ignored_dirs(&options.ignore_dirs);
+        // 候选清单（命中缓存时纯内存）：文件名匹配与内容检索排序都基于它。
+        let (candidates, _cache_hit) = workspace_candidate_files(&options, &ignored, generation)?;
+        // 文件名/路径命中：内存匹配，不读磁盘，因此输入即时就能出结果。
+        let mut files = Vec::new();
+        for entry in &candidates {
+            if files.len() >= 200 {
+                break;
+            }
+            let text = entry.path.to_string_lossy();
+            if matcher.is_match(&text) {
+                files.push(text.to_string());
+            }
+        }
+        // 内容检索的候选顺序：路径命中关键字的文件优先，其次按最近修改时间倒序，
+        // 这样「正在编辑 / 近期文件」优先进入预算窗口，而不是被 DFS 顺序随机丢掉。
+        let mut ordered = candidates
+            .iter()
+            .map(|entry| (matcher.is_match(&entry.path.to_string_lossy()), entry))
             .collect::<Vec<_>>();
+        ordered.sort_by(|left, right| {
+            right
+                .0
+                .cmp(&left.0)
+                .then_with(|| right.1.modified.cmp(&left.1.modified))
+        });
         let mut matches = Vec::new();
         let mut diffs = Vec::new();
         let mut scanned_files = 0usize;
         let mut truncated = false;
-        while let Some(path) = pending.pop() {
-            let metadata = match std::fs::symlink_metadata(&path) {
-                Ok(value) => value,
-                Err(_) => continue,
-            };
-            if metadata.file_type().is_symlink() {
-                continue;
+        // 读盘阶段单独计时：文件清单遍历/缓存构建不应吃掉内容检索的预算。
+        let content_started = Instant::now();
+        for (_, entry) in ordered {
+            // 已被更新的检索取代：立即放弃本次扫描（过期响应会被前端丢弃）。
+            if WORKSPACE_SEARCH_GENERATION.load(Ordering::Relaxed) != generation {
+                return Err("搜索已取消".into());
             }
-            if metadata.is_dir() {
-                if path
-                    .file_name()
-                    .and_then(|value| value.to_str())
-                    .map(|name| ignored.contains(name))
-                    .unwrap_or(false)
-                {
-                    continue;
-                }
-                if let Ok(entries) = std::fs::read_dir(&path) {
-                    pending.extend(entries.flatten().map(|entry| entry.path()));
-                }
-                continue;
-            }
-            if !metadata.is_file()
-                || metadata.len() > 5 * 1024 * 1024
-                || !is_searchable_workspace_file(&path, &options.extensions)
+            // 普通检索受文件数与耗时双重上限约束，超限返回部分结果；
+            // 替换操作不能截断，否则只会替换到工作区的一部分。
+            if options.replace_with.is_none()
+                && (scanned_files >= WORKSPACE_CONTENT_FILE_LIMIT
+                    || content_started.elapsed() > WORKSPACE_SEARCH_TIME_BUDGET)
             {
-                continue;
+                truncated = true;
+                break;
             }
+            let path = &entry.path;
             scanned_files += 1;
-            let original = match std::fs::read_to_string(&path) {
+            let original = match std::fs::read_to_string(path) {
                 Ok(value) => value,
                 Err(_) => continue,
             };
@@ -2026,10 +2179,10 @@ pub async fn workspace_search(
                     diffs.push(WorkspaceSearchDiff {
                         path: path.to_string_lossy().to_string(),
                         replacements,
-                        diff: short_workspace_diff(&original, &changed, &path),
+                        diff: short_workspace_diff(&original, &changed, path),
                     });
                     if options.apply_replace {
-                        std::fs::write(&path, changed)
+                        std::fs::write(path, changed)
                             .map_err(|error| format!("写入 {} 失败：{error}", path.display()))?;
                     }
                 }
@@ -2044,6 +2197,7 @@ pub async fn workspace_search(
         Ok(WorkspaceSearchResponse {
             matches,
             diffs,
+            files,
             scanned_files,
             truncated,
             applied: options.apply_replace && options.replace_with.is_some(),

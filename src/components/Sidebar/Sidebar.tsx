@@ -13,6 +13,7 @@ import {
 } from '../../utils/markdownOutline';
 import { readStoredStringArray, writeStoredStringArray } from '../../utils/storage';
 import { isTextFileName } from '../../utils/fileIcon';
+import { DocumentSearchPanel } from './DocumentSearchPanel';
 import {
   OPENABLE_FILE_EXTENSIONS,
   isConvertibleDocumentName,
@@ -40,6 +41,7 @@ interface RawFileNode {
 
 interface SidebarProps {
   style?: React.CSSProperties;
+  view?: 'explorer' | 'search';
 }
 
 type ContextMenuState = { x: number; y: number; node: FileNode; targetType: 'file' | 'folder' | 'root' } | null;
@@ -156,8 +158,8 @@ function FileIcon({ filename }: { filename: string }) {
   return <FileTypeIcon filename={filename} />;
 }
 
-export function Sidebar({ style }: SidebarProps) {
-  return <ExplorerSidebar style={style} />;
+export function Sidebar({ style, view = 'explorer' }: SidebarProps) {
+  return view === 'search' ? <DocumentSearchPanel style={style} /> : <ExplorerSidebar style={style} />;
 }
 
 function ExplorerSidebar({ style }: SidebarProps) {

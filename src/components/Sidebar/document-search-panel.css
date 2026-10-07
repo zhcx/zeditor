@@ -1,0 +1,34 @@
+/* 侧栏「搜索当前文档」面板：只针对正在编辑的正文做查找/替换，结果全部来自内存。 */
+.document-find-panel { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; gap: 6px; padding: 8px 10px 10px; overflow: auto; }
+
+/* 顶部提示当前搜索的是哪个文档，避免与顶部的工作区搜索混淆。 */
+.document-find-document { display: flex; align-items: center; gap: 5px; min-width: 0; padding: 0 2px 2px; color: var(--text-muted); font-size: 11px; }
+.document-find-document svg { flex: 0 0 auto; width: 13px; height: 13px; }
+.document-find-document span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+
+.document-find-input { width: 100%; box-sizing: border-box; height: 30px; padding: 0 9px; border: 1px solid var(--border-color); border-radius: 5px; color: var(--text-primary); background: var(--bg-elevated); font: inherit; font-size: 12px; }
+.document-find-input:focus { border-color: var(--accent-color); }
+
+.document-find-options { display: flex; align-items: center; gap: 14px; min-height: 24px; }
+.document-find-options label { display: inline-flex; align-items: center; gap: 6px; color: var(--text-secondary); font-size: 12px; white-space: nowrap; cursor: pointer; }
+.document-find-options input[type="checkbox"] { width: 14px; height: 14px; min-width: 14px; margin: 0; padding: 0; accent-color: var(--accent-color); }
+
+.document-find-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.document-find-actions button { min-height: 27px; padding: 4px 9px; border: 1px solid var(--border-color); border-radius: 4px; color: var(--text-primary); background: var(--bg-elevated); font: inherit; font-size: 12px; cursor: pointer; }
+.document-find-actions button:hover:not(:disabled) { background: var(--bg-hover); }
+.document-find-actions button:disabled { opacity: .55; cursor: default; }
+
+.document-find-status { padding: 0 2px; color: var(--text-muted); font-size: 11px; line-height: 1.5; }
+.document-find-status.error { color: var(--danger-color); }
+
+.document-find-results { display: flex; flex-direction: column; gap: 1px; margin-top: 2px; }
+.document-find-result { display: flex; align-items: baseline; gap: 8px; width: 100%; padding: 4px 6px; border: 0; border-radius: 4px; color: var(--text-secondary); background: transparent; text-align: left; cursor: pointer; }
+.document-find-result:hover { color: var(--text-primary); background: var(--bg-hover); }
+.document-find-result.active { color: var(--text-primary); background: var(--selected, var(--accent-light)); }
+.document-find-line { flex: 0 0 auto; min-width: 26px; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
+.document-find-text { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
+.document-find-more { padding: 2px 6px 2px 34px; color: var(--text-muted); font-size: 11px; }
+.document-find-more small { margin-left: 4px; font-size: 10px; }
+
+/* 头部导航按钮复用资源管理器的动作按钮外观，禁用态保持可见但不抢视线。 */
+.search-sidebar .vscode-explorer-actions button:disabled { opacity: .45; cursor: default; }

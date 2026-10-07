@@ -113,7 +113,8 @@ body {
     border-color var(--ui-duration-fast) var(--ui-easing-standard);
 }
 
-.app :is(button, input, select, textarea, [role="tab"]):not(.inputarea):not(.ime-text-area):focus-visible {
+/* 编辑器（Monaco）自带控件沿用其自身样式：Ctrl+F 查找框、重命名框等不套全局 focus 描边。 */
+.app :is(button, input, select, textarea, [role="tab"]):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):focus-visible {
   outline: 2px solid color-mix(in srgb, var(--ui-accent) 62%, transparent);
   outline-offset: 1px;
 }
