@@ -113,8 +113,9 @@ body {
     border-color var(--ui-duration-fast) var(--ui-easing-standard);
 }
 
-/* 编辑器（Monaco）自带控件沿用其自身样式：Ctrl+F 查找框、重命名框等不套全局 focus 描边。 */
-.app :is(button, input, select, textarea, [role="tab"]):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):focus-visible {
+/* 编辑器（Monaco）自带控件与标题栏搜索框沿用自身样式：不套全局 focus 描边
+   （标题栏那一栏由容器画外圈蓝色描边，输入框本身再画一圈会变成双层框）。 */
+.app :is(button, input, select, textarea, [role="tab"]):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):not(.titlebar-search-input):focus-visible {
   outline: 2px solid color-mix(in srgb, var(--ui-accent) 62%, transparent);
   outline-offset: 1px;
 }

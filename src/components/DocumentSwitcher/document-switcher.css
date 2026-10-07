@@ -23,29 +23,17 @@
 
 .document-switcher-results { flex: 1 1 auto; min-height: 72px; overflow: auto; padding: 10px 8px 8px; }
 
-/* 快捷命令行：只有标签与右侧快捷键，并让快捷键右对齐（与页脚 kbd 同一视觉语言）。 */
-.document-switcher-command { min-height: 30px; padding: 3px 10px; gap: 8px; }
-.document-switcher-command-label { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.document-switcher-shortcut { flex: 0 0 auto; margin-left: auto; padding: 2px 5px; border: 1px solid var(--border-soft); border-radius: 4px; color: var(--text-secondary); background: var(--bg-hover); font-family: inherit; font-size: 11px; white-space: nowrap; }
-
-/* 「更多命令…」入口：弱化的次级行，右侧给出命令总数与展开指示。 */
-.document-switcher-more { color: var(--text-secondary); }
-.document-switcher-more-count { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-muted); font-size: 11px; }
-.document-switcher-more-count svg { display: block; flex: 0 0 auto; }
-
-/* 近期文件行：文件名 + 灰色父目录（单行，长路径优先省略目录）。 */
-.document-switcher-recent { min-height: 32px; padding: 4px 10px; gap: 8px; }
-.document-switcher-recent-title { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-color); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
-.document-switcher-recent-dir { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
+/* 快捷命令行 / 更多命令 / 近期文件的规则统一放在文件末尾：
+   它们要覆盖 .document-switcher-item 的 min-height，必须晚于该规则声明。 */
 
 .document-switcher-hint-tip { flex: 0 0 auto; margin-left: auto; padding: 1px 5px; border: 1px solid var(--border-soft); border-radius: 4px; color: var(--text-secondary); background: var(--bg-hover); font-size: 10px; }
 
-.document-switcher-group + .document-switcher-group { margin-top: 8px; border-top: 1px solid var(--border-soft); padding-top: 8px; }
-.document-switcher-group-title { display: flex; align-items: center; gap: 6px; padding: 2px 6px 6px; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
+.document-switcher-group + .document-switcher-group { margin-top: 5px; border-top: 1px solid var(--border-soft); padding-top: 5px; }
+.document-switcher-group-title { display: flex; align-items: center; gap: 6px; padding: 1px 6px 4px; color: var(--text-muted); font-size: 11px; font-weight: 600; letter-spacing: .02em; }
 .document-switcher-group-count { margin-left: auto; padding: 1px 6px; border-radius: 5px; background: var(--bg-hover); color: var(--text-secondary); font-size: 10px; font-weight: 500; }
 .document-switcher-group-status { margin-left: auto; color: var(--text-muted); font-size: 10px; font-weight: 400; }
 
-.document-switcher-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 44px; padding: 6px 10px; border: 1px solid transparent; border-radius: 8px; background: transparent; color: var(--text-color); text-align: left; cursor: pointer; }
+.document-switcher-item { display: flex; align-items: center; gap: 10px; width: 100%; min-height: 40px; padding: 5px 10px; border: 1px solid transparent; border-radius: 6px; background: transparent; color: var(--text-color); text-align: left; cursor: pointer; }
 .document-switcher-item[aria-selected="true"] { background: var(--accent-soft); border-color: color-mix(in srgb, var(--accent-color) 24%, transparent); }
 .document-switcher-item > svg { flex-shrink: 0; width: 18px; height: 18px; }
 .document-switcher-document { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 3px; }
@@ -56,17 +44,34 @@
 .document-switcher-current { padding: 2px 6px; border-radius: 5px; color: var(--text-secondary); font-size: 11px; background: var(--bg-hover); white-space: nowrap; }
 
 /* 工作区内容按文件分组，行内只保留行号与命中文本，扫码式浏览。 */
-.document-switcher-file { margin-bottom: 2px; }
-.document-switcher-file-title { display: flex; align-items: center; gap: 7px; padding: 4px 8px 2px; min-width: 0; }
+.document-switcher-file { margin-bottom: 1px; }
+.document-switcher-file-title { display: flex; align-items: center; gap: 7px; padding: 3px 8px 1px; min-width: 0; }
 .document-switcher-file-title > svg { flex-shrink: 0; width: 15px; height: 15px; }
 .document-switcher-file-name { flex-shrink: 0; max-width: 45%; overflow: hidden; color: var(--text-secondary); font-size: 12px; font-weight: 500; text-overflow: ellipsis; white-space: nowrap; }
 .document-switcher-file-title small { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
-.document-switcher-match { min-height: 30px; padding: 3px 10px 3px 8px; gap: 8px; }
+.document-switcher-match { min-height: 26px; padding: 2px 10px 2px 8px; gap: 8px; }
 .document-switcher-match-line { flex: 0 0 auto; min-width: 26px; color: var(--text-muted); font-size: 11px; font-variant-numeric: tabular-nums; text-align: right; }
 .document-switcher-match-text { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-secondary); font-size: 12px; text-overflow: ellipsis; white-space: nowrap; }
 .document-switcher-match[aria-selected="true"] .document-switcher-match-text { color: var(--text-color); }
 .document-switcher-match-more { padding: 1px 10px 3px 34px; color: var(--text-muted); font-size: 11px; }
 .document-switcher-match-more small { margin-left: 4px; font-size: 10px; }
+
+/* ── 单行行的密度（必须晚于 .document-switcher-item） ───────────────── */
+
+/* 快捷命令行：只有标签与右侧快捷键，快捷键右对齐（与页脚 kbd 同一视觉语言）。 */
+.document-switcher-command { min-height: 26px; padding: 2px 10px; gap: 8px; }
+.document-switcher-command-label { flex: 1 1 auto; min-width: 0; overflow: hidden; font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.document-switcher-shortcut { flex: 0 0 auto; margin-left: auto; padding: 1px 5px; border: 1px solid var(--border-soft); border-radius: 4px; color: var(--text-secondary); background: var(--bg-hover); font-family: inherit; font-size: 11px; white-space: nowrap; }
+
+/* 「更多命令…」入口：弱化的次级行，右侧给出命令总数与展开指示。 */
+.document-switcher-more { color: var(--text-secondary); }
+.document-switcher-more-count { flex: 0 0 auto; display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: var(--text-muted); font-size: 11px; }
+.document-switcher-more-count svg { display: block; flex: 0 0 auto; }
+
+/* 近期文件行：文件名 + 灰色父目录（单行，长路径优先省略目录）。 */
+.document-switcher-recent { min-height: 28px; padding: 3px 10px; gap: 8px; }
+.document-switcher-recent-title { flex: 0 1 auto; min-width: 0; overflow: hidden; color: var(--text-color); font-size: 13px; text-overflow: ellipsis; white-space: nowrap; }
+.document-switcher-recent-dir { flex: 1 1 auto; min-width: 0; overflow: hidden; color: var(--text-muted); font-size: 11px; text-align: right; text-overflow: ellipsis; white-space: nowrap; }
 
 .document-switcher-diff { margin: 6px 8px; padding: 8px; max-height: 180px; overflow: auto; border: 1px solid var(--border-soft); border-radius: 6px; color: var(--text-secondary); background: var(--bg-input); font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; white-space: pre-wrap; }
 .document-switcher-applied { padding: 4px 10px 2px; color: var(--accent-color); font-size: 11px; }
