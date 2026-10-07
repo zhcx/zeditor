@@ -5,12 +5,28 @@ import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Tab } from '../../stores/appStore';
 import { filterOpenDocuments } from '../../utils/workbenchNavigation';
 import { readStoredStringArray } from '../../utils/storage';
+import {
+  parentDirectoryOf,
+  readRecentHistory,
+  type RecentHistoryEntry,
+} from '../../utils/recentHistory';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import { FileTypeIcon } from '../Sidebar/FileTypeIcon';
 import './document-switcher.css';
 import { t } from '../../i18n';
 
 interface DocumentSwitcherProps {
   onClose: () => void;
+  /** 「搜索当前文档」命令需要把侧边栏切到搜索视图，该状态由 App 持有，故以回调注入。 */
+  onRevealActivityView?: (view: 'explorer' | 'search') => void;
+}
+
+/** 快捷命令：复用应用里已有的动作（store 方法或既有 CustomEvent），不另造一套处理链。 */
+interface QuickCommand {
+  id: string;
+  label: string;
+  shortcut?: string;
+  run: () => void;
 }
 
 interface WorkspaceSearchMatch {
@@ -73,6 +89,8 @@ interface DiffState {
 }
 
 type SwitchRow =
+  | { kind: 'command'; key: string; command: QuickCommand }
+  | { kind: 'recent'; key: string; entry: RecentHistoryEntry }
   | { kind: 'document'; key: string; tab: Tab }
   | { kind: 'docContent'; key: string; hit: DocumentContentHit }
   | { kind: 'file'; key: string; path: string }
@@ -96,6 +114,8 @@ const MAX_MATCH_ROWS = 60;
 // 各分组的展示上限：即时层（打开的文档）优先，磁盘检索结果按预算截断。
 const MAX_DOC_CONTENT_ROWS = 30;
 const MAX_FILE_ROWS = 40;
+const MAX_COMMAND_ROWS = 12;
+const MAX_RECENT_ROWS = 8;
 // 单个文档只扫描前 1MB：打开超大文件时仍能保证每次输入瞬间出结果。
 const MAX_DOC_CONTENT_CHARS = 1_000_000;
 
@@ -201,10 +221,11 @@ function toWorkspaceSearchPayload(options: DropdownSearchOptions, replaceWith: s
   };
 }
 
-export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
+export function DocumentSwitcher({ onClose, onRevealActivityView }: DocumentSwitcherProps) {
   const tabs = useAppStore(state => state.tabs);
   const activeTabId = useAppStore(state => state.activeTabId);
   const language = useAppStore(state => state.settings.appearance.language);
+  const historyRetentionDays = useAppStore(state => state.settings.explorer.history_retention_days);
   const [query, setQuery] = useState('');
   const [activeIndex, setActiveIndex] = useState(0);
   const [advancedOpen, setAdvancedOpen] = useState(false);
@@ -224,6 +245,9 @@ export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
   const workspaceRoots = useMemo(() => readStoredStringArray(WORKSPACE_ROOTS_KEY).filter(root => !root.startsWith('web://')), []);
   const canSearchWorkspace = isTauriRuntime() && workspaceRoots.length > 0;
   const trimmedQuery = query.trim();
+  // 与 VS Code 一致：输入 `>` 进入命令模式，只列出快捷命令。
+  const commandMode = trimmedQuery.startsWith('>');
+  const commandQuery = commandMode ? trimmedQuery.slice(1).trim().toLowerCase() : '';
   const searchOptions = useMemo<DropdownSearchOptions>(() => ({
     roots: workspaceRoots,
     query: trimmedQuery,
@@ -239,19 +263,52 @@ export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
   const activeDiffs = diffState?.fingerprint === fingerprint ? diffState.diffs : [];
   const contentGroups = useMemo(() => groupMatchesByPath(activeSearch?.matches ?? []), [activeSearch]);
   const visibleGroups = useMemo(() => limitGroups(contentGroups), [contentGroups]);
+  // 快捷命令：全部指向应用里已有的动作（store 方法或既有 CustomEvent），
+  // 标签与快捷键沿用「文件 / 功能」菜单的用词，保证与菜单一致。
+  const commands = useMemo<QuickCommand[]>(() => [
+    { id: 'new-file', label: t('新建文件', language), shortcut: 'Ctrl+N', run: () => useAppStore.getState().addTab() },
+    { id: 'find-in-document', label: t('搜索当前文档', language), run: () => onRevealActivityView?.('search') },
+    { id: 'check-links', label: t('检查链接', language), shortcut: 'Ctrl+Alt+V', run: () => window.dispatchEvent(new CustomEvent('zeditor-check-links')) },
+    { id: 'ai-palette', label: t('AI 指令面板', language), shortcut: 'Ctrl+J', run: () => window.dispatchEvent(new CustomEvent('zeditor-ai-palette')) },
+    { id: 'presentation', label: t('演示模式', language), run: () => window.dispatchEvent(new CustomEvent('zeditor-presentation-request')) },
+    { id: 'mode-split', label: t('分屏模式', language), run: () => useAppStore.getState().setMode('split') },
+    { id: 'mode-immersive', label: t('沉浸阅读', language), run: () => useAppStore.getState().setMode('immersive') },
+    { id: 'mode-zen', label: t('沉浸写作', language), run: () => useAppStore.getState().setMode('zen') },
+    { id: 'export-html', label: t('导出为 HTML', language), run: () => window.dispatchEvent(new CustomEvent('zeditor-export-request', { detail: { format: 'html' } })) },
+    { id: 'export-word', label: t('导出为 Word', language), run: () => window.dispatchEvent(new CustomEvent('zeditor-export-request', { detail: { format: 'word' } })) },
+    { id: 'settings', label: t('设置', language), run: () => useAppStore.getState().setSettingsOpen(true) },
+  ], [language, onRevealActivityView]);
+  // 空输入展示全部命令，输入 `>` 后按命令名过滤；正常搜索时不占用结果区。
+  const visibleCommands = useMemo(() => {
+    if (trimmedQuery && !commandMode) return [];
+    const filtered = commandQuery
+      ? commands.filter(command => command.label.toLowerCase().includes(commandQuery) || command.id.includes(commandQuery))
+      : commands;
+    return filtered.slice(0, MAX_COMMAND_ROWS);
+  }, [commands, commandMode, commandQuery, trimmedQuery]);
+  // 近期文件与侧边栏「近期记录」共用同一份 localStorage 数据；这里只取文件，打开文件夹仍走资源管理器。
+  const recentFiles = useMemo(() => {
+    if (trimmedQuery) return [];
+    return readRecentHistory(historyRetentionDays)
+      .filter(entry => entry.type === 'file')
+      .slice(0, MAX_RECENT_ROWS);
+  }, [trimmedQuery, historyRetentionDays]);
   const documents = useMemo(() => {
+    if (commandMode) return [];
     const matched = filterOpenDocuments(tabs, query);
     return trimmedQuery ? matched : [...matched].sort((left, right) => Number(right.id === activeTabId) - Number(left.id === activeTabId));
-  }, [tabs, query, trimmedQuery, activeTabId]);
+  }, [tabs, query, trimmedQuery, activeTabId, commandMode]);
   // 即时层：打开文档的正文明文命中（含未保存内容），不依赖后端、不做预算截断。
   const docContentHits = useMemo(
-    () => (trimmedQuery ? findDocumentContentHits(tabs, trimmedQuery, caseSensitive) : []),
-    [tabs, trimmedQuery, caseSensitive],
+    () => (!commandMode && trimmedQuery ? findDocumentContentHits(tabs, trimmedQuery, caseSensitive) : []),
+    [tabs, trimmedQuery, caseSensitive, commandMode],
   );
   // 文件名命中也来自后端的内存匹配结果，首次遍历后同样接近即时。
   const workspaceFiles = useMemo(() => (activeSearch?.files ?? []).slice(0, MAX_FILE_ROWS), [activeSearch]);
-  // 键盘上下键在「打开的文档 + 文档内容 + 工作区文件 + 工作区内容」的同一条扁平轨道上移动。
+  // 键盘上下键在「快捷命令 + 近期文件 + 打开的文档 + 文档内容 + 工作区文件 + 工作区内容」同一条扁平轨道上移动。
   const rows = useMemo<SwitchRow[]>(() => [
+    ...visibleCommands.map(command => ({ kind: 'command' as const, key: `cmd:${command.id}`, command })),
+    ...recentFiles.map(entry => ({ kind: 'recent' as const, key: `recent:${entry.path}`, entry })),
     ...documents.map(tab => ({ kind: 'document' as const, key: `doc:${tab.id}`, tab })),
     ...docContentHits.map(hit => ({ kind: 'docContent' as const, key: `content:${hit.tabId}:${hit.line}:${hit.column}`, hit })),
     ...workspaceFiles.map(path => ({ kind: 'file' as const, key: `file:${path}`, path })),
@@ -260,7 +317,7 @@ export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
       key: `match:${match.path}\u0000${match.line_number}\u0000${match.column}`,
       match,
     }))),
-  ], [documents, docContentHits, workspaceFiles, visibleGroups]);
+  ], [visibleCommands, recentFiles, documents, docContentHits, workspaceFiles, visibleGroups]);
   // 文档内容命中按文档分组展示（各文档的命中在数组里本就是连续的）。
   const docContentGroups = useMemo(() => {
     const byTab = new Map<string, DocumentContentHit[]>();
@@ -280,7 +337,7 @@ export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
   const rowIndex = (key: string) => rowIndexOf.get(key) ?? 0;
   const selectedIndex = Math.min(activeIndex, Math.max(0, rows.length - 1));
   const selected = rows[selectedIndex];
-  const workspaceSearchEnabled = canSearchWorkspace && trimmedQuery.length >= MIN_WORKSPACE_QUERY;
+  const workspaceSearchEnabled = !commandMode && canSearchWorkspace && trimmedQuery.length >= MIN_WORKSPACE_QUERY;
   const searching = workspaceSearchEnabled && !activeSearch;
   // 位置没变就不要 setState：滚动/窗口变化会高频触发，每次都新建对象会让整个面板反复重渲染。
   const place = useCallback(() => {
@@ -417,8 +474,27 @@ export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
     }, 0);
   };
 
+  // 打开近期文件：只打开并聚焦编辑器，不强制把光标放到首行。
+  const openRecentFile = async (path: string) => {
+    try {
+      await useAppStore.getState().openFile(path);
+    } catch {
+      return; // store 已经给出打开失败的原因。
+    }
+    onClose();
+    requestAnimationFrame(() => useAppStore.getState().editorView?.focus());
+  };
+
+  // 命令执行后立即收起面板，把焦点交还给工作区。
+  const runCommand = (command: QuickCommand) => {
+    dismiss();
+    command.run();
+  };
+
   const activateRow = (row: SwitchRow) => {
-    if (row.kind === 'document') openDocument(row.tab.id);
+    if (row.kind === 'command') runCommand(row.command);
+    else if (row.kind === 'recent') void openRecentFile(row.entry.path);
+    else if (row.kind === 'document') openDocument(row.tab.id);
     else if (row.kind === 'docContent') openDocumentContent(row.hit);
     else if (row.kind === 'file') void revealLocation(row.path, 1, 1);
     else void revealLocation(row.match.path, row.match.line_number, row.match.column);
@@ -463,15 +539,17 @@ export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
     if (next && !event.currentTarget.contains(next)) onClose();
   };
 
-  const hint = !trimmedQuery
-    ? t('输入关键词即可搜索已打开的文档与工作区文件内容', language)
-    : trimmedQuery.length < MIN_WORKSPACE_QUERY
-      ? t('输入至少 2 个字符以搜索工作区内容', language)
-      : !isTauriRuntime()
-        ? t('工作区搜索仅在桌面应用中可用', language)
-        : !workspaceRoots.length
-          ? t('请先在资源管理器中打开一个文件夹', language)
-          : '';
+  const hint = commandMode
+    ? ''
+    : !trimmedQuery
+      ? t('输入关键词即可搜索已打开的文档与工作区文件内容', language)
+      : trimmedQuery.length < MIN_WORKSPACE_QUERY
+        ? t('输入至少 2 个字符以搜索工作区内容', language)
+        : !isTauriRuntime()
+          ? t('工作区搜索仅在桌面应用中可用', language)
+          : !workspaceRoots.length
+            ? t('请先在资源管理器中打开一个文件夹', language)
+            : '';
   const workspaceStatus = searching
     ? t('搜索中…', language)
     : activeSearch?.error
@@ -493,8 +571,44 @@ export function DocumentSwitcher({ onClose }: DocumentSwitcherProps) {
         <AppIcon name="search" size={16} />
         <input ref={inputRef} value={query} onChange={event => { setQuery(event.target.value); setActiveIndex(0); }} placeholder={t('搜索文档或文件内容…', language)} aria-label={t('搜索已打开的文档', language)} role="combobox" aria-autocomplete="list" aria-expanded="true" aria-controls="document-switcher-results" aria-activedescendant={selected ? `switch-row-${selectedIndex}` : undefined} />
       </div>
-      {hint && <div className="document-switcher-hint">{hint}</div>}
+      {hint && (
+        <div className="document-switcher-hint">
+          <span>{hint}</span>
+          {!trimmedQuery && <span className="document-switcher-hint-tip">{t('输入 > 查看快捷命令', language)}</span>}
+        </div>
+      )}
       <div id="document-switcher-results" className="document-switcher-results" role="listbox" aria-label={t('已打开的文档', language)}>
+        {/* 快捷命令：与「文件 / 功能」菜单同源的动作用词，右侧显示快捷键。 */}
+        {visibleCommands.length > 0 && (
+          <div className="document-switcher-group" role="group" aria-label={t('快捷命令', language)}>
+            <div className="document-switcher-group-title">{t('快捷命令', language)}<span className="document-switcher-group-count">{visibleCommands.length}</span></div>
+            {visibleCommands.map(command => {
+              const index = rowIndex(`cmd:${command.id}`);
+              return (
+                <button key={command.id} id={`switch-row-${index}`} type="button" role="option" aria-selected={index === selectedIndex} tabIndex={-1} className="document-switcher-item document-switcher-command" onMouseEnter={() => setActiveIndex(index)} onClick={() => runCommand(command)}>
+                  <span className="document-switcher-command-label">{command.label}</span>
+                  {command.shortcut && <kbd className="document-switcher-shortcut">{formatShortcut(command.shortcut)}</kbd>}
+                </button>
+              );
+            })}
+          </div>
+        )}
+        {/* 近期文件：与侧边栏「近期记录」共用同一份 localStorage 数据。 */}
+        {recentFiles.length > 0 && (
+          <div className="document-switcher-group" role="group" aria-label={t('近期文件', language)}>
+            <div className="document-switcher-group-title">{t('近期文件', language)}<span className="document-switcher-group-count">{recentFiles.length}</span></div>
+            {recentFiles.map(entry => {
+              const index = rowIndex(`recent:${entry.path}`);
+              return (
+                <button key={entry.path} id={`switch-row-${index}`} type="button" role="option" aria-selected={index === selectedIndex} tabIndex={-1} className="document-switcher-item document-switcher-recent" onMouseEnter={() => setActiveIndex(index)} onClick={() => void openRecentFile(entry.path)}>
+                  <FileTypeIcon filename={entry.title} />
+                  <span className="document-switcher-recent-title">{entry.title}</span>
+                  <small className="document-switcher-recent-dir">{parentDirectoryOf(entry.path)}</small>
+                </button>
+              );
+            })}
+          </div>
+        )}
         {documents.length > 0 && (
           <div className="document-switcher-group" role="group" aria-label={t('已打开的文档', language)}>
             <div className="document-switcher-group-title">{t('已打开的文档', language)}<span className="document-switcher-group-count">{documents.length}</span></div>

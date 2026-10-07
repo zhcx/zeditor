@@ -13,6 +13,12 @@ import {
 } from '../../utils/markdownOutline';
 import { readStoredStringArray, writeStoredStringArray } from '../../utils/storage';
 import { isTextFileName } from '../../utils/fileIcon';
+import {
+  RECENT_HISTORY_KEY,
+  RECENT_HISTORY_LIMIT,
+  readRecentHistory,
+  type RecentHistoryEntry,
+} from '../../utils/recentHistory';
 import { DocumentSearchPanel } from './DocumentSearchPanel';
 import {
   OPENABLE_FILE_EXTENSIONS,
@@ -51,13 +57,6 @@ type TimelineDialogState = { entry: TimelineEntry; mode: 'preview' | 'diff' } | 
 type TimelineDiffLine = { kind: 'same' | 'added' | 'removed' | 'collapsed'; text: string };
 type RenameState = { path: string; name: string } | null;
 type CreateState = { parentPath: string; type: 'file' | 'folder' } | null;
-
-interface RecentHistoryEntry {
-  path: string;
-  title: string;
-  timestamp: number;
-  type: 'file' | 'folder';
-}
 
 const OPEN_EDITORS_ID = 'virtual:open-editors';
 const WORKSPACE_ROOTS_KEY = 'zeditor.workspace-roots';
@@ -417,24 +416,18 @@ function ExplorerSidebar({ style }: SidebarProps) {
   }, [workspaceFolders]);
 
   // ── 历史记录管理 ──────────────────────────────────────────
-  const HISTORY_KEY = 'zeditor.explorer-history';
-  const loadHistory = useCallback(() => {
-    try {
-      const stored = localStorage.getItem(HISTORY_KEY);
-      if (!stored) return [];
-      const parsed: RecentHistoryEntry[] = JSON.parse(stored);
-      const retentionMs = settings.explorer.history_retention_days * 24 * 60 * 60 * 1000;
-      const cutoff = Date.now() - retentionMs;
-      return parsed.filter(entry => entry.timestamp > cutoff).slice(0, 50);
-    } catch { return []; }
-  }, [settings.explorer.history_retention_days]);
+  // 读取逻辑抽到 utils/recentHistory，供顶部搜索栏「近期文件」分组复用同一份列表。
+  const loadHistory = useCallback(
+    () => readRecentHistory(settings.explorer.history_retention_days),
+    [settings.explorer.history_retention_days],
+  );
 
   const addToHistory = useCallback((path: string, title: string, type: 'file' | 'folder') => {
     const entries = loadHistory();
     const filtered = entries.filter(entry => entry.path !== path);
     filtered.unshift({ path, title, timestamp: Date.now(), type });
-    const trimmed = filtered.slice(0, 50);
-    try { localStorage.setItem(HISTORY_KEY, JSON.stringify(trimmed)); } catch { /* ignore */ }
+    const trimmed = filtered.slice(0, RECENT_HISTORY_LIMIT);
+    try { localStorage.setItem(RECENT_HISTORY_KEY, JSON.stringify(trimmed)); } catch { /* ignore */ }
     setRecentHistory(trimmed);
   }, [loadHistory]);
 

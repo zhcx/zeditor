@@ -678,6 +678,14 @@ function App() {
     if (!sidebarVisible) setSidebarVisible(true);
   }, [activityView, setSidebarVisible, sidebarVisible]);
 
+  // 命令面板里「搜索当前文档」等入口需要强制切过去，不能复用上面的 toggle 语义；
+  // 沉浸/写作模式下侧栏不渲染，因此还要回到分屏模式。
+  const revealActivityView = useCallback((view: 'explorer' | 'search') => {
+    setActivityView(view);
+    setSidebarVisible(true);
+    if (mode !== 'split') useAppStore.getState().setMode('split');
+  }, [mode, setSidebarVisible]);
+
   const toggleThemeVariant = useCallback(() => {
     const currentSettings = useAppStore.getState().settings;
     const nextTheme = toggleThemeMode(currentSettings.appearance.theme);
@@ -1255,7 +1263,7 @@ function App() {
         </Suspense>
       )}
       {documentSwitcherVisible && (
-        <Suspense fallback={null}><DocumentSwitcher onClose={closeDocumentSwitcher} /></Suspense>
+        <Suspense fallback={null}><DocumentSwitcher onClose={closeDocumentSwitcher} onRevealActivityView={revealActivityView} /></Suspense>
       )}
       {encodingDialog && <Suspense fallback={null}><EncodingDialog key={`${encodingDialog.mode}-${encodingDialog.tabId || encodingDialog.path || encodingDialog.title}`} request={encodingDialog} /></Suspense>}
       <Suspense fallback={null}>
