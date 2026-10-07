@@ -22,6 +22,11 @@ features:
     details: Monaco 编辑器 + 实时预览，智能 Tab 导航、富文本粘贴、斜杠命令、表格浮动工具栏与内联弹窗。
     link: /guide/editing
     linkText: 了解编辑功能
+  - icon: 🔍
+    title: 统一搜索与快捷命令
+    details: 用 Ctrl+P 一次输入即可搜索打开的文档、当前正文、工作区文件与内容；空输入列出快捷命令与近期文件，输入 > 可筛选全部命令。
+    link: /guide/files
+    linkText: 了解搜索与替换
   - icon: 📊
     title: 强大渲染能力
     details: KaTeX 公式、Mermaid 图表、Markmap 思维导图、GitHub Actions 工作流查看器、SVG 与任务列表。

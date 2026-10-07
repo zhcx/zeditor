@@ -199,7 +199,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.6.0**
+**Zeditor v0.6.1**
 
 一款现代化的 Markdown 编辑器
 
@@ -214,13 +214,15 @@ graph TD
 - AI 智能助手：对话面板、校对、重写、翻译、摘要、大纲
 - AI 思维链展示与思考模式（DeepSeek / 硅基流动）
 - 支持 OpenAI、DeepSeek、Anthropic、自定义 OpenAI 兼容服务
+- 顶部统一搜索：快捷命令、近期文件、工作区文件与内容检索（Ctrl+P）
+- 侧边栏「搜索当前文档」：当前正文查找 / 替换 / 全部替换（区分大小写、正则）
 - HTML / PDF / Word 导出
 - GitHub Release 自动检查更新
 
 **本版本更新**
-- 更新 Windows Markdown 文档关联图标，使用新版蓝底白色 Md 与 Z 图案
-- 修复 S3 云同步重复添加远端根目录，桶内不再生成“zeditor/zeditor”路径
-- 保留已有云端文件；后续同步统一使用单层根目录
+- 顶部搜索栏空输入时列出**快捷命令**（前 5 条，末尾「更多命令…」可查看并筛选全部，输入 > 同效）与**近期文件**（与侧边栏「近期记录」同一份数据）
+- 搜索输入框移入标题栏：展开后原地输入，面板只负责列出结果，不再出现第二个输入框
+- 搜索面板行距与高亮块收紧，输入框样式与其它输入框统一（去掉多余的内圈描边）
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it

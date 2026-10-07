@@ -181,6 +181,33 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
+## v0.6.1 更新
+
+### 更新日志
+
+- **快捷命令**：顶部搜索栏（`Ctrl+P`）空输入时列出前 5 条常用命令——新建文件、搜索当前文档、检查链接、AI 指令面板、演示模式、分屏 / 沉浸阅读 / 沉浸写作、导出为 HTML / Word、设置，右侧显示快捷键；末尾「更多命令…」或输入 `>` 可按名称筛选全部命令。
+- **近期文件**：空输入时同时列出最近打开过的文件（文件名 + 灰色父目录），与侧边栏「近期记录」共用同一份数据。
+- **输入框移入标题栏**：展开后原地输入、面板只列结果，不再出现第二个搜索框；提示行改为单行显示，不再换行。
+- **面板密度与样式**：行距与高亮块收紧，输入框样式与其它输入框统一（去掉多余的内圈描边，只保留外层蓝色边框）。
+
+### v0.6.1 平台安装包对照
+
+> 以下链接指向 v0.6.1 Release 资产；安装包由 GitHub Actions 根据 v0.6.1 标签源码构建。
+
+| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
+| --- | --- | --- | --- | --- |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor-0.6.1-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.1.md`](docs/releases/v0.6.1.md)。
+
 ## v0.6.0 更新
 
 ### 更新日志
