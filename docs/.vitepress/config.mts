@@ -1,7 +1,13 @@
+import { readFileSync } from 'node:fs'
+import { dirname, resolve } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { defineConfig } from 'vitepress'
 
 const REPO = 'zhcx/zeditor'
 const BASE = '/zeditor/'
+
+// 导航栏版本号直接从应用 package.json 读取，避免每次发布漏改文档（曾漏过一次，页面停留在 v0.5.9）。
+const APP_VERSION = `v${JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8')).version}`
 
 export default defineConfig({
   lang: 'zh-CN',
@@ -27,7 +33,7 @@ export default defineConfig({
       { text: '参考', link: '/reference/shortcuts', activeMatch: '/reference/' },
       { text: '下载', link: `https://github.com/${REPO}/releases/latest` },
       {
-        text: 'v0.5.9',
+        text: APP_VERSION,
         items: [
           { text: '更新日志', link: `https://github.com/${REPO}/blob/main/CHANGELOG.md` },
           { text: '发布说明', link: `https://github.com/${REPO}/releases` }
