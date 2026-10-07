@@ -1,6 +1,6 @@
 # Zeditor 使用教程
 
-> 本教程已同步到 **Zeditor v0.6.1**，覆盖软件功能与最新的搜索体系（快捷命令、近期文件、当前文档查找替换）等改进。
+> 本教程已同步到 **Zeditor v0.6.2**，覆盖软件功能与最新的搜索体系（快捷命令、近期文件、当前文档查找替换）等改进。
 > Zeditor 是一款基于 Tauri 2.0 + React + Monaco Editor 构建的现代化 Markdown 编辑器，支持实时预览、AI 辅助写作、文档转换、多种导出与云备份。
 
 ---
@@ -599,4 +599,4 @@ WebDAV 与 S3 自动备份，见[第 16 章](#16-云备份webdav--s3)。
 
 ---
 
-*本教程对应 Zeditor v0.6.1。若软件更新后界面有变化，请以应用内「快捷键说明」「Markdown 语法」弹窗与 [官方 README](https://github.com/zhcx/zeditor) 为准。*
+*本教程对应 Zeditor v0.6.2。若软件更新后界面有变化，请以应用内「快捷键说明」「Markdown 语法」弹窗与 [官方 README](https://github.com/zhcx/zeditor) 为准。*

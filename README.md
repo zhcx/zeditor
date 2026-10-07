@@ -181,6 +181,32 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
+## v0.6.2 更新
+
+### 更新日志
+
+- **修复预览跳转**：点击编辑器任意位置，对应内容现在出现在预览窗格的**同一相对位置**，不再被一律顶到窗格最上方（预览 → 编辑器方向同样按镜像对齐处理）。
+- **修复长行溢出编辑框**：折行改用基于真实字形测量的策略，字间距（默认 0.6px）不再让长行超出窗格宽度；此前横向滚动条按设计隐藏，溢出部分无法查看。
+- **文档站版本号自动跟随**：使用文档导航栏的版本号改为构建时读取 `package.json`，不再需要每次发版手工同步。
+
+### v0.6.2 平台安装包对照
+
+> 以下链接指向 v0.6.2 Release 资产；安装包由 GitHub Actions 根据 v0.6.2 标签源码构建。
+
+| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
+| --- | --- | --- | --- | --- |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor-0.6.2-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.2.md`](docs/releases/v0.6.2.md)。
+
 ## v0.6.1 更新
 
 ### 更新日志
