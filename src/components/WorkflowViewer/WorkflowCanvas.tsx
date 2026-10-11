@@ -2,6 +2,7 @@ import { AppIcon } from '../Icons/AppIcon';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { workflowEdgePath, type WorkflowGraph, type WorkflowGraphNode } from '../../utils/workflowGraph';
 import { displayWidth } from '../../utils/markdownTable.ts';
+import { formatShortcut } from '../../utils/platformShortcuts';
 import type { WorkflowDiagnostic } from '../../utils/workflowDiagnostics';
 
 interface WorkflowCanvasProps {
@@ -229,7 +230,7 @@ export function WorkflowCanvas({ graph, selectedJobId, onSelectJob, diagnostics,
   return (
     <div className={`workflow-canvas ${compact ? 'is-compact' : ''}`}>
       <div className="workflow-canvas-toolbar">
-        <span className="workflow-canvas-hint">Ctrl + 滚轮缩放，拖动滚动条平移，点击 job 查看详情</span>
+        <span className="workflow-canvas-hint">{formatShortcut('Ctrl + 滚轮缩放，拖动滚动条平移，点击 job 查看详情')}</span>
         <div className="workflow-canvas-zoom">
           <button type="button" onClick={() => applyScale(scale - SCALE_STEP)} aria-label="缩小">−</button>
           <span>{Math.round(scale * 100)}%</span>

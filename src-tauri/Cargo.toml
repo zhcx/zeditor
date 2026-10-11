@@ -11,7 +11,8 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # 不再强制启用 devtools：release 启动更轻量；debug 构建默认自带 devtools。
 # protocol-asset 是 tauri.conf.json 中 assetProtocol 允许本地媒体播放的前提。
-tauri = { version = "2", features = ["protocol-asset"] }
+# macos-private-api 关闭 WKWebView 的不透明白底（详见下方说明），其余平台为空特性。
+tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"
@@ -40,6 +41,15 @@ encoding_rs = "0.8"
 # MCP 支持：WebSocket 桥接（编辑器内）与 MCP server 二进制共用。
 tokio-tungstenite = "0.24"
 futures = "0.3"
+
+# 关于 macos-private-api：窗口缩放 / 最大化时，WKWebView 在内容重绘前会以自身的
+# 不透明白底填充新暴露的区域，这正是「最大化后先出现大面积白边、随后才被应用填满」
+# 的成因。启用该特性（配合 tauri.conf.json 的 macOSPrivateApi）后，前端调用
+# getCurrentWindow().setBackgroundColor() 时 wry 会一并关闭 WKWebView 的
+# drawsBackground、设置 underPageBackgroundColor 与窗口底色（该路径经事件循环
+# 派发到主线程，线程安全）。注意：不要再为此写自研 objc2 原生调用——objc2 的
+# msg_send! 在对象不响应选择器时是 Rust panic（而非 ObjC 异常），panic=abort 下
+# 无法被 exception::catch 拦截，会让进程直接崩溃。
 
 [[bin]]
 name = "zeditor"

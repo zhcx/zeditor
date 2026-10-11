@@ -2843,10 +2843,7 @@ mod workspace_search_tests {
 
 #[cfg(test)]
 mod link_check_tests {
-    use super::{
-        document_drive_prefix, is_drive_relative_path, is_unc_path, is_windows_root_relative,
-        Settings,
-    };
+    use super::{is_drive_relative_path, is_unc_path, is_windows_root_relative, Settings};
 
     #[test]
     fn unc_and_drive_relative_paths_are_rejected() {
@@ -3042,9 +3039,10 @@ pub async fn finalize_update_install(installer_path: String) -> Result<(), Strin
     }
     #[cfg(not(target_os = "windows"))]
     {
-        return Err("自动安装仅支持 Windows".to_string());
+        Err("自动安装仅支持 Windows".to_string())
     }
 
-    // Exit the app so the installer can replace files
+    // Windows 上启动安装程序后退出，让安装器替换文件
+    #[cfg(target_os = "windows")]
     std::process::exit(0);
 }

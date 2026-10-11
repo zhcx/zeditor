@@ -13,9 +13,9 @@ use std::os::windows::process::CommandExt;
 #[cfg(windows)]
 const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 
-fn hide_console(command: &mut Command) {
+fn hide_console(_command: &mut Command) {
     #[cfg(windows)]
-    command.creation_flags(CREATE_NO_WINDOW);
+    _command.creation_flags(CREATE_NO_WINDOW);
 }
 
 pub fn system_command(program: impl AsRef<OsStr>) -> Command {
@@ -65,6 +65,7 @@ fn discover_executable_uncached(name: &str) -> Option<PathBuf> {
         }
     }
 
+    #[allow(unused_mut)]
     let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect())
         .unwrap_or_default();
@@ -117,6 +118,7 @@ fn official_claude_candidates_from_roots(roots: impl IntoIterator<Item = PathBuf
 }
 
 #[cfg(test)]
+#[allow(dead_code)]
 fn discover_in_directories(
     name: &str,
     directories: impl IntoIterator<Item = PathBuf>,
@@ -263,6 +265,7 @@ pub fn resolve_executable(path: PathBuf) -> Result<PathBuf, String> {
 }
 
 pub fn select_discovered(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    #[allow(unused_mut)]
     let mut paths: Vec<PathBuf> = paths.into_iter().filter(|path| path.is_file()).collect();
     #[cfg(windows)]
     paths.sort_by_key(|path| {
@@ -286,7 +289,9 @@ pub fn select_discovered(paths: impl IntoIterator<Item = PathBuf>) -> Option<Pat
 
 #[cfg(test)]
 mod tests {
+    #[cfg(windows)]
     use super::*;
+    #[cfg(windows)]
     use std::fs;
 
     #[cfg(windows)]

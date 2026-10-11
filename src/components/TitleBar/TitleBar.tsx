@@ -5,6 +5,7 @@ import { MenuBar } from '../MenuBar/MenuBar';
 import { useAppStore } from '../../stores/appStore';
 import { t } from '../../i18n';
 import { formatShortcut } from '../../utils/platformShortcuts';
+import { isMacOS } from '../../utils/platform';
 
 const APP_NAME = 'Zeditor';
 
@@ -19,20 +20,41 @@ interface TitleBarProps {
 
 export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '', onSearchQueryChange, searchInputRef }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
+  // macOS 使用原生红绿灯按钮 + Overlay 标题栏（见 tauri.macos.conf.json）：
+  // 自绘的窗口按钮要让位给系统控件，标题栏左侧同时留出红绿灯的位置。
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const mountedRef = useRef(true);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const isMac = isMacOS();
   const language = useAppStore(state => state.settings.appearance.language);
   const activeDocumentTitle = useAppStore(state => (
     state.tabs.find(tab => tab.id === state.activeTabId)?.title || t('未命名', state.settings.appearance.language)
   ));
   const modified = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.modified ?? false);
 
+  // 最大化与全屏状态共用一个读取入口：全屏时 macOS 会隐藏红绿灯，
+  // 标题栏左侧的留白需要同步收起（见 macos.css）。
+  const syncWindowState = useCallback(async () => {
+    try {
+      const appWindow = getCurrentWindow();
+      const [maximized, fullscreen] = await Promise.all([
+        appWindow.isMaximized(),
+        appWindow.isFullscreen(),
+      ]);
+      if (!mountedRef.current) return;
+      setIsMaximized(maximized);
+      setIsFullscreen(fullscreen);
+    } catch { /* not critical */ }
+  }, []);
+
   useEffect(() => {
     if (!isTauri) return undefined;
     mountedRef.current = true;
 
-    // One-shot initial read — fire-and-forget, no effect nesting
-    getCurrentWindow()
+    // One-shot initial read — fire-and-forget, no effect nesting.
+    // 同步调用会把 setState 放进 effect 体内，所以保持 then 回调的写法。
+    const appWindow = getCurrentWindow();
+    appWindow
       .isMaximized()
       .then((maximized) => {
         if (mountedRef.current) {
@@ -40,20 +62,25 @@ export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '',
         }
       })
       .catch(() => { /* not critical */ });
+    if (isMac) {
+      appWindow
+        .isFullscreen()
+        .then((fullscreen) => {
+          if (mountedRef.current) {
+            setIsFullscreen(fullscreen);
+          }
+        })
+        .catch(() => { /* not critical */ });
+    }
 
     return () => {
       mountedRef.current = false;
     };
-  }, [isTauri]);
+  }, [isMac, isTauri]);
 
   const handleResize = useCallback(async () => {
-    try {
-      const maximized = await getCurrentWindow().isMaximized();
-      if (mountedRef.current) {
-        setIsMaximized(maximized);
-      }
-    } catch { /* not critical */ }
-  }, []);
+    if (mountedRef.current) await syncWindowState();
+  }, [syncWindowState]);
 
   useEffect(() => {
     if (!isTauri) return undefined;
@@ -82,8 +109,14 @@ export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '',
     await onRequestClose();
   }, [isTauri, onRequestClose]);
 
+  const titlebarClassName = [
+    'titlebar',
+    isMac ? 'titlebar-macos' : '',
+    isMac && isFullscreen ? 'titlebar-macos-fullscreen' : '',
+  ].filter(Boolean).join(' ');
+
   return (
-    <div className="titlebar">
+    <div className={titlebarClassName}>
       <div className="titlebar-menu" data-tauri-drag-region="false">
         <MenuBar />
       </div>

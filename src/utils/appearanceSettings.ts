@@ -1,3 +1,5 @@
+import { detectPlatform, type DesktopPlatform } from './platform.ts';
+
 export const DEFAULT_FONT_SIZE = 14;
 export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 32;
@@ -34,9 +36,18 @@ export function typographyCssVariables(appearance: { ui_font_size?: unknown; let
  * 引用——CSS 变量字符串本身不随字体变化，更换字体后 Monaco 会命中旧测量
  * 缓存，渲染用的是新字体而折行宽度仍按旧字体计算，导致行文字溢出编辑框。
  */
-export function contentFontStack(fontFamily?: string): string {
-  const family = fontFamily?.replace(/[;{}]/g, '').trim() || 'Microsoft YaHei';
-  return `${family}, "Microsoft YaHei", sans-serif`;
+export const MACOS_FONT_FALLBACK = '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif';
+export const GENERIC_FONT_FALLBACK = '"Microsoft YaHei", sans-serif';
+
+/** 回落字体跟随平台：macOS 上继续以微软雅黑兜底会让界面与系统脱节。 */
+export function fontFallbackStack(platform: DesktopPlatform = detectPlatform()): string {
+  return platform === 'macos' ? MACOS_FONT_FALLBACK : GENERIC_FONT_FALLBACK;
+}
+
+export function contentFontStack(fontFamily?: string, platform?: DesktopPlatform): string {
+  const family = fontFamily?.replace(/[;{}]/g, '').trim();
+  const fallback = fontFallbackStack(platform);
+  return family ? `${family}, ${fallback}` : fallback;
 }
 
 export function getRangeMarkerGeometry(

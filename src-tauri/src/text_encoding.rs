@@ -58,7 +58,9 @@ pub fn decode_text(bytes: &[u8], encoding: Option<&str>) -> Result<TextDocument,
                 return Err(failure());
             }
             let units: Vec<u16> = source
-                .chunks_exact(2)
+                .as_chunks::<2>()
+                .0
+                .iter()
                 .map(|pair| {
                     if little {
                         u16::from_le_bytes([pair[0], pair[1]])

@@ -1,0 +1,21 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  打包时与 Tauri 生成的 Info.plist 合并（见 tauri.macos.conf.json 的 bundle.macOS.infoPlist）。
+
+  用途：声明应用支持的本地化。缺少这一声明时，macOS 会认为应用只支持开发区域
+  （默认 English），于是「打开/保存」等系统面板一律显示英文，与界面语言不一致。
+  这里声明简体中文、繁体中文与英文，系统会按用户的偏好语言自动选择。
+-->
+<plist version="1.0">
+<dict>
+  <key>CFBundleDevelopmentRegion</key>
+  <string>zh-Hans</string>
+  <key>CFBundleLocalizations</key>
+  <array>
+    <string>zh-Hans</string>
+    <string>zh-Hant</string>
+    <string>en</string>
+  </array>
+</dict>
+</plist>

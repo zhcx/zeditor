@@ -418,6 +418,29 @@ html.panel-resizing .chatbot-side-panel {
   contain: layout paint;
 }
 
+/* 窗口缩放期间：临时关掉毛玻璃、阴影与过渡。这些效果的重绘代价很高，
+   会拖慢 WebView 在新尺寸下的绘制，表现为「先出现一片空白、随后才被界面
+   覆盖」。只在缩放进行中生效，结束后立即恢复（见 App.tsx 的 scheduleRebalance）。 */
+html.window-resizing :is(
+  .menubar,
+  .titlebar,
+  .toolbar,
+  .statusbar,
+  .sidebar,
+  .document-pane,
+  .modal-overlay,
+  .modal-content,
+  .menu-dropdown,
+  .context-menu
+) {
+  backdrop-filter: none !important;
+  transition: none !important;
+}
+
+html.window-resizing * {
+  box-shadow: none !important;
+}
+
 /* Keep the active divider clearly visible for the whole drag, even when the
    pointer leaves the 4px hover zone while the panel is being resized. */
 html.panel-resizing .divider.resizable::after,

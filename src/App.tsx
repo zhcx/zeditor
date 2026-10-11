@@ -45,11 +45,14 @@ import { isMediaFilePath } from './utils/media';
 import { insertMediaFromPath } from './services/mediaAssets';
 import { insertImageFromPath } from './services/imageAssets';
 import { isImageFilePath } from './utils/imageSyntax';
+import { isMacOS } from './utils/platform';
 import './styles/main.css';
 import './styles/workbench.css';
 import './styles/comfort.css';
 import './styles/icons.css';
 import './styles/typography.css';
+// macOS 原生外观层：仅在 theme-boot.js 标记的 html[data-platform='macos'] 下生效。
+import './styles/macos.css';
 import { contentFontStack, typographyCssVariables } from './utils/appearanceSettings';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
 
@@ -59,6 +62,66 @@ interface DragDropPayload {
 }
 
 const DEFAULT_EDITOR_RATIO = 0.5;
+
+/**
+ * 关窗语义：
+ * - `window`：关闭窗口。macOS 只隐藏窗口，应用继续常驻 Dock，点按图标即可恢复；
+ * - `quit`：退出应用，销毁窗口并结束进程。
+ */
+type AppCloseMode = 'window' | 'quit';
+
+/**
+ * 当前主题的应用底色，用于同步原生窗口背景色。
+ *
+ * 窗口缩放 / 最大化时，Web 内容重绘之前露出的是原生窗口底色：WKWebView 的
+ * 不透明白色底已由 macOSPrivateApi 关闭（src-tauri/tauri.conf.json），因此
+ * 这层底色必须跟随主题，否则深色主题会出现白边、浅色主题会出现黑边。
+ */
+function resolveAppBackgroundColor(): string | null {
+  const declared = getComputedStyle(document.documentElement).getPropertyValue('--bg-app').trim();
+  const candidate = declared || getComputedStyle(document.body).backgroundColor;
+  return /^#[0-9a-f]{3,8}$/i.test(candidate) || /^rgba?\(/i.test(candidate) ? candidate : null;
+}
+
+/**
+ * 把主题底色同步到原生窗口（挂载、主题切换、窗口缩放开始时调用）。
+ *
+ * WKWebView 在窗口尺寸变化时会重置自身背景，新露出的区域在它重绘完成前
+ * 显示的就是窗口底色——因此除了挂载与主题切换，缩放开始时也要重新应用一次。
+ *
+ * ⚠️ 不要改用 @tauri-apps/api 的 `window.setBackgroundColor()`：它发送的
+ * IPC 参数名是 `color`，而当前 Tauri（2.11）的 Rust 命令参数名是 `value`，
+ * 调用会因缺少 `value` 直接失败并被静默吞掉——这正是「窗口底色始终停留在
+ * 系统默认色（浅色外观下为白色）、最大化动画露出白底」的根因。这里按命令
+ * 签名直接调用，并保留 `color` 形式作为未来版本改名的兼容回退。
+ */
+async function setNativeWindowBackground(color: string) {
+  const label = getCurrentWindow().label;
+  for (const args of [{ label, value: color }, { label, color }]) {
+    try {
+      await invoke('plugin:window|set_background_color', args);
+      return;
+    } catch { /* 参数名不匹配时尝试下一种写法 */ }
+  }
+}
+
+function syncNativeWindowBackground(color?: string | null) {
+  if (!('__TAURI_INTERNALS__' in window)) return;
+  const value = color ?? resolveAppBackgroundColor();
+  if (!value) return;
+  void setNativeWindowBackground(value);
+}
+
+/**
+ * 让原生窗口外观跟随应用主题（决定标题栏材质、窗口控件与系统面板的明暗）。
+ *
+ * `setTheme` 的 JS 参数名（`value`）与 Rust 命令一致，可以直接使用。
+ */
+function syncNativeWindowTheme(themeId: string) {
+  if (!('__TAURI_INTERNALS__' in window)) return;
+  const theme = themeId.endsWith('-dark') ? 'dark' : 'light';
+  void getCurrentWindow().setTheme(theme).catch(() => { /* 平台不支持时忽略 */ });
+}
 
 function App() {
   const {
@@ -214,6 +277,12 @@ function App() {
   const immersivePolicy = getImmersiveWorkspacePolicy(mode, chatbotVisible);
 
   const promptUnsavedChanges = useCallback((tabs: CloseGuardTab[]) => new Promise<UnsavedChangesAction>((resolve) => {
+    // 关窗后窗口可能已隐藏（macOS 常驻 Dock），而退出应用仍要经过这里确认：
+    // 先把窗口显示出来，否则用户看不到确认框、也无法响应。
+    if (isMacOS() && '__TAURI_INTERNALS__' in window) {
+      const current = getCurrentWindow();
+      void current.show().then(() => current.setFocus()).catch(() => undefined);
+    }
     closePromptResolver.current = resolve;
     setClosePromptTabs(tabs);
   }), []);
@@ -227,7 +296,11 @@ function App() {
     resolve?.(action);
   }, []);
 
-  const requestAppClose = useCallback(async (installerPath?: string) => {
+  /**
+   * 关窗语义：`window` 关闭窗口（macOS 只隐藏，应用常驻 Dock），
+   * `quit` 退出应用（销毁窗口并结束进程）。
+   */
+  const requestAppClose = useCallback(async (installerPath?: string, mode: AppCloseMode = 'window') => {
     if (!('__TAURI_INTERNALS__' in window) || closeGuardInProgress.current) return;
     closeGuardInProgress.current = true;
     closeCancelled.current = false;
@@ -271,7 +344,13 @@ function App() {
           return;
         }
         try {
-          await getCurrentWindow().destroy();
+          if (mode === 'window' && isMacOS()) {
+            // macOS 惯例：关闭窗口只隐藏窗口，应用继续常驻 Dock，
+            // 点按 Dock 图标（RunEvent::Reopen）即可原样恢复现场。
+            await getCurrentWindow().hide();
+          } else {
+            await getCurrentWindow().destroy();
+          }
         } catch (error) {
           // A capability/configuration regression must never trap the user in
           // the close prompt. Ask the native application event loop to exit as
@@ -582,6 +661,53 @@ function App() {
     };
   }, [settings.appearance.theme]);
 
+  // 原生窗口底色跟随主题：缩放 / 最大化期间（Web 内容尚未重绘）露出的是这层
+  // 底色，与主题同色才不会出现白边或异色底。
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return undefined;
+    const applyWindowBackgroundColor = () => syncNativeWindowBackground();
+
+    applyWindowBackgroundColor();
+    // 主题切换（含跟随系统明暗）统一由 applyThemeToDocument 广播，避免重复判定。
+    window.addEventListener('zeditor-theme-change', applyWindowBackgroundColor);
+    return () => window.removeEventListener('zeditor-theme-change', applyWindowBackgroundColor);
+  }, []);
+
+  // 原生窗口外观跟随应用主题：标题栏材质、窗口控件与系统面板的明暗都由它决定。
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return undefined;
+    const applyWindowTheme = (event: Event) => {
+      const theme = (event as CustomEvent<string>).detail;
+      if (typeof theme === 'string' && theme) syncNativeWindowTheme(theme);
+    };
+    // 挂载时补一次（applyThemeToDocument 的首次广播可能早于本监听注册）。
+    syncNativeWindowTheme(document.documentElement.dataset.theme ?? 'vscode-dark');
+    window.addEventListener('zeditor-theme-change', applyWindowTheme);
+    return () => window.removeEventListener('zeditor-theme-change', applyWindowTheme);
+  }, []);
+
+  // macOS 的 ⌘Q / Dock 退出走原生路径，Rust 侧拦截后转发到这里，
+  // 复用同一套未保存修改守卫，避免绕过确认直接退出丢数据。
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return undefined;
+    const unlisten = listen('zeditor-quit-requested', () => {
+      // 来自 ⌘Q / Dock 菜单的原生退出：走保存守卫后销毁窗口结束进程。
+      void requestAppClose(undefined, 'quit');
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, [requestAppClose]);
+
+  // macOS 常驻：从 Dock 重新打开窗口（RunEvent::Reopen）后重新测量布局。
+  // 窗口隐藏期间尺寸可能被外部改变（换显示器、系统缩放），这里用一次 resize
+  // 事件让编辑器与各面板同步到新的窗口尺寸。
+  useEffect(() => {
+    if (!('__TAURI_INTERNALS__' in window)) return undefined;
+    const unlisten = listen('zeditor-window-reopened', () => {
+      window.dispatchEvent(new Event('resize'));
+    });
+    return () => { unlisten.then(fn => fn()); };
+  }, []);
+
   // MCP 工具执行器：接收桥接转发的 AI 助手工具调用（设置 → 集成）。
   useEffect(() => {
     void initMcpDispatcher();
@@ -709,10 +835,30 @@ function App() {
     };
 
     const frame = window.requestAnimationFrame(rebalancePanels);
-    window.addEventListener('resize', rebalancePanels);
+    // 窗口缩放动画期间不做重排：逐帧触发 React 重渲染会拖慢 WebView 的重绘，
+    // 新露出的区域会先显示窗口底色（表现为「先出现一片空白、随后才被界面覆盖」）。
+    // 面板宽度本身是 flex 比例，会跟随窗口自动伸缩，等尺寸稳定后再重排即可。
+    let resizeTimer: number | null = null;
+    const scheduleRebalance = () => {
+      // 缩放期间临时关掉毛玻璃、阴影与过渡（见 main.css 的 window-resizing），
+      // WebView 才能更快把新露出的区域画出来。
+      document.documentElement.classList.add('window-resizing');
+      // 缩放开始时先刷一次原生底色：WKWebView 会在尺寸变化时重建图层背景，
+      // 提前刷一层能让新露出的区域直接呈现主题色而不是系统白底。
+      if (resizeTimer === null) syncNativeWindowBackground();
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        document.documentElement.classList.remove('window-resizing');
+        rebalancePanels();
+      }, 150);
+    };
+    window.addEventListener('resize', scheduleRebalance);
     return () => {
       window.cancelAnimationFrame(frame);
-      window.removeEventListener('resize', rebalancePanels);
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      document.documentElement.classList.remove('window-resizing');
+      window.removeEventListener('resize', scheduleRebalance);
     };
   }, [balanceDocumentPanes, chatbotPanelWidth, chatbotVisible, outlineVisible, proofreadPanelWidth, proofreadResults.length, setSplitRatio, sidebarVisible, sidebarWidth]);
 

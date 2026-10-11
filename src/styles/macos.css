@@ -1,0 +1,267 @@
+/* ======================================================================
+   Zeditor macOS 原生外观层
+
+   触发条件：theme-boot.js 在首帧渲染前写入的 <html data-platform="macos">，
+   即仅在 macOS（WKWebView）生效，Windows / Linux 保持既有的 VSCode 风格。
+
+   与原生窗口的配合（src-tauri/tauri.macos.conf.json）：
+   - decorations: true + titleBarStyle: Overlay → 系统红绿灯按钮浮在 WebView
+     之上，窗口保留原生圆角、阴影与缩放手势，因此这里隐藏自绘的窗口按钮，
+     并在标题栏左侧留出红绿灯的固定安全区；
+   - trafficLightPosition: { x: 20, y: 20 } → 系统标题栏容器高度 = 按钮高度(14) + 20
+     = 34px，与 --ui-titlebar-height 完全一致，红绿灯因此在标题栏里垂直居中。
+   ====================================================================== */
+
+/* ── 平台令牌 ─────────────────────────────────────────────────────── */
+
+html[data-platform='macos'] {
+  /* 系统字体：SF Pro（-apple-system）+ 中文苹方。macOS 上回落到
+     Microsoft YaHei 是「像 Windows 软件」最直接的观感来源。 */
+  --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', sans-serif;
+  --font-content: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', sans-serif;
+
+  /* macOS 标题栏固定 34px：原生红绿灯按钮不随界面字号缩放，
+     固定高度才能让它们始终垂直居中（配合 trafficLightPosition.y = 20）。 */
+  --ui-titlebar-height: 34px;
+  --macos-traffic-light-inset: 78px;
+
+  /* 系统强调色（AppKit systemBlue）：菜单高亮、焦点环按平台规范使用系统蓝，
+     与应用自身的品牌强调色解耦，避免覆盖主题注入的 --accent-color。 */
+  --macos-accent: #007aff;
+  --macos-accent-strong: color-mix(in srgb, var(--macos-accent) 88%, #000);
+  --macos-accent-soft: color-mix(in srgb, var(--macos-accent) 14%, transparent);
+  --macos-focus-ring: 0 0 0 3.5px color-mix(in srgb, var(--macos-accent) 40%, transparent);
+
+  /* macOS 菜单/面板的标高比 VSCode 更轻、更柔。 */
+  --ui-shadow-menu: 0 0 0 .5px rgba(0, 0, 0, .12), 0 10px 30px rgba(0, 0, 0, .18), 0 2px 6px rgba(0, 0, 0, .08);
+  --ui-shadow-dialog: 0 0 0 .5px rgba(0, 0, 0, .14), 0 22px 60px rgba(0, 0, 0, .28), 0 4px 12px rgba(0, 0, 0, .12);
+
+  /* 覆盖式滚动条：比 VSCode 的 10px 更细，拇指半透明。 */
+  --ui-scrollbar-size: 8px;
+  --ui-scrollbar-thumb: rgba(0, 0, 0, .28);
+  --ui-scrollbar-thumb-hover: rgba(0, 0, 0, .45);
+}
+
+html[data-platform='macos'][data-theme$='-dark'] {
+  --macos-accent: #0a84ff;
+  --ui-scrollbar-thumb: rgba(255, 255, 255, .26);
+  --ui-scrollbar-thumb-hover: rgba(255, 255, 255, .42);
+}
+
+/* 缩放手势期间不再触发额外重排，窗口调整更接近原生。 */
+html[data-platform='macos'],
+html[data-platform='macos'] body {
+  overscroll-behavior: none;
+}
+
+/* ── 标题栏（Overlay + 原生红绿灯） ─────────────────────────────── */
+
+html[data-platform='macos'] .titlebar {
+  /* 红绿灯安全区：系统按钮位于 x=19，三个按钮合计约 60px。 */
+  padding-left: var(--macos-traffic-light-inset);
+  padding-right: 6px;
+  border-bottom: 1px solid var(--ui-border-subtle);
+  background: var(--ui-bg-titlebar);
+}
+
+/* 进入系统全屏时红绿灯会被隐藏，安全区随之收起，避免左侧出现空洞。 */
+html[data-platform='macos'] .titlebar.titlebar-macos-fullscreen {
+  padding-left: 10px;
+}
+
+/* 自绘的 Windows 风格窗口按钮：macOS 交由原生红绿灯负责。 */
+html[data-platform='macos'] .titlebar-controls { display: none; }
+
+/* 应用菜单已交给系统菜单栏（原生 NSMenu）时，窗口内不再重复显示菜单。
+   构建失败时 MenuBar 不会写入 data-native-menu，此处自动回退为窗口内菜单。 */
+html[data-platform='macos'][data-native-menu='active'] .titlebar .menubar { display: none; }
+
+/* 菜单栏隐藏后，为文档入口补上与左侧红绿灯等宽的留白，
+   使标题栏中央的文档切换器相对窗口真正居中。 */
+html[data-platform='macos'][data-native-menu='active'] .titlebar-drag-spacer { padding-right: 72px; }
+
+html[data-platform='macos'] .titlebar .menubar {
+  gap: 0;
+  background: transparent;
+  border-bottom: 0;
+  backdrop-filter: none;
+}
+
+html[data-platform='macos'] .titlebar .menu-trigger {
+  height: 26px;
+  min-width: 0;
+  padding: 0 8px;
+  border-radius: 5px !important;
+  font-size: 13px;
+  font-weight: 400;
+  letter-spacing: 0;
+}
+
+html[data-platform='macos'] .titlebar .menu-trigger:hover,
+html[data-platform='macos'] .titlebar .menu-trigger.active {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-primary);
+}
+
+/* 应用菜单触发器的图标（macOS 上直接读应用名，不再需要额外留白）。 */
+html[data-platform='macos'] .titlebar .app-menu-trigger {
+  min-width: 0;
+  padding: 0 8px;
+}
+
+/* 标题栏中的文档入口：按 macOS 搜索框（Finder / Safari 地址栏）度量。 */
+html[data-platform='macos'] .titlebar .titlebar-command-center {
+  height: 26px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--ui-bg-input) 55%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, var(--ui-text-primary) 4%, transparent);
+  color: var(--ui-text-secondary);
+  font-size: 12px;
+}
+
+html[data-platform='macos'] .titlebar .titlebar-command-center:hover {
+  border-color: var(--ui-border-strong);
+  background: var(--ui-bg-hover);
+}
+
+html[data-platform='macos'] .titlebar .titlebar-command-center.titlebar-command-center-open {
+  border-color: var(--macos-accent);
+  box-shadow: var(--macos-focus-ring);
+}
+
+html[data-platform='macos'] .titlebar .titlebar-command-center kbd {
+  padding: 1px 4px;
+  border-radius: 4px;
+  background: var(--ui-bg-hover);
+  font-size: 10px;
+}
+
+/* ── 菜单与下拉面板：macOS 菜单质感 ─────────────────────────────── */
+
+html[data-platform='macos'] :is(
+  .menu-dropdown,
+  .submenu-dropdown,
+  .more-dropdown,
+  .context-menu,
+  .toolbar-menu,
+  .status-style-menu,
+  .reasoning-menu,
+  .immersive-mode-menu,
+  .font-picker-dropdown
+) {
+  padding: 4px;
+  border: 0.5px solid var(--ui-border-strong);
+  border-radius: 8px !important;
+  box-shadow: var(--ui-shadow-menu);
+}
+
+html[data-platform='macos'] :is(.menu-dropdown, .submenu-dropdown, .more-dropdown, .context-menu) button,
+html[data-platform='macos'] :is(.menu-option, .context-menu-item, .toolbar-menu-item) {
+  min-height: 24px;
+  padding: 0 8px;
+  border-radius: 5px !important;
+  color: var(--ui-text-primary);
+  font-size: calc(13px * var(--ui-font-scale));
+}
+
+/* 系统菜单以强调色填充整行高亮，而不是 VSCode 的浅灰底。 */
+html[data-platform='macos'] :is(.menu-dropdown, .submenu-dropdown, .more-dropdown, .context-menu) button:hover:not(:disabled),
+html[data-platform='macos'] :is(.menu-option, .context-menu-item):hover:not(.disabled),
+html[data-platform='macos'] :is(.menu-option, .context-menu-item).is-checked {
+  background: var(--macos-accent);
+  color: #fff;
+}
+
+html[data-platform='macos'] :is(.menu-option, .context-menu-item):hover .shortcut,
+html[data-platform='macos'] :is(.menu-option, .context-menu-item).is-checked .shortcut {
+  color: color-mix(in srgb, #fff 78%, transparent);
+}
+
+html[data-platform='macos'] .menu-divider {
+  height: 1px;
+  margin: 4px 6px;
+  background: var(--ui-border-subtle);
+}
+
+/* ── 滚动条：覆盖式细滚动条 ─────────────────────────────────────── */
+
+html[data-platform='macos'] *::-webkit-scrollbar {
+  width: var(--ui-scrollbar-size);
+  height: var(--ui-scrollbar-size);
+}
+
+html[data-platform='macos'] *::-webkit-scrollbar-thumb {
+  border: 2px solid transparent;
+  border-radius: 999px;
+  background: var(--ui-scrollbar-thumb);
+  background-clip: padding-box;
+}
+
+html[data-platform='macos'] *::-webkit-scrollbar-thumb:hover {
+  background: var(--ui-scrollbar-thumb-hover);
+  background-clip: padding-box;
+}
+
+html[data-platform='macos'] *::-webkit-scrollbar-button { display: none; }
+
+/* ── 控件：系统焦点环与系统强调色 ───────────────────────────────── */
+
+html[data-platform='macos'] .app :is(button, input, select, textarea, [role='tab']):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):not(.titlebar-search-input):focus-visible {
+  outline: none;
+  box-shadow: var(--macos-focus-ring);
+}
+
+html[data-platform='macos'] .app :is(input[type='checkbox'], input[type='radio'], input[type='range']) {
+  accent-color: var(--macos-accent);
+}
+
+html[data-platform='macos'] .app :is(input:not([type='checkbox']):not([type='radio']):not([type='range']), select, textarea):not(.inputarea):not(.ime-text-area):not(.titlebar-search-input):focus {
+  border-color: var(--macos-accent);
+  box-shadow: var(--macos-focus-ring);
+}
+
+html[data-platform='macos'] ::selection {
+  background: color-mix(in srgb, var(--macos-accent) 26%, transparent);
+}
+
+/* ── 工作台镀铬微调 ─────────────────────────────────────────────── */
+
+/* 活动栏选中态使用系统蓝，与原生控件语言一致。 */
+html[data-platform='macos'] .activity-bar-button.active {
+  background: var(--macos-accent-soft);
+  color: var(--macos-accent);
+}
+
+html[data-platform='macos'] .activity-bar-button.active svg {
+  color: var(--macos-accent);
+}
+
+html[data-platform='macos'] .activity-bar-button.active::before {
+  background: var(--macos-accent);
+}
+
+/* 标签页：macOS 分隔线更淡，激活态用系统蓝上缘标识。 */
+html[data-platform='macos'] .document-pane-tabs {
+  border-bottom: 1px solid var(--ui-border-subtle);
+}
+
+html[data-platform='macos'] .document-pane-tabs .tab {
+  border-right: 1px solid var(--ui-border-subtle);
+  font-size: calc(12px * var(--ui-font-scale));
+}
+
+html[data-platform='macos'] .document-pane-tabs .tab.active {
+  box-shadow: inset 0 1.5px 0 var(--macos-accent);
+}
+
+/* 状态栏：分隔线收淡，与 macOS 的弱分隔语言一致。 */
+html[data-platform='macos'] .statusbar {
+  border-top: 1px solid var(--ui-border-subtle);
+}
+
+/* 对话框：macOS 面板为圆角矩形 + 柔和外阴影，遮罩带轻微模糊。 */
+html[data-platform='macos'] .modal-overlay,
+html[data-platform='macos'] .settings-overlay {
+  backdrop-filter: blur(2px);
+}
