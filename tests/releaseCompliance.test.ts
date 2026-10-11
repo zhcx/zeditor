@@ -119,6 +119,31 @@ test('release builds wait for the locked quality gate', () => {
   assert.equal(packageJson.engines.node, '>=22.6.0')
 })
 
+test('release workflow can rebuild a single platform without wiping other assets', () => {
+  const workflow = read('.github/workflows/build.yml')
+
+  // 局部重建入口：workflow_dispatch 提供 platforms 选择，标签推送按 all 处理
+  assert.match(workflow, /platforms:/)
+  assert.match(workflow, /BUILD_PLATFORMS: \$\{\{ github\.event\.inputs\.platforms \|\| 'all' \}\}/)
+  for (const platform of ['macos', 'linux', 'windows']) {
+    assert.match(workflow, new RegExp(`github\\.event\\.inputs\\.platforms == '${platform}'`))
+  }
+
+  // 任务级 if 读不到 matrix 上下文，因此 macOS 与 Linux 必须拆成独立任务
+  assert.match(workflow, /\r?\n {2}build-macos:\r?\n/)
+  assert.match(workflow, /\r?\n {2}build-linux:\r?\n/)
+  assert.match(workflow, /\r?\n {2}build-windows:\r?\n/)
+  assert.doesNotMatch(workflow, /build-non-windows/)
+  // macOS 仍覆盖两种架构
+  assert.match(workflow, /aarch64-apple-darwin/)
+  assert.match(workflow, /x86_64-apple-darwin/)
+
+  // 只有全平台重建才清空既有资产；局部重建保留其它平台已发布的安装包，
+  // 由 tauri-action 的「同名先删再传」就地替换本次构建的平台。
+  assert.match(workflow, /if \[ "\$BUILD_PLATFORMS" = "all" \]; then/)
+  assert.match(workflow, /Partial build \(\$\{BUILD_PLATFORMS\}\): keeping other platforms' assets\./)
+})
+
 test('SignPath application copy contains the confirmed applicant details and no placeholders', () => {
   const application = read('docs/signpath-foundation-application.md')
 

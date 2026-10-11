@@ -9,6 +9,18 @@ on:
       tag:
         description: Existing immutable release tag to build
         required: true
+      # 局部重建入口：只重跑某一平台的构建并替换该平台的安装包，
+      # 其余平台已发布的资产保持不变（全平台标签推送无需传该参数）。
+      platforms:
+        description: Which platforms to rebuild (partial runs keep other platforms' assets)
+        required: false
+        default: all
+        type: choice
+        options:
+          - all
+          - macos
+          - linux
+          - windows
 
 permissions:
   actions: read
@@ -16,6 +28,7 @@ permissions:
 
 env:
   RELEASE_TAG: ${{ github.event.inputs.tag || github.ref_name }}
+  BUILD_PLATFORMS: ${{ github.event.inputs.platforms || 'all' }}
 
 concurrency:
   group: release-${{ github.event.inputs.tag || github.ref_name }}
@@ -74,17 +87,24 @@ jobs:
         with:
           ref: ${{ env.RELEASE_TAG }}
 
-      - name: Create release or clear existing assets
+      - name: Create release or refresh release notes
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           notes_file="docs/releases/${RELEASE_TAG}.md"
           test -f "$notes_file" || { echo "Missing release notes: $notes_file"; exit 1; }
           if gh release view "$RELEASE_TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
-            gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '.assets[].id' |
-              while read -r asset_id; do
-                gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
-              done
+            if [ "$BUILD_PLATFORMS" = "all" ]; then
+              # 全平台重建：清空既有资产，避免新旧产物混在一起。
+              gh api "repos/${GITHUB_REPOSITORY}/releases/tags/${RELEASE_TAG}" --jq '.assets[].id' |
+                while read -r asset_id; do
+                  gh api --method DELETE "repos/${GITHUB_REPOSITORY}/releases/assets/${asset_id}"
+                done
+            else
+              # 局部重建（如只重发 macOS）：保留其它平台已发布的安装包，
+              # 本次构建的平台由 tauri-action「先删同名再上传」就地替换。
+              echo "Partial build (${BUILD_PLATFORMS}): keeping other platforms' assets."
+            fi
             gh release edit "$RELEASE_TAG" \
               --repo "$GITHUB_REPOSITORY" \
               --title "Zeditor $RELEASE_TAG" \
@@ -97,34 +117,26 @@ jobs:
               --notes-file "$notes_file"
           fi
 
-  build-non-windows:
+  # macOS 与 Linux 拆成两个任务：任务级 if 读不到 matrix 上下文，
+  # 拆开才能用 platform 输入精确跳过不需要重建的平台。
+  build-macos:
     name: ${{ matrix.name }}
     needs: prepare-release
+    if: ${{ github.event_name == 'push' || github.event.inputs.platforms == '' || github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'macos' }}
     strategy:
       fail-fast: false
       matrix:
         include:
           - name: macOS Apple Silicon
-            platform: macos-latest
             target: aarch64-apple-darwin
           - name: macOS Intel
-            platform: macos-latest
             target: x86_64-apple-darwin
-          - name: Linux x64
-            platform: ubuntu-22.04
-            target: x86_64-unknown-linux-gnu
-    runs-on: ${{ matrix.platform }}
+    runs-on: macos-latest
     steps:
       - name: Checkout release source
         uses: actions/checkout@v5
         with:
           ref: ${{ env.RELEASE_TAG }}
-
-      - name: Install Linux system dependencies
-        if: matrix.platform == 'ubuntu-22.04'
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libgtk-3-dev libssl-dev rpm
 
       - name: Setup Node.js
         uses: actions/setup-node@v5
@@ -156,9 +168,56 @@ jobs:
           prerelease: false
           args: --target ${{ matrix.target }}
 
+  build-linux:
+    name: Linux x64
+    needs: prepare-release
+    if: ${{ github.event_name == 'push' || github.event.inputs.platforms == '' || github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'linux' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout release source
+        uses: actions/checkout@v5
+        with:
+          ref: ${{ env.RELEASE_TAG }}
+
+      - name: Install Linux system dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev libayatana-appindicator3-dev librsvg2-dev patchelf libgtk-3-dev libssl-dev rpm
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v5
+        with:
+          node-version: '22'
+          cache: npm
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-gnu
+
+      - name: Restore Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: ./src-tauri -> target
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Build and publish Tauri bundles
+        uses: tauri-apps/tauri-action@v0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        with:
+          tagName: ${{ env.RELEASE_TAG }}
+          releaseName: Zeditor ${{ env.RELEASE_TAG }}
+          releaseDraft: false
+          prerelease: false
+          args: --target x86_64-unknown-linux-gnu
+
   build-windows:
     name: Windows x64 — two-stage signing
     needs: prepare-release
+    if: ${{ github.event_name == 'push' || github.event.inputs.platforms == '' || github.event.inputs.platforms == 'all' || github.event.inputs.platforms == 'windows' }}
     runs-on: windows-latest
     env:
       WINDOWS_TARGET: x86_64-pc-windows-msvc
