@@ -63,7 +63,7 @@ async function alphaBox(png: Buffer) {
   return { width, height, boxWidth: maxX - minX + 1, boxHeight: maxY - minY + 1, minX, minY };
 }
 
-test('macOS 图标遵循 Apple 安全区，图形不超出 80.5% 网格', async () => {
+test('macOS 图标为满幅不透明方块，避免系统套用兼容底板', async () => {
   const icns = readFileSync('src-tauri/icons/icon.icns');
   const entries = parseIcns(icns);
   assert.deepEqual(
@@ -80,28 +80,26 @@ test('macOS 图标遵循 Apple 安全区，图形不超出 80.5% 网格', async 
   const box = await alphaBox(bitmap[1]);
   assert.equal(box.width, 1024);
 
-  // Apple 的 macOS 图标网格：内容区 824/1024 = 80.5%，居中留透明边距。
-  // 之前源图图形占 98.6%，远超安全区，macOS 会自行缩进并用默认浅灰底板
-  // 填补腾出的边缘，外观上就是图标外多了一圈空白。
-  const ratio = box.boxWidth / box.width;
-  assert.ok(
-    ratio > 0.78 && ratio < 0.83,
-    `ic10 内容宽度占比应为 80.5%（Apple 标准），实际 ${(ratio * 100).toFixed(1)}%`,
-  );
-  const margin = (box.width - box.boxWidth) / 2;
-  assert.ok(
-    Math.abs(box.minX - margin) <= 2 && Math.abs(box.minY - margin) <= 2,
-    `图形应居中，实际左上角 ${box.minX},${box.minY}（期望约 ${margin}）`,
-  );
+  // Apple 自 macOS 26 起要求应用图标是「满幅方块、不带自带圆角、不带透明内边距」，
+  // 圆角由系统的 squircle 遮罩统一施加。若图标自带圆角与留白，系统会判定其
+  // 「已是成品外观」而走兼容渲染：额外画一层浅灰底板并把图形缩小贴上，
+  // 外观上就是图标外面多出一圈空白。因此 ic10 必须铺满整个画布。
+  assert.equal(box.boxWidth, box.width, `图形应铺满画布宽度，实际 ${box.boxWidth}/${box.width}`);
+  assert.equal(box.boxHeight, box.height, `图形应铺满画布高度，实际 ${box.boxHeight}/${box.height}`);
+  assert.equal(box.minX, 0, '图形左上角应在画布原点');
+  assert.equal(box.minY, 0, '图形左上角应在画布原点');
+
+  // 连一个透明像素都不能有：任何透明区域都会成为系统底板的露出窗口
+  const stats = await sharp(bitmap[1]).stats();
+  assert.equal(stats.channels[3].min, 255, 'ic10 不应存在任何透明像素（min alpha 应为 255）');
 });
 
-test('图标生成脚本在官方 CLI 之后重建 macOS icns', () => {
+test('图标生成脚本在官方 CLI 之后把 macOS icns 重建为满幅方块', () => {
   const script = readFileSync('scripts/generate-icons.cjs', 'utf8');
-  // macOS 不能沿用满幅方图，必须在 tauri icon 之后单独按安全区重建 icns
   assert.match(script, /const MACOS_CANVAS = 1024;/);
-  assert.match(script, /const MACOS_CONTENT = 824;/);
   assert.match(script, /execFileSync\(process\.execPath, \[tauriCli, 'icon', sourceIcon\]/);
   assert.match(script, /fs\.writeFileSync\(icnsPath, icns\);/);
-  // 源图自带透明边距时要先裁到图形包围盒，否则内容会小于 80.5%
+  // 先裁到图形包围盒（源图自带 0.6% 边距），再延展填满透明四角
   assert.match(script, /\.extract\(box\)/);
+  assert.match(script, /function fillBleed\(bitmap\)/);
 });
