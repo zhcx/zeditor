@@ -2844,6 +2844,10 @@ mod workspace_search_tests {
 #[cfg(test)]
 mod link_check_tests {
     use super::{is_drive_relative_path, is_unc_path, is_windows_root_relative, Settings};
+    // 只被下方 `#[cfg(target_os = "windows")]` 断言使用：条件导入可同时避免
+    // macOS/Linux 上的 unused import 与 Windows 上的 cannot find function。
+    #[cfg(target_os = "windows")]
+    use super::document_drive_prefix;
 
     #[test]
     fn unc_and_drive_relative_paths_are_rejected() {

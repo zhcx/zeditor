@@ -760,8 +760,11 @@ pub(crate) mod test_support {
 
     async fn write_response(stream: &mut tokio::net::TcpStream, status: u16, body: &str) {
         let reason = status_reason(status);
+        // 本服务器每个连接只处理一个请求随即关闭，因此必须显式声明
+        // `Connection: close`：否则 reqwest 的连接池会把下一个请求复用到一个
+        // 已被关闭的 socket 上，导致「同一个 WebDAV 用例偶发返回网络错误」。
         let response = format!(
-            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\n\r\n{body}",
+            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
             body.len()
         );
         let _ = stream.write_all(response.as_bytes()).await;
@@ -774,8 +777,9 @@ pub(crate) mod test_support {
         body: &[u8],
     ) {
         let reason = status_reason(status);
+        // 同上：单请求连接，需显式关闭，避免连接池复用已关闭的 socket。
         let header = format!(
-            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\n\r\n",
+            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
             body.len()
         );
         let _ = stream.write_all(header.as_bytes()).await;
