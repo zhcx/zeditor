@@ -181,121 +181,32 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.6.2 更新
+## v0.6.3 更新
 
 ### 更新日志
 
-- **修复预览跳转**：点击编辑器任意位置，对应内容现在出现在预览窗格的**同一相对位置**，不再被一律顶到窗格最上方（预览 → 编辑器方向同样按镜像对齐处理）。
-- **修复长行溢出编辑框**：折行改用基于真实字形测量的策略，字间距（默认 0.6px）不再让长行超出窗格宽度；此前横向滚动条按设计隐藏，溢出部分无法查看。
-- **文档站版本号自动跟随**：使用文档导航栏的版本号改为构建时读取 `package.json`，不再需要每次发版手工同步。
+- **修复启动时「预览框先出现，编辑框与资源管理器栏后出现」**：编辑区是懒加载的，Monaco 的首次布局与文字绘制是**异步**的，预览的 Markdown 却是**同步**渲染的；启动页此前只在 React 首帧后（双 `requestAnimationFrame`）就淡出，揭开时预览已有内容、编辑区仍在加载。现在启动页等到**编辑区首帧真正画出**且**字体就绪**后再淡出，保证揭开时界面已完整。
+- **字体就绪纳入等待**：等待 `document.fonts.ready`，避免字体替换引起的二次重排被看见。
+- **编辑区始终有占位骨架**：Monaco 就绪前渲染「正在加载编辑器…」占位层，任何时刻都不再是一片空背景；该占位样式此前已存在但无渲染点（死代码），本次接入。
+- **超时兜底**：启动页最多等待 3 秒，极端情况下也不会滞留。
 
-### v0.6.2 平台安装包对照
+### v0.6.3 平台安装包对照
 
-> 以下链接指向 v0.6.2 Release 资产；安装包由 GitHub Actions 根据 v0.6.2 标签源码构建。
-
-| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
-| --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor-0.6.2-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.2/Zeditor_0.6.2_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
-
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.2.md`](docs/releases/v0.6.2.md)。
-
-## v0.6.1 更新
-
-### 更新日志
-
-- **快捷命令**：顶部搜索栏（`Ctrl+P`）空输入时列出前 5 条常用命令——新建文件、搜索当前文档、检查链接、AI 指令面板、演示模式、分屏 / 沉浸阅读 / 沉浸写作、导出为 HTML / Word、设置，右侧显示快捷键；末尾「更多命令…」或输入 `>` 可按名称筛选全部命令。
-- **近期文件**：空输入时同时列出最近打开过的文件（文件名 + 灰色父目录），与侧边栏「近期记录」共用同一份数据。
-- **输入框移入标题栏**：展开后原地输入、面板只列结果，不再出现第二个搜索框；提示行改为单行显示，不再换行。
-- **面板密度与样式**：行距与高亮块收紧，输入框样式与其它输入框统一（去掉多余的内圈描边，只保留外层蓝色边框）。
-
-### v0.6.1 平台安装包对照
-
-> 以下链接指向 v0.6.1 Release 资产；安装包由 GitHub Actions 根据 v0.6.1 标签源码构建。
+> 以下链接指向 v0.6.3 Release 资产；安装包由 GitHub Actions 根据 v0.6.3 标签源码构建。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor-0.6.1-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.1/Zeditor_0.6.1_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor-0.6.3-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.1.md`](docs/releases/v0.6.1.md)。
-
-## v0.6.0 更新
-
-### 更新日志
-
-**搜索**
-
-- **顶部统一搜索栏（`Ctrl+P`）**：标题栏搜索入口改为下拉面板，一次输入即可搜索**已打开的文档、当前文档正文、工作区文件名、工作区文件内容**；`↑`/`↓` 选择、`Enter` 打开、`Esc` 收起，点击面板外部自动关闭。
-- **即时层**：已打开文档的正文命中（含**未保存**修改）与工作区文件名不读磁盘、不做全盘扫描，输入即可见结果。
-- **侧边栏「搜索当前文档」**：针对**当前正在编辑的正文**查找与替换——命中列表、上一个 / 下一个、`替换`、`全部替换`、区分大小写、正则（支持 `$1` 分组引用）；替换保留撤销历史，一次 `Ctrl+Z` 即可回退。
-- **修复工作区检索卡死**：新增文件清单缓存（仅遍历元数据）、文件名内存匹配、内容检索按「路径命中 → 最近修改」排序并施加 1500 文件 / 2 秒硬预算，旧检索在发起新检索时立即中止。
-- **修复工作区检索报错**：参数名与后端不一致导致的 `missing field case_sensitive` 已修正。
-- **修复查找框描边**：`Ctrl+F` 内置查找框不再出现多余蓝色描边。
-
-**界面**
-
-- **侧边栏密度优化**：压缩资源管理器各分组行高与分组间距，整体更紧凑，视觉密度贴近 VS Code。
-- **修复「近期记录」空状态**：分组为空时的占位文案原先缺少缩进、紧贴左边缘；现已与「近期记录」标题文字对齐，避免换行。
-- **重构文档切换器与文件树**：重写多标签页文档切换器，精简侧边栏文件树交互，提升多文档导航与切换体验。
-- **界面与本地化打磨**：完善活动栏、标题栏与多语言文案细节。
-
-### v0.6.0 平台安装包对照
-
-> 以下链接指向 v0.6.0 Release 资产；安装包由 GitHub Actions 根据 v0.6.0 标签源码构建。
-
-| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
-| --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor-0.6.0-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.0/Zeditor_0.6.0_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
-
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.0.md`](docs/releases/v0.6.0.md)。
-
-## v0.5.9 更新
-
-### 更新日志
-
-- **Markdown 文件图标**：Windows 安装程序将 `.md` / `.markdown` 文件关联到新的蓝底白色 Md + Z 图标。
-- **修复 S3 远端路径**：根目录只应用一次；远端根目录设为 `/Zeditor` 时，新对象路径不会再重复为 `Zeditor/Zeditor/...`。已有云端副本保留在原处。
-
-### v0.5.9 平台安装包对照
-
-> 以下链接指向 v0.5.9 Release 资产；安装包由 GitHub Actions 根据 v0.5.9 标签源码构建。
-
-| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
-| --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor-0.5.9-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.5.9/Zeditor_0.5.9_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
-
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.5.9.md`](docs/releases/v0.5.9.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.3.md`](docs/releases/v0.6.3.md)。
 
 ## Contributors
 
