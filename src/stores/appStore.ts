@@ -308,6 +308,15 @@ interface AppState {
   setCurrentFile: (file: string | null) => void;
   setSettings: (settings: Settings) => void;
   setSidebarVisible: (visible: boolean) => void;
+  /**
+   * 编辑区是否已完成首次挂载与布局。
+   *
+   * Monaco 的首次绘制是异步的，而预览的 Markdown 是同步渲染的，因此启动时
+   * 会短暂出现「预览已有内容、编辑区还是空白」的落差。启动页据此标志延后淡出，
+   * 保证揭开时两栏都已就位。
+   */
+  editorBootReady: boolean;
+  markEditorBootReady: () => void;
   setSidebarWidth: (width: number) => void;
   setOutlineVisible: (visible: boolean) => void;
   setSettingsOpen: (open: boolean) => void;
@@ -685,6 +694,10 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setSidebarVisible: (visible) => set({ sidebarVisible: visible }),
+  editorBootReady: false,
+  markEditorBootReady: () => {
+    if (!get().editorBootReady) set({ editorBootReady: true });
+  },
   setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(400, width)) }),
   setOutlineVisible: (visible) => set({ outlineVisible: visible }),
 

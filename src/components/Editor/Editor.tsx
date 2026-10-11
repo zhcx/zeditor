@@ -384,6 +384,11 @@ const documentModels = new DocumentSessions<monaco.editor.ITextModel>();
 
 export function Editor({ className, style, onActiveLineChange, onActiveLineReveal }: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
+  // Monaco 实例在 effect 中创建，首帧这里只是空的挂载点。用该状态渲染占位骨架，
+  // 并在首帧真正绘制后再通知启动流程揭开启动页，避免出现「预览已有内容、
+  // 编辑区还是一片空白」的落差。
+  const [editorReady, setEditorReady] = useState(false);
+  const bootReadyFrameRef = useRef(0);
   const monacoRef = useRef<monaco.editor.IStandaloneCodeEditor | null>(null);
   const modelRef = useRef<monaco.editor.ITextModel | null>(null);
   const controllerRef = useRef<EditorController | null>(null);
@@ -835,6 +840,14 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     modelRef.current = model;
     controllerRef.current = controller;
     setEditorView(controller);
+    // Monaco 的首次布局与文字绘制是异步的（预览的 Markdown 却是同步渲染），
+    // 因此推迟到下一帧再宣告就绪：让占位骨架一直覆盖到编辑区真正画出内容，
+    // 启动页也据此延后揭开，消除「预览先出现、编辑框后出现」的顺序感。
+    bootReadyFrameRef.current = requestAnimationFrame(() => {
+      bootReadyFrameRef.current = 0;
+      setEditorReady(true);
+      useAppStore.getState().markEditorBootReady();
+    });
     onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
 
     const applyTableEdit = (edit: TableEdit | null) => {
@@ -1520,6 +1533,10 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       slashKeyDisposable.dispose();
       layoutDisposable.dispose();
       selectionToolbarResizeObserver.disconnect();
+      if (bootReadyFrameRef.current) {
+        cancelAnimationFrame(bootReadyFrameRef.current);
+        bootReadyFrameRef.current = 0;
+      }
       editor.dispose();
       monacoRef.current = null;
       modelRef.current = null;
@@ -1609,6 +1626,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     <div className={`editor-container monaco-editor-container ${className || ''}`} style={style}>
       <div className="editor-document-card monaco-document-card">
         <div ref={editorRef} className="editor-content monaco-host" />
+        {/* 编辑区首帧只有空的挂载点：Monaco 实例要等 effect 创建，首次绘制更是
+            异步完成。没有这层占位时，启动瞬间编辑区就是一片空背景，看起来像
+            「编辑框迟到」。 */}
+        {!editorReady && (
+          <div className="editor-loading-placeholder" role="status">正在加载编辑器…</div>
+        )}
         {!content && (
           <div className="editor-empty-guide" aria-hidden="true">
             <AppIcon name="pen" size={20}  />

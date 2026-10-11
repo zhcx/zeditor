@@ -416,21 +416,55 @@ function App() {
 
   // 应用就绪后淡出内置启动页。原生窗口由 Rust 侧在 setup 中立即显示
   // （背景色与主题一致），这里不再负责 show，避免把窗口可见性绑定到
-  // 前端加载进度；1.5s 超时兜底防止极端情况下启动页滞留。
+  // 前端加载进度。
+  //
+  // 关键在于「就绪」的判定：编辑区是懒加载的，Monaco 的首次布局与文字绘制
+  // 又是异步的，而预览的 Markdown 是同步渲染的。若只等 React 首帧（双 rAF）
+  // 就淡出，揭开时预览已有内容、编辑区还在加载，看起来就是「预览先出现、
+  // 编辑框与资源管理器后出现」。因此这里等编辑区首帧画出 + 字体就绪再揭开，
+  // 3s 超时兜底，保证极端情况下启动页不会滞留。
   useEffect(() => {
+    let frame = 0;
+    let removeTimer = 0;
+    let settled = false;
+    let fontsReady = false;
+    let editorReady = useAppStore.getState().editorBootReady;
+
     const hideBootSplash = () => {
       document.getElementById('boot-splash')?.classList.add('boot-splash-hide');
     };
     const removeBootSplash = () => document.getElementById('boot-splash')?.remove();
-
-    const fallbackTimer = window.setTimeout(hideBootSplash, 1500);
-    let removeTimer = 0;
-    const frame = requestAnimationFrame(() => requestAnimationFrame(() => {
-      window.clearTimeout(fallbackTimer);
+    const scheduleRemoval = () => {
       hideBootSplash();
       removeTimer = window.setTimeout(removeBootSplash, 300);
-    }));
+    };
+
+    const reveal = () => {
+      if (settled || !fontsReady || !editorReady) return;
+      settled = true;
+      window.clearTimeout(fallbackTimer);
+      unsubscribe();
+      // 双 rAF：确保编辑区那一帧已经提交并真正绘制，再揭开启动页。
+      frame = requestAnimationFrame(() => requestAnimationFrame(scheduleRemoval));
+    };
+
+    const fallbackTimer = window.setTimeout(() => {
+      settled = true;
+      unsubscribe();
+      scheduleRemoval();
+    }, 3000);
+
+    const unsubscribe = useAppStore.subscribe((state) => {
+      editorReady = state.editorBootReady;
+      reveal();
+    });
+    void Promise.resolve(document.fonts?.ready).then(() => {
+      fontsReady = true;
+      reveal();
+    });
+
     return () => {
+      unsubscribe();
       cancelAnimationFrame(frame);
       window.clearTimeout(fallbackTimer);
       window.clearTimeout(removeTimer);
