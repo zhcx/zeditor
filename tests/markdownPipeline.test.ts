@@ -30,3 +30,11 @@ it('maps image size attributes onto the img tag', () => {
   const html = renderMarkdownSource('![图](a.png){width=320}\n');
   assert.match(html, /width="320"/);
 });
+
+it('keeps the source tex on rendered formulas', () => {
+  const inlineHtml = renderMarkdownSource('体积 $V = a^3$ 计算\n');
+  assert.match(inlineHtml, /data-tex="V = a\^3"/);
+
+  const blockHtml = renderMarkdownSource('$$\nE = mc^2\n$$\n');
+  assert.match(blockHtml, /class="katex-block"[^>]*data-tex=/);
+});

@@ -142,11 +142,25 @@ export function renderMediaPlaceholders(source: string): string {
   return output;
 }
 
+const escapeAttribute = (value: string) => value
+  .replace(/&/g, '&amp;')
+  .replace(/"/g, '&quot;')
+  .replace(/</g, '&lt;')
+  .replace(/>/g, '&gt;');
+
+/**
+ * 公式渲染。
+ *
+ * 输出上带 `data-tex`：所见即所得要在渲染结果上编辑，回写源码时必须能还原 TeX，
+ * 而 KaTeX 的 DOM 结构无法反推。
+ */
 export const renderFormula = (tex: string, displayMode: boolean): string => {
+  const source = tex.trim();
+  const attribute = `data-tex="${escapeAttribute(source)}"`;
   try {
-    return katex.renderToString(tex.trim(), { displayMode, throwOnError: false, strict: 'warn', trust: false });
+    return `<span class="zeditor-math" ${attribute}>${katex.renderToString(source, { displayMode, throwOnError: false, strict: 'warn', trust: false })}</span>`;
   } catch {
-    return displayMode ? `$$${tex}$$` : `$${tex}$`;
+    return `<span class="zeditor-math" ${attribute}>${displayMode ? `$$${source}$$` : `$${source}$`}</span>`;
   }
 };
 
@@ -159,8 +173,8 @@ export const renderMath = (source: string) => source
     return segment.split(/(`[^`\n]*`)/g).map((part, partIndex) => {
       if (partIndex % 2 === 1) return part;
       return part
-        .replace(/(^|\n)\$\$\s*([\s\S]*?)\s*\$\$(?=\n|$)/g, (_, prefix, tex) => `${prefix}<div class="katex-block">${renderFormula(tex, true)}</div>`)
-        .replace(/(^|\n)\\\[\s*([\s\S]*?)\s*\\\](?=\n|$)/g, (_, prefix, tex) => `${prefix}<div class="katex-block">${renderFormula(tex, true)}</div>`)
+        .replace(/(^|\n)\$\$\s*([\s\S]*?)\s*\$\$(?=\n|$)/g, (_, prefix, tex) => `${prefix}<div class="katex-block" data-tex="${escapeAttribute(tex.trim())}" data-display="block">${renderFormula(tex, true)}</div>`)
+        .replace(/(^|\n)\\\[\s*([\s\S]*?)\s*\\\](?=\n|$)/g, (_, prefix, tex) => `${prefix}<div class="katex-block" data-tex="${escapeAttribute(tex.trim())}" data-display="block">${renderFormula(tex, true)}</div>`)
         .replace(/\\\((.+?)\\\)/g, (_, tex) => renderFormula(tex, false))
         .replace(/(^|[^\\$])\$([^$\n]+?)\$(?!\$)/g, (_, prefix, tex) => `${prefix}${renderFormula(tex, false)}`);
     }).join('');
