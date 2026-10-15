@@ -142,3 +142,25 @@ export function replaceBlockSource(doc: WysiwygDocument, block: WysiwygBlock, so
   if (source === block.source) return doc;
   return splitMarkdownDocument(doc.source.slice(0, block.offset) + source + doc.source.slice(block.offset + block.length));
 }
+
+/**
+ * 删除一个块：连同它与相邻块之间的分隔空白一起删除，避免留下多余空行。
+ * 返回新源码与删除后光标应落到的偏移。
+ */
+export function removeBlockFromSource(document: WysiwygDocument, index: number): { source: string; caret: number } {
+  const block = document.blocks[index];
+  if (!block) return { source: document.source, caret: 0 };
+  const next = document.blocks[index + 1];
+  if (next) {
+    return {
+      source: document.source.slice(0, block.offset) + document.source.slice(next.offset),
+      caret: block.offset,
+    };
+  }
+  const previous = document.blocks[index - 1];
+  const from = previous ? previous.offset + previous.length : 0;
+  return {
+    source: document.source.slice(0, from) + document.source.slice(block.offset + block.length),
+    caret: from,
+  };
+}
