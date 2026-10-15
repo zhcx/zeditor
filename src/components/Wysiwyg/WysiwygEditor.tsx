@@ -6,8 +6,10 @@ import { renderMarkdownSource } from '../../utils/markdownPipeline';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
 import { splitMarkdownDocument, type WysiwygBlockKind, type WysiwygDocument } from '../../utils/wysiwyg/blocks';
+import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
 import { WysiwygSession, type WysiwygSessionSnapshot } from './wysiwygSession';
 import { createWysiwygController } from './WysiwygController';
+import { WysiwygCodeBlock } from './WysiwygCodeBlock';
 
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
 const blockHtmlCache = new Map<string, string>();
@@ -40,11 +42,12 @@ interface WysiwygBlockViewProps {
   onKeyDown: (event: React.KeyboardEvent<HTMLElement>, index: number) => void;
   onBlurBlock: (index: number) => void;
   onCompositionChange: (composing: boolean) => void;
+  onCommitCode: (index: number, code: string, language?: string) => void;
 }
 
 const WysiwygBlockView = memo(function WysiwygBlockView({
   index, kind, source, startLine, editable, skipRender, documentPath, workflowViewerEnabled,
-  scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
+  scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange, onCommitCode,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
 
@@ -89,6 +92,14 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         onCompositionStart={() => onCompositionChange(true)}
         onCompositionEnd={() => onCompositionChange(false)}
       />
+      {kind === 'fence' && (
+        <WysiwygCodeBlock
+          index={index}
+          code={extractFenceCode(source)}
+          language={extractFenceLanguage(source)}
+          onCommit={onCommitCode}
+        />
+      )}
     </div>
   );
 });
@@ -299,6 +310,7 @@ export function WysiwygEditor() {
             onKeyDown={handleBlockKeyDown}
             onBlurBlock={(position) => session.normalizeBlock(position)}
             onCompositionChange={(composing) => session.markComposing(composing)}
+            onCommitCode={(position, code, language) => { session.writeCodeBlock(position, code, language); }}
           />
         ))}
       </article>

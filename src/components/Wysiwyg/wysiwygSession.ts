@@ -29,6 +29,7 @@ import {
   stripBlockPrefix,
 } from '../../utils/wysiwyg/blockOps';
 import { createUndoStack } from '../../utils/wysiwyg/undoStack';
+import { extractFenceLanguage, extractFenceMarker, formatFence } from '../../utils/wysiwyg/codeFence';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste';
 import { pointInContainer, rangeInContainer } from './domCaret';
@@ -338,6 +339,19 @@ export class WysiwygSession {
     this.prepareExternalEdit();
     this.pushUndo({ coalesce: false });
     this.applySource(this.document.source.slice(0, from) + text + this.document.source.slice(to), caret ?? from + text.length);
+  }
+
+  /** 代码块内容写回：围栏样式沿用原样，语言缺省时沿用原有信息串。 */
+  writeCodeBlock(index: number, code: string, language?: string): boolean {
+    const block = this.document.blocks[index];
+    if (!block || block.kind !== 'fence') return false;
+    const next = formatFence(code, language ?? extractFenceLanguage(block.source), {
+      marker: extractFenceMarker(block.source),
+      indent: block.source.match(/^[ \t]*/)?.[0] ?? '',
+    });
+    if (next === block.source) return false;
+    this.pushUndo({ coalesce: false });
+    return this.applyBlockSource(block, next, block.offset);
   }
 
   /** 来自 store 的外部变更（内容与本会话源码不同才生效）。 */

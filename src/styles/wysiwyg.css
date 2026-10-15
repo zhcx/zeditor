@@ -30,6 +30,61 @@
   content-visibility: auto;
 }
 
+/* 代码块编辑层：平时只显示语言选择与「编辑代码」按钮，编辑时铺满整块。 */
+.wysiwyg-code-layer {
+  position: absolute;
+  top: 6px;
+  right: 8px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  z-index: 2;
+}
+
+.wysiwyg-code-layer.is-editing { inset: 0; }
+
+.wysiwyg-code-entry {
+  opacity: 0;
+  transition: opacity .15s ease;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 8px;
+  cursor: pointer;
+}
+
+.wysiwyg-block-shell:hover > .wysiwyg-code-layer > .wysiwyg-code-entry,
+.wysiwyg-block-shell:focus-within > .wysiwyg-code-layer > .wysiwyg-code-entry { opacity: 1; }
+
+.wysiwyg-code-language select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 4px;
+}
+
+.wysiwyg-code-layer.is-editing .wysiwyg-code-language { position: absolute; top: 6px; right: 8px; }
+
+.wysiwyg-code-editor {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  resize: none;
+  border: 1px solid var(--accent);
+  border-radius: 8px;
+  background: var(--bg-document);
+  color: var(--text-primary);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 12px 14px;
+}
+
 /* 空段落要有可点击的光标位置（contenteditable 的空块高度为 0）。 */
 .wysiwyg-block p:empty::after,
 .wysiwyg-block h1:empty::after,

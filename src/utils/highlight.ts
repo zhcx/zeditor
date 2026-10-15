@@ -73,4 +73,7 @@ for (const [name, language] of Object.entries(languages)) {
   hljs.registerLanguage(name, language);
 }
 
+/** 已注册语言名（供代码块的语言选择使用）。 */
+export const HIGHLIGHT_LANGUAGE_NAMES: readonly string[] = Object.keys(languages).sort();
+
 export default hljs;
