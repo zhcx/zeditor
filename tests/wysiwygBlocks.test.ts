@@ -55,8 +55,22 @@ it('handles documents without a trailing newline and empty documents', () => {
   assert.equal(document.blocks.length, 1);
   assert.equal(document.blocks[0].source, '# 只有标题');
   assert.equal(document.source, '# 只有标题');
-  assert.deepEqual(splitMarkdownDocument('').blocks, []);
-  assert.deepEqual(splitMarkdownDocument('\n\n').blocks, []);
+  const empty = splitMarkdownDocument('');
+  assert.deepEqual(empty.blocks.map(({ kind, offset, length, source, editable }) => ({ kind, offset, length, source, editable })), [
+    { kind: 'paragraph', offset: 0, length: 0, source: '', editable: true },
+  ]);
+
+  const blankLines = splitMarkdownDocument('\n\n');
+  assert.deepEqual(blankLines.blocks.map(({ kind, offset, length }) => ({ kind, offset, length })), [
+    { kind: 'paragraph', offset: 0, length: 0 },
+    { kind: 'paragraph', offset: 2, length: 0 },
+  ]);
+
+  const trailingParagraph = splitMarkdownDocument('正文\n\n');
+  assert.deepEqual(trailingParagraph.blocks.map(({ kind, offset, length }) => ({ kind, offset, length })), [
+    { kind: 'paragraph', offset: 0, length: 2 },
+    { kind: 'paragraph', offset: 4, length: 0 },
+  ]);
 });
 
 it('replaces one block source without touching the rest of the document', () => {
@@ -108,4 +122,24 @@ it('keeps CRLF intact when a block is replaced', () => {
   const document = splitMarkdownDocument('第一段\r\n\r\n第二段\r\n');
   const next = replaceBlockSource(document, document.blocks[0], '改过的第一段');
   assert.equal(next.source, '改过的第一段\r\n\r\n第二段\r\n');
+});
+
+it('keeps editable empty paragraphs before and between nonempty blocks', () => {
+  const source = '\n\n第一段\n\n\n\n第二段';
+  const document = splitMarkdownDocument(source);
+  assert.deepEqual(document.blocks.map(block => [block.source, block.offset]), [
+    ['', 0], ['第一段', 2], ['', 7], ['第二段', 9],
+  ]);
+  const next = replaceBlockSource(document, document.blocks[2], '新段落');
+  assert.equal(next.source, '\n\n第一段\n\n新段落\n\n第二段');
+});
+
+it('preserves reference definitions that do not produce rendered tokens', () => {
+  const source = '[ref]: https://example.com\n\n';
+  const document = splitMarkdownDocument(source);
+  assert.equal(document.blocks[0].editable, false);
+  assert.equal(document.blocks[0].source, '[ref]: https://example.com');
+  assert.equal(document.blocks[1].offset, source.length);
+  assert.equal(replaceBlockSource(document, document.blocks[1], '正文').source, source + '正文');
+  assert.equal(splitMarkdownDocument('正文\n\n[ref]: https://example.com\n').blocks.length, 1);
 });

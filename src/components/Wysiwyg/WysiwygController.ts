@@ -8,8 +8,8 @@
  * 偏移做替换」的既有调用方（工具栏、AI）始终拿到最新偏移；`replaceRange` 只做 flush，
  * 不再重算调用方给的偏移。
  */
-import { countLines, lineAtOffset, offsetOfLine } from '../../utils/wysiwyg/textLines';
-import { rectOfRange, revealElement } from './domCaret';
+import { countLines, lineAtOffset, offsetOfLine } from '../../utils/wysiwyg/textLines.ts';
+import { rectOfRange, revealElement } from './domCaret.ts';
 import type { WysiwygSession } from './wysiwygSession';
 import type { EditorController, EditorDispatchSpec, EditorLine } from '../../types/editor';
 
@@ -59,34 +59,37 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
         const { from, to } = selectionRange();
         return { main: { from, to, empty: from === to } };
       },
-      sliceDoc: (from, to) => session.getSource().slice(from, to),
+      sliceDoc: (from, to) => { session.flushWriteBack(); return session.getSource().slice(from, to); },
       doc: {
         get length() { return session.getSource().length; },
         get lines() { return countLines(session.getSource()); },
         lineAt: (offset: number) => lineAtOffset(session.getSource(), offset) as EditorLine,
         line: (lineNumber: number) => lineAtOffset(session.getSource(), offsetOfLine(session.getSource(), lineNumber)) as EditorLine,
       },
-      update: (spec) => {
-        controller.dispatch(spec);
-        return spec;
-      },
+      update: (spec) => spec,
     },
     dispatch: (spec: EditorDispatchSpec) => {
+      const selection = spec.selection?.main ?? spec.selection;
       const changes = spec.changes;
       if (changes) {
         const from = changes.from;
         const to = changes.to ?? from;
-        const caret = spec.selection?.from ?? spec.selection?.anchor ?? from + (changes.insert?.length ?? 0);
+        const caret = selection?.from ?? selection?.anchor ?? from + (changes.insert?.length ?? 0);
         session.replaceRange(from, to, changes.insert ?? '', caret);
+        if (selection) session.setSelectionOffsets(caret, selection.to ?? selection.head ?? caret);
         return;
       }
-      if (spec.selection) {
-        const from = spec.selection.from ?? spec.selection.anchor ?? 0;
-        const to = spec.selection.to ?? spec.selection.head ?? from;
+      if (selection) {
+        const from = selection.from ?? selection.anchor ?? 0;
+        const to = selection.to ?? selection.head ?? from;
         session.setSelectionOffsets(from, to);
       }
     },
-    getValue: () => session.getSource(),
+    getValue: () => {
+      session.flushWriteBack();
+      return session.getSource();
+    },
+    flushPendingEdits: () => session.flushWriteBack(),
     resetValue: (content) => { session.applySource(content, 0); },
     getSelection: () => {
       // 先落盘再读：否则调用方拿到的偏移会落后于用户刚敲的内容。
@@ -94,9 +97,10 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
       const { from, to } = selectionRange();
       return { from, to, empty: from === to };
     },
-    getText: (from, to) => session.getSource().slice(from, to),
+    getText: (from, to) => { session.flushWriteBack(); return session.getSource().slice(from, to); },
     replaceRange: (from, to, text, selection) => {
       session.replaceRange(from, to, text, selection?.from);
+      if (selection) session.setSelectionOffsets(selection.from, selection.to);
     },
     setSelection: (from, to) => { session.setSelectionOffsets(from, to); },
     lineAt: (offset) => lineAtOffset(session.getSource(), offset) as EditorLine,
@@ -113,8 +117,6 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
     revealOffset: (offset) => {
       const element = session.locateElementOfOffset(offset);
       if (element) revealElement(element, deps.getScrollDOM());
-      session.setSelectionOffsets(offset);
-      deps.focus();
     },
   };
 

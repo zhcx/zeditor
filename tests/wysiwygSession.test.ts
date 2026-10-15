@@ -48,6 +48,14 @@ it('undoes and redoes in order', () => {
   assert.deepEqual(stack.redo({ source: 'a', caret: 1, timestamp: 3300 }), { source: 'ab', caret: 2, timestamp: 3100 });
 });
 
+it('does not coalesce typing across a structural undo boundary', () => {
+  const stack = createUndoStack();
+  stack.push({ source: '文字', caret: 2, timestamp: 1000 }, { coalesce: false });
+  stack.push({ source: '文字\n\n', caret: 4, timestamp: 1100 }, { coalesce: true });
+  assert.equal(stack.size(), 2);
+  assert.equal(stack.undo({ source: '文字\n\n新', caret: 5, timestamp: 1200 })?.source, '文字\n\n');
+});
+
 it('drops the oldest snapshots beyond the limit', () => {
   const stack = createUndoStack(2);
   stack.push({ source: 'a', caret: 0, timestamp: 1 }, { coalesce: false });

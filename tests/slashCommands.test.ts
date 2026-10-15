@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import {
   filterSlashCommands,
   findSlashCommandTrigger,
+  resolveSlashSelection,
   SLASH_COMMANDS,
 } from '../src/utils/slashCommands.ts';
 import { slashAiGenie } from '../src/utils/aiGenies.ts';
@@ -31,6 +32,29 @@ test('filters commands by shortcut, Chinese title, and English aliases', () => {
   assert.deepEqual(filterSlashCommands('h2').map((command) => command.id), ['heading-2']);
   assert.deepEqual(filterSlashCommands('表格').map((command) => command.id), ['table']);
   assert.ok(filterSlashCommands('formula').some((command) => command.id === 'math'));
+});
+
+test('ranks exact shortcut matches before looser keyword hits', () => {
+  // 回归：`/code` 曾排在 `/inlinecode` 之后，键盘回车会插入行内代码。
+  const code = filterSlashCommands('code').map((command) => command.id);
+  assert.equal(code[0], 'code');
+  assert.ok(code.includes('inline-code'), '关键词命中不应被过滤掉');
+  assert.ok(code.indexOf('code') < code.indexOf('inline-code'));
+  // 前缀命中同样排在关键词命中之前
+  assert.equal(filterSlashCommands('cod')[0]?.id, 'code');
+  assert.equal(filterSlashCommands('inlinecode')[0]?.id, 'inline-code');
+  // 标题前缀命中保持声明顺序
+  assert.deepEqual(filterSlashCommands('公式').map((command) => command.id), ['math', 'math-block']);
+});
+
+test('resolves the slash trigger from the latest source before a keyboard confirm', () => {
+  const source = '第一行\n/code';
+  assert.deepEqual(resolveSlashSelection(source, source.length), { from: 4, to: 9, query: 'code' });
+  assert.deepEqual(resolveSlashSelection('/h1', 3), { from: 0, to: 3, query: 'h1' });
+  // 光标不在斜杠 token 内（触发行没有斜杠，或斜杠后又出现空格）
+  assert.equal(resolveSlashSelection('正文', 2), null);
+  assert.equal(resolveSlashSelection('/h1 标题', 7), null);
+  assert.equal(resolveSlashSelection('', 0), null);
 });
 
 test('every slash command has a valid post-insertion selection', () => {

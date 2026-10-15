@@ -5,21 +5,20 @@
  * 「输入」走 DOM 本地改写（记脏 → 防抖写回），「结构操作 / 外部修改」走文档级源码替换
  * （重新分块 → 重渲染 → 恢复光标），两条路径共用同一个块模型。
  */
-import { useAppStore } from '../../stores/appStore';
 import {
   removeBlockFromSource,
   replaceBlockSource,
   splitMarkdownDocument,
   type WysiwygBlock,
   type WysiwygDocument,
-} from '../../utils/wysiwyg/blocks';
+} from '../../utils/wysiwyg/blocks.ts';
 import {
   serializeBlockMarkdown,
   type BlockSerializeOptions,
   type BlockSerializeResult,
-} from '../../utils/wysiwyg/blockSerialize';
-import { blockOffsetFromPoint, pointFromBlockOffset, type ContainerInput } from '../../utils/wysiwyg/offsetMap';
-import { toInlineNodes } from '../../utils/wysiwyg/inlineNodes';
+} from '../../utils/wysiwyg/blockSerialize.ts';
+import { blockOffsetFromPoint, pointFromBlockOffset, type ContainerInput } from '../../utils/wysiwyg/offsetMap.ts';
+import { toInlineNodes } from '../../utils/wysiwyg/inlineNodes.ts';
 import {
   adjustListIndent,
   contentStartOffset,
@@ -27,12 +26,14 @@ import {
   setHeadingLevel,
   splitBlock,
   stripBlockPrefix,
-} from '../../utils/wysiwyg/blockOps';
-import { createUndoStack } from '../../utils/wysiwyg/undoStack';
-import { extractFenceLanguage, extractFenceMarker, formatFence } from '../../utils/wysiwyg/codeFence';
-import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
-import { prepareMarkdownPaste } from '../../utils/markdownPaste';
-import { pointInContainer, rangeInContainer } from './domCaret';
+} from '../../utils/wysiwyg/blockOps.ts';
+import { createUndoStack } from '../../utils/wysiwyg/undoStack.ts';
+import { extractFenceInfo, extractFenceLanguage, extractFenceMarker, formatFence, withFenceLanguage } from '../../utils/wysiwyg/codeFence.ts';
+import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown.ts';
+import { prepareMarkdownPaste } from '../../utils/markdownPaste.ts';
+import { pointInContainer, rangeInContainer } from './domCaret.ts';
+import { parseTableAt } from '../../utils/markdownTable.ts';
+import { escapeInlineText, serializeInlineNodes } from '../../utils/wysiwyg/inlineSerialize.ts';
 
 export interface WysiwygSessionSnapshot {
   document: WysiwygDocument;
@@ -40,10 +41,12 @@ export interface WysiwygSessionSnapshot {
   skipRenderIndex: number | null;
   /** 结构版本号：外壳用它作为布局效应的依赖。 */
   version: number;
+  /** 仅规范化或结构变化时递增，用于避免重复重建已恢复选区的 DOM。 */
+  renderRevision: number;
 }
 
 export interface WysiwygSessionOptions {
-  getTabId: () => string | null;
+  onSourceChange: (source: string) => void;
   /** 粘贴图片的落地方（镜像编辑器里已有的图床 / .assets 链路）。 */
   insertClipboardImage: (file: File) => Promise<boolean>;
 }
@@ -89,8 +92,11 @@ export class WysiwygSession {
   private composing = false;
   private skipRenderIndex: number | null = null;
   private version = 0;
+  private renderRevision = 0;
   private lastCaret = 0;
   private pendingCaret: number | null = null;
+  private pendingSelectionEnd: number | null = null;
+  private awaitingRender = false;
   /** 变更通知由外壳在挂载后注入（避免外壳在渲染期读取会话实例）。 */
   private notify: () => void = () => undefined;
   private accessors: WysiwygSessionAccessors = NO_ACCESSORS;
@@ -98,7 +104,7 @@ export class WysiwygSession {
   constructor(source: string, options: WysiwygSessionOptions) {
     this.options = options;
     this.document = splitMarkdownDocument(source);
-    this.snapshot = { document: this.document, skipRenderIndex: null, version: 0 };
+    this.snapshot = { document: this.document, skipRenderIndex: null, version: 0, renderRevision: 0 };
   }
 
   /** 注入变更监听：外壳挂载时调用，卸载时可传回空实现。 */
@@ -113,14 +119,36 @@ export class WysiwygSession {
 
   getSnapshot(): WysiwygSessionSnapshot { return this.snapshot; }
   getSource(): string { return this.document.source; }
+  getVisibleSource(): string {
+    const collected = this.pendingIndex === null ? null : this.collectBlock(this.pendingIndex);
+    if (!collected) return this.document.source;
+    const { block, serialized } = collected;
+    return this.document.source.slice(0, block.offset) + serialized.markdown + this.document.source.slice(block.offset + block.length);
+  }
   getBlocks(): WysiwygBlock[] { return this.document.blocks; }
 
   // ── 输入与写回 ─────────────────────────────────────────────
 
-  markComposing(composing: boolean): void { this.composing = composing; }
+  markComposing(composing: boolean, index?: number): void {
+    this.composing = composing;
+    if (index !== undefined) this.pendingIndex = index;
+    if (composing) {
+      if (this.writeBackTimer !== null) {
+        clearTimeout(this.writeBackTimer);
+        this.writeBackTimer = null;
+      }
+      return;
+    }
+    if (this.pendingIndex !== null) this.scheduleWriteBack(this.pendingIndex);
+  }
 
   handleInput(index: number): void {
+    this.pendingIndex = index;
     if (this.composing) return;
+    this.scheduleWriteBack(index);
+  }
+
+  private scheduleWriteBack(index: number): void {
     this.pendingIndex = index;
     if (this.writeBackTimer !== null) clearTimeout(this.writeBackTimer);
     this.writeBackTimer = setTimeout(() => {
@@ -149,6 +177,7 @@ export class WysiwygSession {
     if (this.skipRenderIndex !== index) return;
     this.skipRenderIndex = null;
     this.pendingCaret = this.locateCaretOffset();
+    this.pendingSelectionEnd = null;
     this.emit();
   }
 
@@ -174,6 +203,7 @@ export class WysiwygSession {
     const kindChanged = index >= 0 && next.blocks[index]?.kind !== block.kind;
     const countChanged = next.blocks.length !== this.document.blocks.length;
     this.document = next;
+    this.pendingSelectionEnd = null;
 
     if (kindChanged || countChanged) {
       this.skipRenderIndex = null;
@@ -194,12 +224,15 @@ export class WysiwygSession {
     if (!collected) return false;
     const caret = this.caretOffsetInBlock(collected);
     if (caret === null) return false;
-    this.pushUndo({ coalesce: false });
-    const result = splitBlock({ source: collected.serialized.markdown, kind: collected.block.kind, caret });
+    this.checkpointBlock(collected);
+    const kind = splitMarkdownDocument(collected.serialized.markdown).blocks[0]?.kind ?? collected.block.kind;
+    const balanced = this.splitContentAtSelection(collected);
+    const result = splitBlock({ source: balanced?.source ?? collected.serialized.markdown, kind, caret: balanced?.caret ?? caret });
+    const tailPrefix = kind === 'list' || kind === 'blockquote' ? contentStartOffset(result.tail, kind) : 0;
     return this.applyBlockSource(
       collected.block,
       `${result.head}${result.separator}${result.tail}`,
-      collected.block.offset + result.head.length + result.separator.length,
+      collected.block.offset + result.head.length + result.separator.length + tailPrefix,
     );
   }
 
@@ -213,14 +246,14 @@ export class WysiwygSession {
     if (caret > contentStart) return false;
 
     if (collected.serialized.markdown.slice(contentStart).trim().length === 0) {
-      this.pushUndo({ coalesce: false });
+      this.checkpointBlock(collected);
       const removed = removeBlockFromSource(this.document, index);
       return this.applySource(removed.source, removed.caret);
     }
 
     const stripped = stripBlockPrefix(collected.serialized.markdown, collected.block.kind);
     if (stripped) {
-      this.pushUndo({ coalesce: false });
+      this.checkpointBlock(collected);
       return this.applyBlockSource(collected.block, stripped.source, collected.block.offset + stripped.caret);
     }
 
@@ -237,7 +270,7 @@ export class WysiwygSession {
     const merged = mergeBlocks(previousMarkdown, collected.serialized.markdown);
     if (!merged) return false;
 
-    this.pushUndo({ coalesce: false });
+    this.checkpointBlock(collected);
     const source = this.document.source.slice(0, previous.offset)
       + merged.source
       + this.document.source.slice(collected.block.offset + collected.block.length);
@@ -270,7 +303,7 @@ export class WysiwygSession {
     const result = adjustListIndent(collected.serialized.markdown, collected.block.kind, direction);
     if (!result) return false;
     const innerCaret = Math.max(0, caret - contentStartOffset(collected.serialized.markdown, collected.block.kind));
-    this.pushUndo({ coalesce: false });
+    this.checkpointBlock(collected);
     return this.applyBlockSource(
       collected.block,
       result.source,
@@ -289,7 +322,7 @@ export class WysiwygSession {
     const result = setHeadingLevel(collected.serialized.markdown, collected.block.kind, level);
     const innerCaret = Math.max(0, caret - contentStartOffset(collected.serialized.markdown, collected.block.kind));
     const targetKind = level > 0 ? 'heading' : 'paragraph';
-    this.pushUndo({ coalesce: false });
+    this.checkpointBlock(collected);
     return this.applyBlockSource(
       collected.block,
       result.source,
@@ -329,6 +362,7 @@ export class WysiwygSession {
     this.document = splitMarkdownDocument(source);
     this.skipRenderIndex = null;
     this.pendingCaret = caret;
+    this.pendingSelectionEnd = null;
     this.persist();
     this.emit();
     return true;
@@ -371,17 +405,52 @@ export class WysiwygSession {
     return this.applyBlockSource(block, source, block.offset);
   }
 
-  /** 代码块内容写回：围栏样式沿用原样，语言缺省时沿用原有信息串。 */
+  /** 调整块顺序，保留原位置的间隔与未渲染源码。 */
+  moveBlock(from: number, to: number): boolean {
+    this.flushWriteBack();
+    const blocks = this.document.blocks;
+    if (from === to || !blocks[from] || !blocks[to]) return false;
+    const reordered = [...blocks];
+    const [moved] = reordered.splice(from, 1);
+    reordered.splice(to, 0, moved);
+    let source = '';
+    let cursor = 0;
+    let caret = 0;
+    blocks.forEach((block, index) => {
+      source += this.document.source.slice(cursor, block.offset);
+      if (reordered[index] === moved) caret = source.length;
+      source += reordered[index].source;
+      cursor = block.offset + block.length;
+    });
+    source += this.document.source.slice(cursor);
+    this.pushUndo({ coalesce: false });
+    return this.applySource(source, caret);
+  }
+
+  duplicateBlock(index: number): boolean {
+    this.flushWriteBack();
+    const block = this.document.blocks[index];
+    if (!block) return false;
+    const at = block.offset + block.length;
+    const gap = this.document.eol.repeat(2);
+    this.pushUndo({ coalesce: false });
+    return this.applySource(this.document.source.slice(0, at) + gap + block.source + this.document.source.slice(at), at + gap.length);
+  }
+
+  /** 代码块即时写回，输入时保留原生 textarea 的光标。 */
   writeCodeBlock(index: number, code: string, language?: string): boolean {
     const block = this.document.blocks[index];
     if (!block || block.kind !== 'fence') return false;
-    const next = formatFence(code, language ?? extractFenceLanguage(block.source), {
+    // 围栏信息串可能除语言外还带 title= / 行高亮等属性，回写必须原样保留（只换语言时替换首个词）。
+    const info = extractFenceInfo(block.source);
+    const next = formatFence(code, extractFenceLanguage(block.source), {
       marker: extractFenceMarker(block.source),
       indent: block.source.match(/^[ \t]*/)?.[0] ?? '',
+      info: language === undefined ? info : withFenceLanguage(info, language),
     });
     if (next === block.source) return false;
-    this.pushUndo({ coalesce: false });
-    return this.applyBlockSource(block, next, block.offset);
+    this.commit(block, next);
+    return true;
   }
 
   /** 来自 store 的外部变更（内容与本会话源码不同才生效）。 */
@@ -411,6 +480,11 @@ export class WysiwygSession {
     const { from, to } = this.getSelectionOffsets();
     const html = data.getData('text/html');
     const text = data.getData('text/plain');
+    const index = this.blockIndexAtOffset(from);
+    if (text && index !== null && this.document.blocks[index]?.kind === 'table') {
+      this.replaceRange(from, to, escapeInlineText(text.replace(/\r?\n/g, ' '), { escapeLineStart: false, escapePipes: true }));
+      return true;
+    }
     if (html && shouldConvertHtmlToMarkdown(html, text)) {
       this.replaceRange(from, to, prepareMarkdownPaste(htmlToMarkdown(html), this.document.source, from, to));
       return true;
@@ -423,7 +497,21 @@ export class WysiwygSession {
   // ── 选区与映射 ─────────────────────────────────────────────
 
   getSelectionOffsets(): { from: number; to: number } {
+    if (this.awaitingRender && this.pendingCaret !== null) {
+      const to = this.pendingSelectionEnd ?? this.pendingCaret;
+      return { from: Math.min(this.pendingCaret, to), to: Math.max(this.pendingCaret, to) };
+    }
     const surface = this.accessors.getSurface();
+    const active = surface?.ownerDocument.activeElement;
+    if (active?.matches('textarea.wysiwyg-code-editor')) {
+      const textarea = active as HTMLTextAreaElement;
+      const host = textarea.closest('.wysiwyg-block-shell')?.querySelector<HTMLElement>('[data-block-index]');
+      const block = this.document.blocks[Number(host?.dataset.blockIndex)];
+      if (block?.kind === 'fence') {
+        const prefix = block.source.indexOf('\n') + 1;
+        return { from: block.offset + prefix + textarea.selectionStart, to: block.offset + prefix + textarea.selectionEnd };
+      }
+    }
     const selection = surface?.ownerDocument.getSelection();
     if (!surface || !selection || selection.rangeCount === 0) return { from: this.lastCaret, to: this.lastCaret };
     const range = selection.getRangeAt(0);
@@ -435,18 +523,43 @@ export class WysiwygSession {
   setSelectionOffsets(from: number, to = from): void {
     this.lastCaret = from;
     this.pendingCaret = from;
-    this.applySelection(from, to);
+    this.pendingSelectionEnd = to;
+    if (!this.awaitingRender) this.applySelection(from, to);
   }
 
-  getCaretOffset(): number { return this.lastCaret; }
+  getCaretOffset(): number { return this.pendingCaret ?? this.lastCaret; }
+
+  /** 焦点必须落在块宿主上；外层只负责滚动，不再可编辑。 */
+  focus(): void {
+    if (this.awaitingRender) return;
+    const { from, to } = this.getSelectionOffsets();
+    if (this.domRangeOfOffset(this.pendingCaret ?? from)) {
+      this.applySelection(this.pendingCaret ?? from, this.pendingSelectionEnd ?? to);
+      return;
+    }
+    const index = this.blockIndexAtOffset(from);
+    const targetIndex = index !== null && this.document.blocks[index]?.editable
+      ? index
+      : this.document.blocks.findIndex(block => block.editable);
+    if (targetIndex < 0) return;
+    this.accessors.getBlockElement(targetIndex)?.focus();
+    if (targetIndex === index) this.applySelection(from, to);
+  }
 
   /** 渲染完成后由外壳调用：把待恢复的光标落到新 DOM 上。 */
   restoreCaretAfterRender(): void {
+    this.awaitingRender = false;
     if (this.pendingCaret === null) return;
     const caret = this.pendingCaret;
+    const selectionEnd = this.pendingSelectionEnd ?? caret;
     this.pendingCaret = null;
+    this.pendingSelectionEnd = null;
     this.lastCaret = caret;
-    this.applySelection(caret, caret);
+    const index = this.blockIndexAtOffset(caret);
+    if (index !== null && this.document.blocks[index]?.editable) {
+      this.accessors.getBlockElement(index)?.focus();
+    }
+    this.applySelection(caret, selectionEnd);
   }
 
   /** 鼠标点击位置 → 块索引与文档偏移（行内目标定位用）。 */
@@ -490,39 +603,78 @@ export class WysiwygSession {
 
   // ── 内部实现 ───────────────────────────────────────────────
 
+  /** 按 DOM 选区拆开行内树，Range 会为两侧保留完整的 strong/em/link 包装。 */
+  private splitContentAtSelection(collected: CollectedBlock): { source: string; caret: number } | null {
+    const owner = this.accessors.getSurface()?.ownerDocument;
+    const selection = owner?.getSelection();
+    if (!owner?.createRange || !selection?.rangeCount) return null;
+    const range = selection.getRangeAt(0);
+    for (const entry of collected.serialized.containers) {
+      const container = pathToNode(collected.element, entry.path);
+      if (!container?.contains(range.startContainer) || !container.contains(range.endContainer)) continue;
+      const options = { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes };
+      const before = owner.createRange();
+      before.selectNodeContents(container);
+      before.setEnd(range.startContainer, range.startOffset);
+      const after = owner.createRange();
+      after.selectNodeContents(container);
+      after.setStart(range.endContainer, range.endOffset);
+      const head = serializeInlineNodes(toInlineNodes(before.cloneContents()), options);
+      const tail = serializeInlineNodes(toInlineNodes(after.cloneContents()), options);
+      const originalLength = serializeInlineNodes(toInlineNodes(container), options).length;
+      return {
+        source: collected.serialized.markdown.slice(0, entry.contentOffset) + head + tail + collected.serialized.markdown.slice(entry.contentOffset + originalLength),
+        caret: entry.contentOffset + head.length,
+      };
+    }
+    return null;
+  }
+
   private applyBlockSource(block: WysiwygBlock, nextBlockSource: string, caret: number): boolean {
     this.document = replaceBlockSource(this.document, block, nextBlockSource);
     this.skipRenderIndex = null;
     this.pendingCaret = caret;
+    this.pendingSelectionEnd = null;
     this.persist();
     this.emit();
     return true;
   }
 
-  private pushUndo(options: { coalesce: boolean }): void {
+  /** 结构操作前，先保留尚未防抖写回的文字，再建立结构操作的撤销边界。 */
+  private checkpointBlock(collected: CollectedBlock): void {
+    const visibleSource = replaceBlockSource(this.document, collected.block, collected.serialized.markdown).source;
+    if (visibleSource !== this.document.source) this.pushUndo({ coalesce: true });
+    this.pushUndo({ coalesce: false, source: visibleSource });
+    if (this.pendingIndex !== null && this.document.blocks[this.pendingIndex] === collected.block) {
+      if (this.writeBackTimer !== null) clearTimeout(this.writeBackTimer);
+      this.writeBackTimer = null;
+      this.pendingIndex = null;
+    }
+  }
+
+  private pushUndo(options: { coalesce: boolean; source?: string }): void {
     this.undo.push({
-      source: this.document.source,
+      source: options.source ?? this.document.source,
       caret: this.locateCaretOffset() ?? this.lastCaret,
       timestamp: Date.now(),
     }, options);
   }
 
   private persist(): void {
-    const tabId = this.options.getTabId();
-    if (!tabId) return;
-    useAppStore.getState().updateTabContent(tabId, this.document.source);
+    this.options.onSourceChange(this.document.source);
   }
 
   private emit(): void {
     this.version += 1;
-    this.snapshot = { document: this.document, skipRenderIndex: this.skipRenderIndex, version: this.version };
+    if (this.skipRenderIndex === null) { this.renderRevision += 1; this.awaitingRender = true; }
+    this.snapshot = { document: this.document, skipRenderIndex: this.skipRenderIndex, version: this.version, renderRevision: this.renderRevision };
     this.notify();
   }
 
   private collectBlock(index: number): CollectedBlock | null {
     const block = this.document.blocks[index];
     const element = this.accessors.getBlockElement(index);
-    if (!block || !element || !block.editable) return null;
+    if (!block || !element || (!block.editable && block.kind !== 'table')) return null;
     try {
       return { block, element, serialized: serializeBlockMarkdown(block.kind, toInlineNodes(element), EDITING_SERIALIZE_OPTIONS) };
     } catch {
@@ -536,7 +688,15 @@ export class WysiwygSession {
     const element = this.accessors.getBlockElement(index);
     if (!block || !element) return null;
     try {
-      return { block, element, serialized: serializeBlockMarkdown(block.kind, toInlineNodes(element), EDITING_SERIALIZE_OPTIONS) };
+      const serialized = serializeBlockMarkdown(block.kind, toInlineNodes(element), EDITING_SERIALIZE_OPTIONS);
+      if (block.kind === 'table') {
+        const table = parseTableAt(block.source, 0);
+        const cells = table?.rows.filter((_, row) => row !== 1).flatMap(row => row.cells);
+        if (cells?.length === serialized.containers.length) {
+          serialized.containers.forEach((container, cell) => { container.contentOffset = cells[cell].from; });
+        }
+      }
+      return { block, element, serialized };
     } catch {
       return null;
     }
@@ -580,6 +740,7 @@ export class WysiwygSession {
   /** 全文档光标偏移（撤销快照用）。 */
   private locateCaretOffset(): number | null {
     const surface = this.accessors.getSurface();
+    if (surface?.ownerDocument.activeElement?.matches('textarea.wysiwyg-code-editor')) return this.getSelectionOffsets().from;
     const selection = surface?.ownerDocument.getSelection();
     if (!surface || !selection || selection.rangeCount === 0) return null;
     const range = selection.getRangeAt(0);
@@ -589,8 +750,20 @@ export class WysiwygSession {
   private applySelection(from: number, to: number): void {
     const surface = this.accessors.getSurface();
     if (!surface) return;
+    const active = surface.ownerDocument.activeElement as HTMLElement | null;
+    const preserveFocus = Boolean(active?.matches('input,textarea') && !surface.contains(active));
     const start = this.domRangeOfOffset(from);
-    if (!start) return;
+    if (!start) {
+      const index = this.blockIndexAtOffset(from);
+      const block = index === null ? null : this.document.blocks[index];
+      if (block?.kind === 'fence' && index !== null) {
+        const prefix = block.source.indexOf('\n') + 1;
+        this.accessors.getBlockElement(index)?.dispatchEvent(new CustomEvent('zeditor-code-selection', { detail: { from: Math.max(0, from - block.offset - prefix), to: Math.max(0, to - block.offset - prefix), preserveFocus } }));
+      }
+      return;
+    }
+    const startElement = start.startContainer.nodeType === 1 ? start.startContainer as HTMLElement : start.startContainer.parentElement;
+    startElement?.closest<HTMLElement>('[contenteditable="true"]')?.focus();
     const selection = surface.ownerDocument.getSelection();
     if (!selection) return;
     const range = surface.ownerDocument.createRange();
@@ -600,6 +773,7 @@ export class WysiwygSession {
     else range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
+    if (preserveFocus) active?.focus();
   }
 
   private domRangeOfOffset(offset: number): Range | null {

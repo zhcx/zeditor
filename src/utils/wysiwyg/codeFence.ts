@@ -31,6 +31,26 @@ export function extractFenceLanguage(source: string): string {
   return parseFence(source)?.language ?? '';
 }
 
+/**
+ * 完整的信息串（围栏标记之后的全部内容）。
+ *
+ * 围栏信息串除语言外还可能带属性，例如 ```` ```js title="示例" ```` 或 ```` ```js {1,3} ````；
+ * 只取第一个词再回写会把它们丢掉，所以回写时以完整信息串为准。
+ */
+export function extractFenceInfo(source: string): string {
+  const opening = source.split('\n')[0] ?? '';
+  const match = opening.match(/^[ \t]*(?:`{3,}|~{3,})[ \t]*([^\n]*)$/);
+  return (match?.[1] ?? '').trim();
+}
+
+/** 切换语言时只替换信息串的第一个词，保留 `title=`、行高亮等其余属性。 */
+export function withFenceLanguage(info: string, language: string): string {
+  const tokens = info.split(/[ \t]+/).filter(Boolean);
+  if (tokens.length === 0) return language;
+  if (!language) return tokens.slice(1).join(' ');
+  return [language, ...tokens.slice(1)].join(' ');
+}
+
 /** 代码内容：去掉围栏行与每行共同的缩进。 */
 export function extractFenceCode(source: string): string {
   const parts = parseFence(source);
@@ -45,6 +65,8 @@ export function extractFenceCode(source: string): string {
 export interface FormatFenceOptions {
   marker?: string;
   indent?: string;
+  /** 完整信息串（优先于 `language`）；缺省时退化为 `language`。 */
+  info?: string;
 }
 
 /** 内容里出现不短于当前围栏的反引号或波浪号序列时，把围栏加长一位。 */
@@ -60,6 +82,7 @@ export function formatFence(code: string, language: string, options: FormatFence
   const baseMarker = options.marker ?? '```';
   const indent = options.indent ?? '';
   const marker = safeMarker(code, baseMarker);
+  const info = options.info ?? language;
   const body = code.replace(/\n+$/, '').split('\n').map(line => `${indent}${line}`).join('\n');
-  return `${indent}${marker}${language}\n${body}\n${indent}${marker}`;
+  return `${indent}${marker}${info}\n${body}\n${indent}${marker}`;
 }

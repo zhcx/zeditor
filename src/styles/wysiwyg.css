@@ -22,6 +22,13 @@
   padding: 2px 0;
 }
 
+.wysiwyg-block.is-editable { min-height: 1.8em; }
+.wysiwyg-block.is-editable:empty::before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
+  pointer-events: none;
+}
+
 .wysiwyg-block:focus { outline: none; }
 .wysiwyg-block.is-editable:focus-within { border-radius: 4px; }
 
@@ -199,3 +206,38 @@
 }
 
 .status-mode-button:hover { background: var(--bg-hover); }
+
+/* 编辑区采用连续文档间距，不能叠加阅读预览的上下段落留白。 */
+.wysiwyg-surface > .wysiwyg-document { width: 100%; max-width: 960px; box-sizing: border-box; padding: 24px 48px 35vh; }
+.wysiwyg-document .wysiwyg-block-shell { margin: 0 0 .45em; }
+.wysiwyg-document .wysiwyg-block { padding: 0; }
+.wysiwyg-document .wysiwyg-block.is-editable { min-height: 1.5em; }
+.wysiwyg-document .wysiwyg-block > :first-child { margin-top: 0; }
+.wysiwyg-document .wysiwyg-block > :last-child { margin-bottom: 0; }
+.wysiwyg-document .wysiwyg-block > p { margin: 0; }
+.wysiwyg-document .wysiwyg-block :is(table, pre) { margin-block: 0; }
+.wysiwyg-block[data-block-kind="table"] { content-visibility: visible; }
+.wysiwyg-block :is(td, th)[contenteditable="true"] { cursor: text; min-width: 70px; user-select: text; }
+.wysiwyg-block :is(td, th)[contenteditable="true"]:focus { outline: 2px solid var(--accent-color); outline-offset: -2px; }
+.wysiwyg-block mark { background: color-mix(in srgb, #e8c547 40%, transparent); color: inherit; }
+
+/* 块操作集中在左侧手柄中，只有悬停、键盘聚焦或展开菜单时显示。 */
+.wysiwyg-block-actions { top: 0; left: -34px; right: auto; pointer-events: auto; }
+.wysiwyg-block-shell:focus-within > .wysiwyg-block-actions { opacity: 0; pointer-events: auto; }
+.wysiwyg-block-shell:hover > .wysiwyg-block-actions,
+.wysiwyg-block-shell > .wysiwyg-block-actions:focus-within,
+.wysiwyg-block-shell > .wysiwyg-block-actions.is-open { opacity: 1; pointer-events: auto; }
+.wysiwyg-block-actions .wysiwyg-block-handle { width: 28px; height: 28px; justify-content: center; border-color: transparent; background: transparent; font-size: 22px; cursor: pointer; }
+.wysiwyg-block-menu { position: absolute; top: 30px; left: 0; z-index: 80; width: 190px; padding: 5px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-elevated); box-shadow: 0 8px 24px #0004; }
+.wysiwyg-block-menu button { width: 100%; padding: 7px 10px; border: 0; background: transparent; font-size: 12px; text-align: left; }
+.wysiwyg-block-menu button:disabled { opacity: .35; cursor: default; }
+
+/* 代码工具栏和编辑框参与正常布局，不用覆盖层挡住代码与语言选择。 */
+.wysiwyg-code-layer { position: static; display: block; margin: 0; }
+.wysiwyg-code-layer.is-editing { position: static; }
+.wysiwyg-code-toolbar { display: flex; align-items: center; gap: 8px; padding: 6px 10px; background: var(--bg-panel); border: 1px solid var(--border-color); border-radius: 7px 7px 0 0; font-size: 12px; }
+.wysiwyg-code-toolbar > span { flex: 1; }
+.wysiwyg-code-toolbar :is(button, select) { border: 1px solid var(--border-color); border-radius: 4px; padding: 3px 7px; color: var(--text-secondary); background: var(--bg-elevated); font: inherit; cursor: pointer; }
+.wysiwyg-code-layer .wysiwyg-code-editor { position: static; display: block; width: 100%; height: auto; min-height: 140px; box-sizing: border-box; resize: vertical; border-radius: 0 0 7px 7px; padding: 12px 14px; tab-size: 2; }
+.wysiwyg-block.is-code-editing { display: none; }
+.wysiwyg-document .has-code pre { border-top-left-radius: 0; border-top-right-radius: 0; }

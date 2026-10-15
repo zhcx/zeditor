@@ -692,6 +692,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setMode: (mode) => {
+    get().editorView?.flushPendingEdits?.();
     set({ mode });
     // 沉浸写作 / 沉浸阅读是临时态：只切运行时视图，不覆盖用户选择的默认编辑方式。
     if (mode !== 'split' && mode !== 'wysiwyg') return;
@@ -769,6 +770,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   openFile: async (path, encoding, cancelled) => {
+    get().editorView?.flushPendingEdits?.();
     const requestVersion = ++fileOpenSequence;
     const opened = get().tabs.find(tab => tab.path === path);
     if (opened) {
@@ -789,6 +791,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const loaded = await reading;
       if (cancelled?.()) return;
       const fileContent = loaded.content;
+      get().editorView?.flushPendingEdits?.();
       const { tabs, activeTabId } = get();
       const existingTab = tabs.find(t => t.path === path);
 
@@ -953,6 +956,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   saveTab: async (tabId, path) => {
+    if (get().activeTabId === tabId) get().editorView?.flushPendingEdits?.();
     pendingSaves += 1;
     set({ isSaving: true });
     try {
@@ -1006,6 +1010,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   addTab: (tab?: Partial<Tab>) => {
+    get().editorView?.flushPendingEdits?.();
     fileOpenSequence += 1;
     const { tabs } = get();
     const id = generateId();
@@ -1028,6 +1033,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   closeTab: (id) => {
+    get().editorView?.flushPendingEdits?.();
     const { tabs, activeTabId, timeline } = get();
     if (id === activeTabId) fileOpenSequence += 1;
     const tabIndex = tabs.findIndex(t => t.id === id);
@@ -1065,6 +1071,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   setActiveTab: (id) => {
+    get().editorView?.flushPendingEdits?.();
     const { tabs } = get();
     const tab = tabs.find(t => t.id === id);
     if (tab) {

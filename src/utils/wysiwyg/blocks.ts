@@ -105,11 +105,9 @@ function indexLines(source: string): SourceLine[] {
 
 export function splitMarkdownDocument(source: string): WysiwygDocument {
   const eol = detectEol(source);
-  if (source.length === 0) return { source, eol, blocks: [] };
-
   const lines = indexLines(source);
   const blocks: WysiwygBlock[] = [];
-  const tokens = markdownRenderer.parse(source, {});
+  const tokens = source.length > 0 ? markdownRenderer.parse(source, {}) : [];
 
   for (const token of tokens) {
     if (token.level !== 0 || token.hidden || !token.map) continue;
@@ -134,7 +132,51 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
     });
   }
 
-  return { source, eol, blocks };
+  if (blocks.length === 0 && source.trim().length > 0) {
+    const rawSource = source.trimEnd();
+    blocks.push({
+      kind: 'other', startLine: 1, endLine: rawSource.split(/\r\n|\n|\r/).length,
+      offset: 0, length: rawSource.length, source: rawSource, editable: false,
+    });
+  }
+
+  const lineNumberAt = (offset: number) => source.slice(0, offset).split(/\r\n|\n|\r/).length;
+  const emptyParagraph = (offset: number, length = 0): WysiwygBlock => ({
+    kind: 'paragraph',
+    startLine: lineNumberAt(offset),
+    endLine: lineNumberAt(offset),
+    offset,
+    length,
+    source: source.slice(offset, offset + length),
+    editable: true,
+  });
+
+  // Markdown 解析器不生成空段落 token，但编辑器必须保留回车新建的光标落点。
+  const pairEnds = (from: number, to: number) => {
+    const gap = source.slice(from, to);
+    if (gap.trim().length > 0) return [];
+    return Array.from(gap.matchAll(/\r\n|\n|\r/g))
+      .flatMap((match, index) => index % 2 === 1 ? [from + match.index + match[0].length] : []);
+  };
+  if (blocks.length === 0) {
+    const initialLength = /[\r\n]/.test(source) ? 0 : source.length;
+    return { source, eol, blocks: [emptyParagraph(0, initialLength), ...pairEnds(0, source.length).map(offset => emptyParagraph(offset))] };
+  }
+
+  const editableBlocks: WysiwygBlock[] = [];
+  const leadingPairs = pairEnds(0, blocks[0].offset);
+  if (leadingPairs.length > 0) {
+    editableBlocks.push(emptyParagraph(0), ...leadingPairs.slice(0, -1).map(offset => emptyParagraph(offset)));
+  }
+  blocks.forEach((block, index) => {
+    editableBlocks.push(block);
+    const next = blocks[index + 1];
+    const gapPairs = pairEnds(block.offset + block.length, next?.offset ?? source.length);
+    const emptyOffsets = next ? gapPairs.slice(0, -1) : gapPairs;
+    editableBlocks.push(...emptyOffsets.map(offset => emptyParagraph(offset)));
+  });
+
+  return { source, eol, blocks: editableBlocks };
 }
 
 /** 用新的块源码替换该块，其余字符逐字保留；源码未变化时返回原对象。 */

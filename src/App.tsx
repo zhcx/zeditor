@@ -81,6 +81,7 @@ function App() {
     openFile
   } = useAppStore(useShallow(state => ({ mode: state.mode, settingsOpen: state.settingsOpen, sidebarVisible: state.sidebarVisible, sidebarWidth: state.sidebarWidth, outlineVisible: state.outlineVisible, loadSettings: state.loadSettings, settings: state.settings, splitRatio: state.splitRatio, setSplitRatio: state.setSplitRatio, setSidebarWidth: state.setSidebarWidth, setSidebarVisible: state.setSidebarVisible, setSettingsOpen: state.setSettingsOpen, openFile: state.openFile })));
   const editorView = useAppStore(state => state.editorView);
+  const activeTabId = useAppStore(state => state.activeTabId);
   const converterDialog = useAppStore(state => state.converterDialog);
   const encodingDialog = useAppStore(state => state.encodingDialog);
   const { proofreadResults, setProofreadPanelVisible, translationPosition, translationOriginal, translationResult, setTranslationVisible, chatbotVisible, setChatbotVisible, companionVisible, pendingEdit } = useAIStore(useShallow(state => ({ proofreadResults: state.proofreadResults, setProofreadPanelVisible: state.setProofreadPanelVisible, translationPosition: state.translationPosition, translationOriginal: state.translationOriginal, translationResult: state.translationResult, setTranslationVisible: state.setTranslationVisible, chatbotVisible: state.chatbotVisible, setChatbotVisible: state.setChatbotVisible, companionVisible: state.companionVisible, pendingEdit: state.pendingEdit })));
@@ -766,8 +767,20 @@ function App() {
   const revealActivityView = useCallback((view: 'explorer' | 'search') => {
     setActivityView(view);
     setSidebarVisible(true);
-    if (mode !== 'split') useAppStore.getState().setMode('split');
+    if (mode !== 'split' && mode !== 'wysiwyg') useAppStore.getState().setMode('split');
   }, [mode, setSidebarVisible]);
+
+  useEffect(() => {
+    const find = () => {
+      if (useAppStore.getState().mode !== 'wysiwyg') return;
+      useAppStore.getState().editorView?.flushPendingEdits?.();
+      setActivityView('search');
+      setSidebarVisible(true);
+      requestAnimationFrame(() => document.querySelector<HTMLInputElement>('.document-find-input')?.focus());
+    };
+    window.addEventListener('zeditor-editor-find', find);
+    return () => window.removeEventListener('zeditor-editor-find', find);
+  }, [setSidebarVisible]);
 
   const toggleThemeVariant = useCallback(() => {
     const currentSettings = useAppStore.getState().settings;
@@ -1264,7 +1277,7 @@ function App() {
                 </div>
               )}
               <Suspense fallback={<div className="editor-container editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
-                <WysiwygEditor />
+                <WysiwygEditor key={activeTabId} />
               </Suspense>
             </section>
           ) : (

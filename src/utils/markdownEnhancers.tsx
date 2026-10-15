@@ -74,7 +74,8 @@ function measureColumnWidths(table: HTMLTableElement): number[] {
 }
 
 /** 给表格加列宽拖动把手：拖动改列宽，双击把手恢复该列的自动宽度。 */
-function enhanceTables(container: HTMLElement, documentPath: string | null): void {
+function enhanceTables(container: HTMLElement, documentPath: string | null): () => void {
+  const cleanups: Array<() => void> = [];
   Array.from(container.querySelectorAll<HTMLTableElement>('table')).forEach((table, tableIndex) => {
     if (tableColumnCount(table) < 2) return;
     const key = tableLayoutKey(documentPath, table, tableIndex);
@@ -170,7 +171,12 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): voi
       repositionObserver.observe(wrap);
     }
     window.requestAnimationFrame(reposition);
+    cleanups.push(() => {
+      repositionObserver?.disconnect();
+      if (wrap.parentNode) { wrap.parentNode.insertBefore(table, wrap); wrap.remove(); }
+    });
   });
+  return () => cleanups.forEach(cleanup => cleanup());
 }
 
 function addListItemContentAnchors(container: HTMLElement) {
@@ -566,10 +572,11 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
     });
   }
 
-  enhanceTables(root, options.documentPath);
+  const cleanupTables = enhanceTables(root, options.documentPath);
 
   return () => {
     disposed = true;
+    cleanupTables();
     mermaidObserver?.disconnect();
     workflowObserver?.disconnect();
     markmapObserver?.disconnect();

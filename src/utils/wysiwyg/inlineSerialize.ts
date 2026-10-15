@@ -30,6 +30,7 @@ export interface MarkdownPiece {
 }
 
 export interface SerializeOptions {
+  escapePipes?: boolean;
   /** 内容是否位于行首（段落为 true，带 `# `/`- ` 前缀的块为 false）。 */
   escapeLineStart?: boolean;
 }
@@ -52,7 +53,7 @@ export function escapeSteps(text: string, options: SerializeOptions = {}): Array
       steps.push({ from: index, escaped });
       continue;
     }
-    if (ALWAYS_ESCAPED.has(char)) {
+    if (ALWAYS_ESCAPED.has(char) || (options.escapePipes && char === '|')) {
       escaped = `\\${char}`;
     } else if (atLineStart && LINE_START_ESCAPED.has(char)) {
       escaped = `\\${char}`;
@@ -74,6 +75,10 @@ export function escapeInlineText(text: string, options: SerializeOptions = {}): 
 }
 
 const EMPHASIS_MARKERS: Record<string, { open: string; close: string }> = {
+  u: { open: '<u>', close: '</u>' },
+  sup: { open: '<sup>', close: '</sup>' },
+  sub: { open: '<sub>', close: '</sub>' },
+  mark: { open: '<mark>', close: '</mark>' },
   strong: { open: '**', close: '**' },
   b: { open: '**', close: '**' },
   em: { open: '*', close: '*' },
@@ -88,10 +93,12 @@ function codeDelimiter(raw: string): string {
   return '`'.repeat(Math.max(1, ...runs));
 }
 
-function imageMarkdown(node: InlineElementNode): string {
-  const alt = (node.attrs.alt ?? '').replace(/]/g, '\\]');
+function imageMarkdown(node: InlineElementNode, options: SerializeOptions): string {
+  // 表格单元格里必须转义竖线（GFM 同样要求行内代码与链接文本内的竖线转义），否则会被拆成两列。
+  const pipe = (value: string) => options.escapePipes ? value.replace(/\|/g, '\\|') : value;
+  const alt = pipe((node.attrs.alt ?? '').replace(/]/g, '\\]'));
   // 增强管线改写 src 之前会把原始路径记在 data-md-src：回写必须用它，否则文档里会写进 asset 地址。
-  const src = node.attrs['data-md-src'] ?? node.attrs.src ?? '';
+  const src = pipe(node.attrs['data-md-src'] ?? node.attrs.src ?? '');
   const size: string[] = [];
   if (node.attrs.width) size.push(`width=${node.attrs.width}`);
   if (node.attrs.height) size.push(`height=${node.attrs.height}`);
@@ -113,7 +120,7 @@ function endsAtLineStart(out: MarkdownPiece[], options: SerializeOptions): boole
 function emitNode(node: InlineNode, path: number[], options: SerializeOptions, out: MarkdownPiece[]): void {
   if (node.type === 'text') {
     if (node.text.length === 0) return;
-    const steps = escapeSteps(node.text, { escapeLineStart: endsAtLineStart(out, options) });
+    const steps = escapeSteps(node.text, { ...options, escapeLineStart: endsAtLineStart(out, options) });
     out.push({
       text: steps.map(step => step.escaped).join(''),
       path,
@@ -128,12 +135,13 @@ function emitNode(node: InlineNode, path: number[], options: SerializeOptions, o
   if (isIslandElement(node)) return;
 
   if (node.tag === 'br') {
+    if (node.attrs['data-wysiwyg-placeholder'] !== undefined) return;
     out.push({ text: '\n', path, kind: 'syntax' });
     return;
   }
 
   if (node.tag === 'img') {
-    out.push({ text: imageMarkdown(node), path, kind: 'syntax' });
+    out.push({ text: imageMarkdown(node, options), path, kind: 'syntax' });
     return;
   }
 
@@ -144,11 +152,13 @@ function emitNode(node: InlineNode, path: number[], options: SerializeOptions, o
 
   if (node.tag === 'code') {
     // 行内代码内容不做转义，整体作为一个片段输出：内容里的反引号由围栏长度处理。
+    // 例外：表格单元格里的竖线必须转义，否则会被当成列分隔符（GFM 要求含行内代码在内一起转义）。
     const raw = textContentOf(node.children);
     if (raw.length === 0) return;
+    const escaped = options.escapePipes ? raw.replace(/\|/g, '\\|') : raw;
     const delimiter = codeDelimiter(raw);
     const pad = raw.startsWith('`') || raw.endsWith('`') ? ' ' : '';
-    out.push({ text: `${delimiter}${pad}${raw}${pad}${delimiter}`, path, kind: 'syntax' });
+    out.push({ text: `${delimiter}${pad}${escaped}${pad}${delimiter}`, path, kind: 'syntax' });
     return;
   }
 

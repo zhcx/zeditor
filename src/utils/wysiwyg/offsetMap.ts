@@ -35,7 +35,8 @@ export function blockOffsetFromPoint(block: BlockSerializeResult, container: Con
   if (!entry) return null;
 
   // 转义上下文必须与序列化时一致，否则片段长度对不上、光标会整体偏移。
-  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart });
+  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes });
+  if (pieces.length === 0) return entry.contentOffset;
   let local = 0;
   for (const piece of pieces) {
     if (piece.kind === 'text' && samePath(piece.path, point.path)) {
@@ -54,7 +55,8 @@ export function pointFromBlockOffset(block: BlockSerializeResult, container: Con
   const entry = containerEntryOf(block, container.path);
   if (!entry) return null;
 
-  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart });
+  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes });
+  if (pieces.length === 0) return { path: [], offset: 0 };
   const target = offset - entry.contentOffset;
   let local = 0;
   let last: InlinePoint | null = null;

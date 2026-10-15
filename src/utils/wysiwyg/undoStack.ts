@@ -23,6 +23,7 @@ const COALESCE_WINDOW_MS = 400;
 export function createUndoStack(limit = 200): UndoStack {
   let past: UndoSnapshot[] = [];
   let future: UndoSnapshot[] = [];
+  let lastPushCoalescible = false;
   const trim = (stack: UndoSnapshot[]) => stack.length > limit ? stack.slice(stack.length - limit) : stack;
 
   return {
@@ -30,10 +31,12 @@ export function createUndoStack(limit = 200): UndoStack {
     push: (snapshot, options) => {
       future = [];
       const top = past[past.length - 1];
-      if (options.coalesce && top && snapshot.timestamp - top.timestamp < COALESCE_WINDOW_MS) return;
+      if (options.coalesce && lastPushCoalescible && top && snapshot.timestamp - top.timestamp < COALESCE_WINDOW_MS) return;
       past = trim([...past, snapshot]);
+      lastPushCoalescible = options.coalesce;
     },
     undo: (current) => {
+      lastPushCoalescible = false;
       const snapshot = past[past.length - 1];
       if (!snapshot) return null;
       past = past.slice(0, -1);
@@ -41,6 +44,7 @@ export function createUndoStack(limit = 200): UndoStack {
       return snapshot;
     },
     redo: (current) => {
+      lastPushCoalescible = false;
       const snapshot = future[future.length - 1];
       if (!snapshot) return null;
       future = future.slice(0, -1);
@@ -50,6 +54,7 @@ export function createUndoStack(limit = 200): UndoStack {
     clear: () => {
       past = [];
       future = [];
+      lastPushCoalescible = false;
     },
   };
 }

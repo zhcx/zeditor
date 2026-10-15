@@ -4,7 +4,7 @@
  * 会话层只认「块元素 + 容器路径 + 文本偏移」，DOM Range 的语义（容器可能是元素、
  * 偏移可能是子节点下标）在这里被归一化，避免这些细节渗进编辑逻辑。
  */
-import { nodeAtPath, pathOfNode, type InlinePoint } from '../../utils/wysiwyg/inlineNodes';
+import { nodeAtPath, pathOfNode, type InlinePoint } from '../../utils/wysiwyg/inlineNodes.ts';
 
 const TEXT_NODE = 3;
 const ELEMENT_NODE = 1;

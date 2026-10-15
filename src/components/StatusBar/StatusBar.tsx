@@ -56,7 +56,8 @@ export function StatusBar() {
   const [companionMenuOpen, setCompanionMenuOpen] = useState(false);
   const aiMenuRef = useRef<HTMLDivElement>(null);
   const companionMenuRef = useRef<HTMLDivElement>(null);
-  const selection = editorView?.getSelection();
+  // 渲染只读选区；getSelection 会提交所见即所得的挂起输入，不能在渲染期调用。
+  const selection = editorView?.state.selection.main;
   const hasSelection = Boolean(selection && !selection.empty);
   const companionEnabled = settings.ai.enabled && settings.ai.auto_suggest;
   const companionStyleLabel = WRITING_STYLES.find(({ value }) => value === settings.ai.writing_style)?.label || '正式';

@@ -10,6 +10,7 @@ import { textContentOf, type InlineElementNode, type InlineNode } from './inline
 import type { WysiwygBlockKind } from './blocks.ts';
 
 export interface BlockContainerOffset {
+  escapePipes?: boolean;
   /** 文本容器在块节点树中的路径（`[]` 表示块内容本身就是容器，如段落）。 */
   path: number[];
   /** 容器内容在生成的 Markdown 中的起始偏移。 */
@@ -34,7 +35,7 @@ export interface BlockSerializeOptions {
   allowBlockMarkers?: boolean;
 }
 
-const EDITABLE_BLOCK_KINDS = new Set<WysiwygBlockKind>(['paragraph', 'heading', 'blockquote', 'list']);
+const EDITABLE_BLOCK_KINDS = new Set<WysiwygBlockKind>(['paragraph', 'heading', 'blockquote', 'list', 'table']);
 
 /**
  * 行首块标记：用户刚敲出来的块级标记要留给重新解析去改变块类型，不能被转义成字面量。
@@ -106,21 +107,23 @@ function writeHeading(writer: Writer, index: number, node: InlineElementNode): v
   writeContainer(writer, [index], node.children, false);
 }
 
-function writeBlockquote(writer: Writer, nodes: InlineNode[]): void {
+function writeBlockquote(writer: Writer, nodes: InlineNode[], parentPath: number[] = []): void {
   nodes.forEach((node, index) => {
+    if (node.type === 'text' && node.text.trim().length === 0) return;
+    const path = [...parentPath, index];
     if (writer.length() > 0) writer.write('\n>\n');
     writer.write('> ');
     const level = headingLevel(node);
     if (level > 0 && node.type === 'element') {
       writer.write(`${'#'.repeat(level)} `);
-      writeContainer(writer, [index], node.children, false, true);
+      writeContainer(writer, path, node.children, false, true);
       return;
     }
     if (isElement(node, ['p'])) {
-      writeContainer(writer, [index], node.children, false, true);
+      writeContainer(writer, path, node.children, false, true);
       return;
     }
-    writeContainer(writer, [index], [node], false, true);
+    writeContainer(writer, path, [node], false, true);
   });
 }
 
@@ -158,6 +161,39 @@ function writeList(writer: Writer, listPath: number[], list: InlineElementNode, 
   });
 }
 
+/** 增强管线会在 table 外包一层容器，路径始终相对真实块 DOM。 */
+function writeTable(writer: Writer, nodes: InlineNode[]): void {
+  const rows: Array<Array<{ node: InlineElementNode; path: number[] }>> = [];
+  const visit = (children: InlineNode[], path: number[]) => {
+    children.forEach((node, index) => {
+      if (node.type !== 'element') return;
+      const nextPath = [...path, index];
+      if (node.tag === 'tr') {
+        rows.push(node.children.flatMap((cell, cellIndex) => isElement(cell, ['th', 'td']) ? [{ node: cell, path: [...nextPath, cellIndex] }] : []));
+      } else visit(node.children, nextPath);
+    });
+  };
+  visit(nodes, []);
+  if (rows.length === 0 || rows[0].length === 0) throw new Error('无法读取表格单元格');
+  rows.forEach((cells, rowIndex) => {
+    if (rowIndex > 0) writer.write('\n');
+    writer.write('| ');
+    cells.forEach(({ node, path }, column) => {
+      if (column > 0) writer.write(' | ');
+      writer.openContainer(path, writer.length(), false);
+      writer.containers[writer.containers.length - 1].escapePipes = true;
+      writer.write(serializeInlineNodes(node.children, { escapeLineStart: false, escapePipes: true }).replace(/\n/g, ' '));
+    });
+    writer.write(' |');
+    if (rowIndex === 0) {
+      writer.write('\n| ' + cells.map(({ node }) => {
+        const align = /text-align\s*:\s*(left|center|right)/.exec(node.attrs.style ?? '')?.[1] ?? node.attrs.align;
+        return align === 'center' ? ':---:' : align === 'right' ? '---:' : align === 'left' ? ':---' : '---';
+      }).join(' | ') + ' |');
+    }
+  });
+}
+
 /** 块节点树 → 块源码；不可编辑的块类型直接抛错，调用方据此走只读分支。 */
 export function serializeBlockMarkdown(
   kind: WysiwygBlockKind,
@@ -170,16 +206,24 @@ export function serializeBlockMarkdown(
   const allowMarkers = options.allowBlockMarkers === true;
   const headingIndex = nodes.findIndex(node => headingLevel(node) > 0);
   const listIndex = nodes.findIndex(node => isElement(node, ['ul', 'ol']));
-  const singleParagraph = nodes.length === 1 && isElement(nodes[0], ['p']) ? nodes[0] : null;
+  const meaningfulIndices = nodes.flatMap((node, index) => node.type === 'text' && node.text.trim().length === 0 ? [] : [index]);
+  const paragraphIndex = meaningfulIndices.length === 1 && isElement(nodes[meaningfulIndices[0]], ['p']) ? meaningfulIndices[0] : -1;
+  const quoteIndex = nodes.findIndex(node => isElement(node, ['blockquote']));
 
-  if (kind === 'heading' && headingIndex >= 0) {
+  if (kind === 'table') {
+    writeTable(writer, nodes);
+  } else if (kind === 'heading' && headingIndex >= 0) {
     writeHeading(writer, headingIndex, nodes[headingIndex] as InlineElementNode);
   } else if (kind === 'blockquote') {
-    writeBlockquote(writer, nodes);
+    if (quoteIndex >= 0) {
+      writeBlockquote(writer, (nodes[quoteIndex] as InlineElementNode).children, [quoteIndex]);
+    } else {
+      writeBlockquote(writer, nodes);
+    }
   } else if (kind === 'list' && listIndex >= 0) {
     writeList(writer, [listIndex], nodes[listIndex] as InlineElementNode, 0);
-  } else if (singleParagraph) {
-    writeContainer(writer, [0], singleParagraph.children, true, false, allowMarkers);
+  } else if (paragraphIndex >= 0) {
+    writeContainer(writer, [paragraphIndex], (nodes[paragraphIndex] as InlineElementNode).children, true, false, allowMarkers);
   } else {
     writeContainer(writer, [], nodes, true, false, allowMarkers);
   }

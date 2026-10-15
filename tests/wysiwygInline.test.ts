@@ -12,6 +12,17 @@ const image = (src: string, alt = '', attrs: Record<string, string> = {}) => ele
 const math = (tex: string) => elementNode('span', { class: 'zeditor-math', 'data-tex': tex }, [textNode(tex)]);
 const lineBreak = () => elementNode('br', {}, []);
 
+it('omits the caret placeholder in an otherwise empty editable container', () => {
+  assert.equal(serializeInlineNodes([elementNode('br', { 'data-wysiwyg-placeholder': 'true' }, [])]), '');
+  assert.equal(serializeInlineNodes([lineBreak()]), '\n');
+});
+
+it('preserves underline, superscript, subscript and highlight toolbar formatting', () => {
+  for (const tag of ['u', 'sup', 'sub', 'mark']) {
+    assert.equal(serializeInlineNodes([elementNode(tag, {}, [textNode('格式')])]), `<${tag}>格式</${tag}>`);
+  }
+});
+
 it('serializes plain text with required escapes', () => {
   assert.equal(serializeInlineNodes([textNode('2 * 3 = 6')]), '2 \\* 3 = 6');
   assert.equal(serializeInlineNodes([textNode('a_b [c] `d` ~e~ $f$ \\g')]), 'a\\_b \\[c\\] \\`d\\` \\~e\\~ \\$f\\$ \\\\g');
@@ -63,4 +74,17 @@ it('reports the markdown offset of every piece it emits', () => {
 it('writes the original image source back, not the resolved asset url', () => {
   const resolved = elementNode('img', { src: 'asset://localhost/D%3A/a.png', alt: '图', 'data-md-src': './a.png' }, []);
   assert.equal(serializeInlineNodes([resolved]), '![图](./a.png)');
+});
+
+it('escapes pipes inside table cells, including code spans and link text', () => {
+  // 回归：单元格里的行内代码含竖线时，写回会被当成列分隔符，表格多出一列。
+  assert.equal(serializeInlineNodes([code('a|b')], { escapePipes: true }), '`a\\|b`');
+  assert.equal(serializeInlineNodes([textNode('前|后')], { escapePipes: true }), '前\\|后');
+  assert.equal(
+    serializeInlineNodes([elementNode('img', { src: 'a|b.png', alt: '图|注' }, [])], { escapePipes: true }),
+    '![图\\|注](a\\|b.png)',
+  );
+  // 不开启时行为不变（普通段落里的竖线不需要转义）
+  assert.equal(serializeInlineNodes([code('a|b')]), '`a|b`');
+  assert.equal(serializeInlineNodes([textNode('前|后')]), '前|后');
 });

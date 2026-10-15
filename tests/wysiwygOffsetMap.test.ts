@@ -56,3 +56,14 @@ it('returns null when the container path is unknown', () => {
   assert.equal(blockOffsetFromPoint(block, { nodes, path: [9] }, { path: [0], offset: 1 }), null);
   assert.equal(pointFromBlockOffset(block, { nodes, path: [9] }, 1), null);
 });
+
+it('maps the empty paragraph caret to and from its block offset', () => {
+  const nodes: InlineNode[] = [];
+  const block = serializeBlockMarkdown('paragraph', nodes);
+  const container = { nodes, path: [] };
+  const point = { path: [], offset: 0 };
+
+  assert.equal(blockOffsetFromPoint(block, container, point), 0);
+  assert.deepEqual(pointFromBlockOffset(block, container, 0), point);
+  assert.equal(blockOffsetFromPoint(block, container, { path: [0], offset: 0 }), 0);
+});

@@ -2,7 +2,6 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useShallow } from 'zustand/react/shallow';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { useAppStore } from '../../stores/appStore';
-import { useAIStore } from '../../stores/aiStore';
 import { renderMarkdownSource } from '../../utils/markdownPipeline';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
@@ -18,6 +17,7 @@ import { WysiwygCodeBlock } from './WysiwygCodeBlock';
 import { BlockActions } from './BlockActions';
 import { SourcePopup } from './SourcePopup';
 import { imageSpecMarkdown, inlineTargetMarkdown } from './inlineEditing';
+import { WysiwygChrome } from './WysiwygChrome';
 
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
 const blockHtmlCache = new Map<string, string>();
@@ -48,6 +48,8 @@ interface WysiwygBlockViewProps {
   startLine: number;
   editable: boolean;
   skipRender: boolean;
+  renderRevision: number;
+  emptyDocument: boolean;
   documentPath: string | null;
   workflowViewerEnabled: boolean;
   scrollRoot: HTMLElement | null;
@@ -56,20 +58,26 @@ interface WysiwygBlockViewProps {
   onInput: (index: number) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLElement>, index: number) => void;
   onBlurBlock: (index: number) => void;
-  onCompositionChange: (composing: boolean) => void;
+  onCompositionChange: (composing: boolean, index: number) => void;
   onCommitCode: (index: number, code: string, language?: string) => void;
   onInlineClick: (event: React.MouseEvent<HTMLElement>) => void;
   onEditSource: (index: number) => void;
   onDeleteBlock: (index: number) => void;
   onInsertAfter: (index: number) => void;
+  onMove: (from: number, to: number) => void;
+  onDuplicate: (index: number) => void;
+  count: number;
 }
 
 const WysiwygBlockView = memo(function WysiwygBlockView({
-  index, kind, source, startLine, editable, skipRender, documentPath, workflowViewerEnabled,
+  index, kind, source, startLine, editable, skipRender, renderRevision, emptyDocument, documentPath, workflowViewerEnabled,
   scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
-  onCommitCode, onInlineClick, onEditSource, onDeleteBlock, onInsertAfter,
+  onCommitCode, onInlineClick, onEditSource, onDeleteBlock, onInsertAfter, onMove, onDuplicate, count,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
+  const renderedRevisionRef = useRef<number | null>(null);
+  const [codeEditing, setCodeEditing] = useState(kind === 'fence' && extractFenceCode(source).length === 0);
+  const [codeSelection, setCodeSelection] = useState<{ from: number; to: number; preserveFocus?: boolean } | null>(null);
 
   // 注册与内容渲染都必须放在 useLayoutEffect：React 先跑子节点的 layout effect、再跑父节点，
   // 而父节点正是在 layout effect 里恢复光标——用 useEffect（被动效应）会晚于光标恢复执行，
@@ -79,14 +87,24 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
     registerElement(index, host);
     return () => registerElement(index, null);
   }, [index, registerElement]);
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    const revealCode = (event: Event) => { setCodeEditing(true); setCodeSelection((event as CustomEvent<{ from: number; to: number; preserveFocus?: boolean }>).detail); };
+    host?.addEventListener('zeditor-code-selection', revealCode);
+    return () => host?.removeEventListener('zeditor-code-selection', revealCode);
+  }, []);
 
   useLayoutEffect(() => {
     const host = hostRef.current;
     if (!host) return undefined;
     // 由用户输入触发的写回：DOM 就是最新的，重建反而会丢光标。
     if (skipRender) return undefined;
-    host.innerHTML = renderBlockHtml(kind, source);
-    return enhanceRenderedMarkdown(host, {
+    // StrictMode 会重复运行 layout effect；同一轮不能在恢复光标后再次清空 DOM。
+    if ((!editable && kind !== 'table') || renderedRevisionRef.current !== renderRevision) {
+      host.innerHTML = renderBlockHtml(kind, source);
+      renderedRevisionRef.current = renderRevision;
+    }
+    const cleanup = enhanceRenderedMarkdown(host, {
       scrollRoot,
       source,
       documentPath,
@@ -95,34 +113,48 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
       // 回写要保留原始图片语法：解析失败时不要把 <img> 换成提示文本。
       keepUnresolvedImages: true,
     });
-  }, [documentPath, kind, scrollRoot, skipRender, source, theme, workflowViewerEnabled]);
+    if (kind === 'table') {
+      host.querySelectorAll<HTMLTableRowElement>('tr').forEach((row, rowIndex) => {
+        Array.from(row.cells).forEach((cell, column) => {
+          cell.contentEditable = 'true';
+          cell.tabIndex = 0;
+          cell.setAttribute('role', 'textbox');
+          cell.setAttribute('aria-label', `第 ${rowIndex + 1} 行第 ${column + 1} 列`);
+        });
+      });
+    }
+    if (editable || kind === 'table') {
+      // 空列表项需要真正的光标占位；只有 CSS 高度时 Chromium 会把输入移到前一项。
+      host.querySelectorAll('li:empty, p:empty, h1:empty, h2:empty, h3:empty, h4:empty, h5:empty, h6:empty, th:empty, td:empty').forEach(container => {
+        const placeholder = host.ownerDocument.createElement('br');
+        placeholder.dataset.wysiwygPlaceholder = 'true';
+        container.appendChild(placeholder);
+      });
+    }
+    return cleanup;
+  }, [documentPath, editable, kind, renderRevision, scrollRoot, skipRender, source, theme, workflowViewerEnabled]);
 
   return (
-    <div className="wysiwyg-block-shell">
+    <div className={`wysiwyg-block-shell${kind === 'fence' ? ' has-code' : ''}`}>
+      {kind === 'fence' && <WysiwygCodeBlock index={index} code={extractFenceCode(source)} language={extractFenceLanguage(source)} onCommit={(position, code, language) => { onCommitCode(position, code, language); if (!codeEditing) onBlurBlock(index); }} editing={codeEditing} selection={codeSelection} onEditingChange={editing => { setCodeEditing(editing); if (!editing) onBlurBlock(index); }} />}
       <section
         ref={hostRef}
-        className={`wysiwyg-block ${editable ? 'is-editable' : 'is-readonly'}`}
+        className={`wysiwyg-block ${editable ? 'is-editable' : 'is-readonly'}${kind === 'fence' && codeEditing ? ' is-code-editing' : ''}`}
         data-block-index={index}
         data-block-kind={kind}
         data-source-line={startLine}
+        data-placeholder={emptyDocument && index === 0 ? '开始写作，输入 / 插入内容' : undefined}
         contentEditable={editable}
         suppressContentEditableWarning
         spellCheck={false}
         onInput={() => onInput(index)}
+        onFocus={(event) => { if (kind === 'table' && (event.target as Element).closest('td,th')) onInput(index); }}
         onKeyDown={(event) => onKeyDown(event, index)}
-        onBlur={() => onBlurBlock(index)}
-        onCompositionStart={() => onCompositionChange(true)}
-        onCompositionEnd={() => onCompositionChange(false)}
-        onClick={onInlineClick}
+        onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onBlurBlock(index); }}
+        onCompositionStart={() => onCompositionChange(true, index)}
+        onCompositionEnd={() => onCompositionChange(false, index)}
+        onClick={(event) => { if (kind === 'fence') setCodeEditing(true); else onInlineClick(event); }}
       />
-      {kind === 'fence' && (
-        <WysiwygCodeBlock
-          index={index}
-          code={extractFenceCode(source)}
-          language={extractFenceLanguage(source)}
-          onCommit={onCommitCode}
-        />
-      )}
       <BlockActions
         index={index}
         kind={kind}
@@ -130,6 +162,9 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         onEditSource={onEditSource}
         onDelete={onDeleteBlock}
         onInsertAfter={onInsertAfter}
+        onMove={onMove}
+        onDuplicate={onDuplicate}
+        count={count}
       />
     </div>
   );
@@ -157,8 +192,15 @@ function fileAsDataUrl(file: File): Promise<string> {
 
 /** 剪贴板图片：沿用编辑器里已有的 .assets / 图床上传链路（它会通过当前编辑器插入语法）。 */
 async function insertClipboardImage(file: File): Promise<boolean> {
-  if (!('__TAURI_INTERNALS__' in window) || !useAppStore.getState().currentFile) return false;
   const dataUrl = await fileAsDataUrl(file);
+  if (!('__TAURI_INTERNALS__' in window) || !useAppStore.getState().currentFile) {
+    const editor = useAppStore.getState().editorView;
+    if (!editor) return false;
+    const selection = editor.getSelection();
+    editor.replaceRange(selection.from, selection.to, `![粘贴的图片](${dataUrl})`);
+    editor.focus();
+    return true;
+  }
   const { insertImageFromBytes } = await import('../../services/imageAssets');
   const { clipboardImageExtension } = await import('../../utils/imageSyntax');
   return insertImageFromBytes(dataUrl.split(',')[1], clipboardImageExtension(file.type), '粘贴的图片');
@@ -193,14 +235,20 @@ export function WysiwygEditor() {
 
   // 会话只建一次；它是普通对象，不受 React 状态更新影响。放在 useState 里而不是
   // useRef 里，是因为 react-hooks/refs 禁止在渲染期读 ref。
-  const [session] = useState(() => new WysiwygSession(useAppStore.getState().content, {
-    getTabId: () => useAppStore.getState().activeTabId,
-    insertClipboardImage,
-  }));
+  const [session] = useState(() => {
+    const store = useAppStore.getState();
+    const tabId = store.activeTabId;
+    return new WysiwygSession(store.content, {
+      onSourceChange: (source) => {
+        if (tabId) useAppStore.getState().updateTabContent(tabId, source);
+      },
+      insertClipboardImage,
+    });
+  });
   const [snapshot, setSnapshot] = useState<WysiwygSessionSnapshot>(() => session.getSnapshot());
   const [sourcePopup, setSourcePopup] = useState<{ index: number; title: string } | null>(null);
   const [imageTarget, setImageTarget] = useState<{ target: InlineTarget; spec: ImageSpec } | null>(null);
-  const [inlineTarget, setInlineTarget] = useState<{ target: InlineTarget; anchor: { left: number; top: number } } | null>(null);
+  const [inlineTarget, setInlineTarget] = useState<{ target: InlineTarget; anchor: { left: number; top: number }; autoFocus?: boolean } | null>(null);
 
   const registerElement = useCallback((index: number, element: HTMLElement | null) => {
     if (element) blockElementsRef.current.set(index, element);
@@ -208,7 +256,7 @@ export function WysiwygEditor() {
   }, []);
 
   // DOM 访问器与变更监听都在挂载后注入：渲染期读 ref 会触发 react-hooks/refs。
-  useEffect(() => {
+  useLayoutEffect(() => {
     setScrollRoot(surfaceRef.current);
     session.setAccessors({
       getSurface: () => surfaceRef.current,
@@ -217,6 +265,8 @@ export function WysiwygEditor() {
     session.setChangeListener(() => setSnapshot(session.getSnapshot()));
     return () => {
       session.setChangeListener(() => undefined);
+      // 退出时兜底；模式、标签切换和保存已在 store 入口同步写回。
+      session.flushWriteBack();
       session.setAccessors({
         getSurface: () => null,
         getBlockElement: () => null,
@@ -233,7 +283,7 @@ export function WysiwygEditor() {
         const selection = window.getSelection();
         return selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
       },
-      focus: () => surfaceRef.current?.focus(),
+      focus: () => session.focus(),
     });
     setEditorView(controller);
     markEditorBootReady();
@@ -254,20 +304,29 @@ export function WysiwygEditor() {
     session.restoreCaretAfterRender();
   }, [session, snapshot?.version]);
 
-  // 查找替换在所见即所得下不可用：引导用户切回源码对照模式。
-  useEffect(() => {
-    const onFindRequest = () => {
-      useAIStore.getState().setStatus('error', '查找替换在源码对照模式下可用：按 Ctrl+Alt+M 切回后再试');
-    };
-    window.addEventListener('zeditor-editor-find', onFindRequest);
-    return () => window.removeEventListener('zeditor-editor-find', onFindRequest);
-  }, []);
-
   // 卸载前落盘，避免丢失最后一次输入。
   useEffect(() => () => session.flushWriteBack(), [session]);
 
   const handleBlockKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>, index: number) => {
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     const modified = event.ctrlKey || event.metaKey;
+    if (modified && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
+      event.preventDefault();
+      const editor = useAppStore.getState().editorView;
+      if (!editor) return;
+      const selection = editor.getSelection();
+      let target = findInlineTargetAt(editor.getValue(), selection.from);
+      if (target?.kind !== 'link') {
+        const label = editor.getText(selection.from, selection.to) || '链接文字';
+        editor.replaceRange(selection.from, selection.to, `[${label}](https://)`);
+        target = findInlineTargetAt(editor.getValue(), selection.from + 1);
+      }
+      if (target?.kind === 'link') {
+        const rect = event.currentTarget.getBoundingClientRect();
+        setInlineTarget({ target, anchor: { left: rect.left, top: rect.top }, autoFocus: true });
+      }
+      return;
+    }
     if (modified && !event.altKey && !event.shiftKey && /^[0-6]$/.test(event.key)) {
       event.preventDefault();
       session.handleHeadingLevel(Number(event.key));
@@ -311,6 +370,7 @@ export function WysiwygEditor() {
 
   // 点击行内结构（链接 / 公式 / 图片）：用点击位置反查源码目标，复用既有弹窗。
   const handleInlineClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (window.getSelection()?.isCollapsed === false) return;
     if (!(settings.editor.inline_popups ?? true)) return;
     const position = session.blockPositionOfEvent(event.nativeEvent);
     if (!position) return;
@@ -351,17 +411,30 @@ export function WysiwygEditor() {
     () => blockDocument.blocks.map((block, index) => `${index}:${block.kind}`),
     [blockDocument],
   );
-  const isEmpty = blockDocument.blocks.length === 0;
   const popupBlock = sourcePopup ? blockDocument.blocks[sourcePopup.index] ?? null : null;
 
   return (
     <div
       className="wysiwyg-surface"
       ref={surfaceRef}
-      contentEditable
-      suppressContentEditableWarning
       spellCheck={settings.editor.spell_check}
       onBlur={() => session.flushWriteBack()}
+      onClick={(event) => {
+        // 块外的留白不是编辑宿主；点击后落到末尾的空段落。
+        if (event.target !== event.currentTarget && !(event.target instanceof HTMLElement && event.target.classList.contains('wysiwyg-document'))) return;
+        const blocks = session.getBlocks();
+        const lastIndex = blocks.length - 1;
+        const last = blocks[lastIndex];
+        if (!last) return;
+        const lastElement = blockElementsRef.current.get(lastIndex);
+        if (lastElement && event.clientY < lastElement.getBoundingClientRect().bottom) return;
+        if (last.kind === 'paragraph' && last.source.trim().length === 0) {
+          session.setSelectionOffsets(last.offset);
+          session.focus();
+        } else {
+          session.insertParagraphAfter(lastIndex);
+        }
+      }}
       onBeforeInput={(event) => {
         const type = (event.nativeEvent as InputEvent).inputType || '';
         // 浏览器自带的撤销会绕过我们的快照栈。
@@ -371,10 +444,9 @@ export function WysiwygEditor() {
           else session.handleRedo();
           return;
         }
-        // 根节点本身不是编辑面：落在根上的输入会让文本游离在块外。
-        if (event.target === surfaceRef.current) event.preventDefault();
       }}
       onPaste={(event) => {
+        if ((event.target as Element).closest('textarea,input')) return;
         if (session.handlePaste(event.nativeEvent)) event.preventDefault();
       }}
       style={{ fontFamily: settings.appearance.font_family }}
@@ -389,6 +461,9 @@ export function WysiwygEditor() {
             startLine={block.startLine}
             editable={block.editable}
             skipRender={snapshot.skipRenderIndex === index}
+            renderRevision={snapshot.renderRevision}
+            emptyDocument={blockDocument.source.trim().length === 0}
+            count={blockDocument.blocks.length}
             documentPath={currentFile}
             workflowViewerEnabled={settings.workflow?.render_in_preview !== false}
             scrollRoot={scrollRoot}
@@ -397,21 +472,18 @@ export function WysiwygEditor() {
             onInput={(position) => session.handleInput(position)}
             onKeyDown={handleBlockKeyDown}
             onBlurBlock={(position) => session.normalizeBlock(position)}
-            onCompositionChange={(composing) => session.markComposing(composing)}
+            onCompositionChange={(composing, position) => session.markComposing(composing, position)}
             onCommitCode={(position, code, language) => { session.writeCodeBlock(position, code, language); }}
             onInlineClick={handleInlineClick}
             onEditSource={handleEditSource}
             onDeleteBlock={(position) => session.deleteBlock(position)}
             onInsertAfter={(position) => session.insertParagraphAfter(position)}
+            onMove={(from, to) => session.moveBlock(from, to)}
+            onDuplicate={(position) => session.duplicateBlock(position)}
           />
         ))}
       </article>
-      {isEmpty && (
-        <div className="wysiwyg-empty-state">
-          <strong>开始写作</strong>
-          <span>输入内容即可看到排版结果，Markdown 标记会自动隐藏。</span>
-        </div>
-      )}
+      <WysiwygChrome session={session} surface={scrollRoot} version={snapshot.version} pinned={Boolean(settings.editor.pin_toolbar)} />
       {sourcePopup && popupBlock && (
         <SourcePopup
           title={sourcePopup.title}
@@ -419,11 +491,11 @@ export function WysiwygEditor() {
           onApply={(next) => {
             session.replaceBlock(sourcePopup.index, next);
             setSourcePopup(null);
-            surfaceRef.current?.focus();
+            session.focus();
           }}
           onClose={() => {
             setSourcePopup(null);
-            surfaceRef.current?.focus();
+            session.focus();
           }}
         />
       )}
@@ -441,7 +513,7 @@ export function WysiwygEditor() {
         <InlinePopup
           target={inlineTarget.target}
           anchor={inlineTarget.anchor}
-          autoFocus={false}
+          autoFocus={inlineTarget.autoFocus ?? false}
           language={settings.appearance.language}
           onApply={(fields) => {
             session.replaceRange(inlineTarget.target.from, inlineTarget.target.to, inlineTargetMarkdown(inlineTarget.target, fields));

@@ -71,5 +71,32 @@ it('serializes task items from the checkbox state', () => {
 });
 
 it('refuses to serialize block types that are not editable in place', () => {
-  assert.throws(() => serializeBlockMarkdown('table', [elementNode('table', {}, [])]), /不支持就地编辑/);
+  assert.throws(() => serializeBlockMarkdown('fence', []), /不支持就地编辑/);
+});
+
+it('ignores renderer whitespace outside the paragraph and keeps the DOM path', () => {
+  const result = serializeBlockMarkdown('paragraph', [textNode('\n'), p(textNode('正文')), textNode('\n')]);
+  assert.equal(result.markdown, '正文');
+  assert.deepEqual(result.containers, [{ path: [1], contentOffset: 0, escapeLineStart: true }]);
+});
+
+it('unwraps the rendered blockquote without dropping its content', () => {
+  const result = serializeBlockMarkdown('blockquote', [
+    elementNode('blockquote', {}, [textNode('\n'), p(textNode('引用正文')), textNode('\n')]),
+    textNode('\n'),
+  ]);
+  assert.equal(result.markdown, '> 引用正文');
+  assert.deepEqual(result.containers, [{ path: [0, 1], contentOffset: 2, escapeLineStart: false }]);
+});
+
+it('serializes editable table cells through renderer wrappers with alignment and escaped pipes', () => {
+  const nodes = [elementNode('div', { class: 'table-resize-wrap' }, [elementNode('table', {}, [
+    elementNode('thead', {}, [elementNode('tr', {}, [elementNode('th', { style: 'text-align:center' }, [textNode('标题')]), elementNode('th', {}, [textNode('B')])])]),
+    elementNode('tbody', {}, [elementNode('tr', {}, [elementNode('td', {}, [textNode('a|b')]), elementNode('td', {}, [strong(textNode('重点'))])])]),
+  ])])];
+  const result = serializeBlockMarkdown('table', nodes);
+  assert.equal(result.markdown, '| 标题 | B |\n| :---: | --- |\n| a\\|b | **重点** |');
+  assert.equal(result.containers.length, 4);
+  assert.deepEqual(result.containers[0].path, [0, 0, 0, 0, 0]);
+  assert.equal(result.containers[2].escapePipes, true);
 });
