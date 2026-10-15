@@ -69,6 +69,41 @@ it('replaces one block source without touching the rest of the document', () => 
   assert.equal(next.blocks[2].startLine, 5);
 });
 
+it('keeps media and display math blocks read-only', () => {
+  const document = splitMarkdownDocument('@[video](demo.mp4)\n\n$$\nE = mc^2\n$$\n\n普通段落\n');
+  assert.deepEqual(document.blocks.map(block => [block.kind, block.editable]), [
+    ['paragraph', false],
+    ['paragraph', false],
+    ['paragraph', true],
+  ]);
+});
+
+it('keeps structures the inline serializer cannot round-trip read-only', () => {
+  const source = [
+    '- 普通项',
+    '- 带代码的项',
+    '  ```ts',
+    '  const a = 1;',
+    '  ```',
+    '',
+    '> 纯段落引用',
+    '',
+    '> 引用里的列表',
+    '> - 项',
+    '',
+    '```ts',
+    'const b = 2;',
+    '```',
+  ].join('\n') + '\n';
+  const document = splitMarkdownDocument(source);
+  assert.deepEqual(document.blocks.map(block => [block.kind, block.editable]), [
+    ['list', false],
+    ['blockquote', true],
+    ['blockquote', false],
+    ['fence', false],
+  ]);
+});
+
 it('keeps CRLF intact when a block is replaced', () => {
   const document = splitMarkdownDocument('第一段\r\n\r\n第二段\r\n');
   const next = replaceBlockSource(document, document.blocks[0], '改过的第一段');

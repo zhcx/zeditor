@@ -6,6 +6,7 @@
  * 不依赖 DOM 与 React，可直接在 node:test 中断言。
  */
 import { markdownRenderer } from '../markdownPipeline.ts';
+import { findMediaEmbeds } from '../media.ts';
 
 export type WysiwygBlockKind =
   | 'heading'
@@ -71,6 +72,23 @@ export function detectEol(source: string): '\n' | '\r\n' {
   return source.includes('\r\n') ? '\r\n' : '\n';
 }
 
+/**
+ * 只有「DOM 序列化能完整往返」的块才允许原地编辑，否则回写会丢内容：
+ * - 媒体嵌入渲染成播放器后无法从 DOM 还原语法；
+ * - 块级公式渲染成 KaTeX 结构，正文编辑会破坏它（行内公式不受影响）；
+ * - 围栏代码在文本容器里是只读岛屿，列表或引用中出现时整块重写会丢掉它；
+ * - 引用里嵌套列表 / 表格同理（逐行前缀处理不在 v1 范围内）。
+ */
+function isEditableBlock(kind: WysiwygBlockKind, source: string): boolean {
+  if (!EDITABLE_KINDS.has(kind)) return false;
+  if (findMediaEmbeds(source).length > 0) return false;
+  if (/^\s*(?:\$\$|\\\[)/.test(source)) return false;
+  if (/^[ \t]*(?:```|~~~)/m.test(source)) return false;
+  if (kind === 'blockquote' && /^[ \t]*>[ \t]*(?:[-*+]|\d+[.)])[ \t]/m.test(source)) return false;
+  if (kind === 'blockquote' && /^[ \t]*>[ \t]*\|/m.test(source)) return false;
+  return true;
+}
+
 /** 按行切分并记录每行首字符的偏移；结尾换行不会产生额外的空行。 */
 function indexLines(source: string): SourceLine[] {
   const lines: SourceLine[] = [];
@@ -112,7 +130,7 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
       offset,
       length,
       source: source.slice(offset, offset + length),
-      editable: EDITABLE_KINDS.has(kind),
+      editable: isEditableBlock(kind, source.slice(offset, offset + length)),
     });
   }
 
