@@ -1,7 +1,7 @@
 import { AppIcon } from './components/Icons/AppIcon';
 import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useCallback, useState, lazy, Suspense } from 'react';
-import { useAppStore } from './stores/appStore';
+import { useAppStore, type WorkspaceMode, type PersistentWorkspaceMode } from './stores/appStore';
 import { useAIStore } from './stores/aiStore';
 import { useWebDavStore } from './stores/webdavStore';
 import { useS3Store } from './stores/s3Store';
@@ -29,6 +29,8 @@ const ConverterDialog = lazy(() => import('./components/ConverterDialog/Converte
 const PresentationView = lazy(() => import('./components/Presentation/PresentationView').then(m => ({ default: m.PresentationView })));
 const AIPalette = lazy(() => import('./components/AIPalette/AIPalette').then(m => ({ default: m.AIPalette })));
 const DocumentSwitcher = lazy(() => import('./components/DocumentSwitcher/DocumentSwitcher').then(m => ({ default: m.DocumentSwitcher })));
+const WysiwygEditor = lazy(() => import('./components/Wysiwyg/WysiwygEditor').then(m => ({ default: m.WysiwygEditor })));
+const ModeChooserDialog = lazy(() => import('./components/Onboarding/ModeChooserDialog').then(m => ({ default: m.ModeChooserDialog })));
 const EncodingDialog = lazy(() => import('./components/Encoding/EncodingDialog').then(m => ({ default: m.EncodingDialog })));
 import { getCurrentWebviewWindow } from '@tauri-apps/api/webviewWindow';
 import { initMcpDispatcher } from './services/mcpDispatcher';
@@ -50,6 +52,8 @@ import './styles/workbench.css';
 import './styles/comfort.css';
 import './styles/icons.css';
 import './styles/typography.css';
+import './styles/wysiwyg.css';
+import './styles/onboarding.css';
 import { contentFontStack, typographyCssVariables } from './utils/appearanceSettings';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
 
@@ -96,6 +100,9 @@ function App() {
   const [proofreadPanelWidth, setProofreadPanelWidth] = useState(280);
   const [chatbotPanelWidth, setChatbotPanelWidth] = useState(340);
   const [previewScrollElement, setPreviewScrollElement] = useState<HTMLDivElement | null>(null);
+  /** 设置读取完成前不弹首次选择框，避免闪一下又被持久模式顶掉。 */
+  const [settingsLoaded, setSettingsLoaded] = useState(false);
+  const [modeChoiceSaving, setModeChoiceSaving] = useState(false);
   const [previewRenderVersion, setPreviewRenderVersion] = useState(0);
   const [activeEditorLine, setActiveEditorLine] = useState(1);
 
@@ -409,8 +416,13 @@ function App() {
 
   useEffect(() => {
     void loadSettings().then(() => {
-      useWebDavStore.getState().initialize(useAppStore.getState().settings.webdav);
-      useS3Store.getState().initialize(useAppStore.getState().settings.s3);
+      const store = useAppStore.getState();
+      useWebDavStore.getState().initialize(store.settings.webdav);
+      useS3Store.getState().initialize(store.settings.s3);
+      // 恢复用户上次选择的编辑方式（未选择过则保持源码对照，并由首次选择框引导）。
+      const persisted = store.settings.editor.mode;
+      if (persisted === 'split' || persisted === 'wysiwyg') store.setMode(persisted);
+      setSettingsLoaded(true);
     });
   }, [loadSettings]);
 
@@ -521,13 +533,36 @@ function App() {
     return () => { unlisten.then(fn => fn()); };
   }, [requestAppClose]);
 
+  // 沉浸模式是临时态：Esc 回到用户选择的持久模式（默认源码对照）。
   useEffect(() => {
-    if (mode === 'split') return;
+    if (mode === 'split' || mode === 'wysiwyg') return;
     const exitImmersiveWorkspace = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') useAppStore.getState().setMode('split');
+      if (event.key !== 'Escape') return;
+      const store = useAppStore.getState();
+      store.setMode(store.settings.editor.mode ?? 'split');
     };
     window.addEventListener('keydown', exitImmersiveWorkspace);
     return () => window.removeEventListener('keydown', exitImmersiveWorkspace);
+  }, [mode]);
+
+  // Ctrl+Alt+M：在源码对照与所见即所得之间切换；沉浸模式下切到另一种持久模式。
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (!(event.ctrlKey || event.metaKey) || !event.altKey || event.shiftKey || event.isComposing) return;
+      if (event.key.toLowerCase() !== 'm') return;
+      event.preventDefault();
+      const store = useAppStore.getState();
+      // 在两种持久模式之间切换；处于沉浸态时以「持久模式的另一种」为目标。
+      const persistent = store.settings.editor.mode === 'wysiwyg' ? 'wysiwyg' : 'split';
+      const target: WorkspaceMode = mode === 'wysiwyg'
+        ? 'split'
+        : mode === 'split'
+          ? 'wysiwyg'
+          : (persistent === 'wysiwyg' ? 'split' : 'wysiwyg');
+      store.setMode(target);
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
   }, [mode]);
 
   useEffect(() => {
@@ -748,6 +783,32 @@ function App() {
     applyThemeToDocument(nextTheme);
     void useAppStore.getState().saveSettings(nextSettings);
   }, []);
+
+  // 首次启动（设置里没有 editor.mode）时引导选择编辑方式；关闭或 Esc 视为选择源码对照。
+  const persistedMode = settings.editor.mode;
+  const showModeChooser = settingsLoaded && persistedMode !== 'split' && persistedMode !== 'wysiwyg';
+
+  const chooseMode = useCallback(async (choice: PersistentWorkspaceMode) => {
+    const latest = useAppStore.getState();
+    setModeChoiceSaving(true);
+    try {
+      await latest.saveSettings({ ...latest.settings, editor: { ...latest.settings.editor, mode: choice } });
+      latest.setMode(choice);
+    } finally {
+      setModeChoiceSaving(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!showModeChooser) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape') return;
+      event.preventDefault();
+      void chooseMode('split');
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [chooseMode, showModeChooser]);
 
   const handlePointerUp = useCallback(() => {
     if (isDragging.current) {
@@ -1043,6 +1104,7 @@ function App() {
           settingsOpen={settingsOpen}
           immersive={mode === 'immersive'}
           zen={mode === 'zen'}
+          wysiwyg={mode === 'wysiwyg'}
           theme={settings.appearance.theme}
           activeView={activityView}
           sidebarVisible={sidebarVisible}
@@ -1056,13 +1118,18 @@ function App() {
             void latest.saveSettings({ ...latest.settings, editor: { ...latest.settings.editor, pin_toolbar: !latest.settings.editor.pin_toolbar } })
               .catch(error => useAIStore.getState().setStatus('error', `保存工具栏设置失败：${String(error)}`));
           }}
+          onSelectSplit={() => useAppStore.getState().setMode('split')}
+          onSelectWysiwyg={() => useAppStore.getState().setMode('wysiwyg')}
           onSelectImmersive={() => useAppStore.getState().setMode('immersive')}
           onSelectZen={() => useAppStore.getState().setMode('zen')}
-          onExitImmersive={() => useAppStore.getState().setMode('split')}
+          onExitImmersive={() => {
+            const store = useAppStore.getState();
+            store.setMode(store.settings.editor.mode ?? 'split');
+          }}
         />
         <div className="app-workbench-content">
           <div className="app-body">
-          {mode === 'split' && (sidebarVisible || outlineVisible) && (
+          {(mode === 'split' || mode === 'wysiwyg') && (sidebarVisible || outlineVisible) && (
           <>
             <Sidebar style={{ width: sidebarWidth }} view={activityView} />
             <div
@@ -1186,6 +1253,20 @@ function App() {
                 </div>
               </section>
             </>
+          ) : mode === 'wysiwyg' ? (
+            <section className="document-pane wysiwyg-workspace-pane">
+              <div className="document-pane-tabs">
+                <TabsBar />
+              </div>
+              {settings.editor.pin_toolbar && (
+                <div className="editor-pane-toolbar">
+                  <Toolbar />
+                </div>
+              )}
+              <Suspense fallback={<div className="editor-container editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
+                <WysiwygEditor />
+              </Suspense>
+            </section>
           ) : (
             <section
               className={`immersive-workspace immersive-${immersivePolicy.kind}`}
@@ -1276,6 +1357,11 @@ function App() {
         </div>
       </div>
       <StatusBar />
+      {showModeChooser && (
+        <Suspense fallback={null}>
+          <ModeChooserDialog busy={modeChoiceSaving} onChoose={(choice) => { void chooseMode(choice); }} />
+        </Suspense>
+      )}
       {settingsOpen && (
         <Suspense fallback={null}>
           <SettingsPanel />

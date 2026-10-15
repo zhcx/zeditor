@@ -73,6 +73,11 @@ const INPUT_ENGINE_OPTIONS = [
   { value: 'textarea', label: '传统输入层', description: '旧版 WebView 兼容' },
 ];
 
+const WORKSPACE_MODE_OPTIONS = [
+  { value: 'split', label: '源码对照', description: '编辑器 + 实时预览' },
+  { value: 'wysiwyg', label: '所见即所得', description: '直接在渲染结果上编辑' },
+];
+
 const IMAGE_SERVICE_OPTIONS = [
   { value: 'local', label: '本地' },
   { value: 'cloudinary', label: 'Cloudinary' },
@@ -662,6 +667,23 @@ export function SettingsPanel() {
 
           {activeTab === 'editor' && (
             <div className="settings-section">
+              <div className="setting-item">
+                <label>
+                  默认编辑模式
+                  <small>启动时使用的编辑方式，可用 Ctrl+Alt+M 随时切换</small>
+                </label>
+                <SettingsSelect
+                  ariaLabel="默认编辑模式"
+                  value={localSettings.editor.mode || 'split'}
+                  options={WORKSPACE_MODE_OPTIONS}
+                  onChange={(mode) =>
+                    setLocalSettings({
+                      ...localSettings,
+                      editor: { ...localSettings.editor, mode: mode as 'split' | 'wysiwyg' },
+                    })
+                  }
+                />
+              </div>
               <div className="setting-item">
                 <label>自动保存间隔 (ms)</label>
                 <input

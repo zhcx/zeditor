@@ -11,11 +11,14 @@ interface ActivityBarProps {
   settingsOpen: boolean;
   immersive: boolean;
   zen: boolean;
+  wysiwyg: boolean;
   theme: string;
   onSelectView: (view: ActivityView) => void;
   onOpenChat: () => void;
   onOpenSettings: () => void;
   onToggleTheme: () => void;
+  onSelectSplit: () => void;
+  onSelectWysiwyg: () => void;
   onSelectImmersive: () => void;
   onSelectZen: () => void;
   onExitImmersive: () => void;
@@ -23,13 +26,13 @@ interface ActivityBarProps {
   onToggleToolbar: () => void;
 }
 
-const ActivityIconNames = {"explorer":"folder","search":"search","ai":"assistant","immersive":"book","zen":"penLine","theme":"sun","settings":"settings","format":"format"} as const satisfies Record<string, IconName>;
+const ActivityIconNames = {"explorer":"folder","search":"search","ai":"assistant","immersive":"book","zen":"penLine","wysiwyg":"penLine","theme":"sun","settings":"settings","format":"format"} as const satisfies Record<string, IconName>;
 
-function ActivityIcon({ name }: { name: 'explorer' | 'search' | 'ai' | 'immersive' | 'zen' | 'theme' | 'settings' | 'format' }) {
+function ActivityIcon({ name }: { name: 'explorer' | 'search' | 'ai' | 'immersive' | 'zen' | 'wysiwyg' | 'theme' | 'settings' | 'format' }) {
   return <AppIcon name={ActivityIconNames[name]} />;
 }
 
-export function ActivityBar({ activeView, sidebarVisible, chatbotVisible, settingsOpen, immersive, zen, theme, onSelectView, onOpenChat, onOpenSettings, onToggleTheme, onSelectImmersive, onSelectZen, onExitImmersive, toolbarPinned, onToggleToolbar }: ActivityBarProps) {
+export function ActivityBar({ activeView, sidebarVisible, chatbotVisible, settingsOpen, immersive, zen, wysiwyg, theme, onSelectView, onOpenChat, onOpenSettings, onToggleTheme, onSelectSplit, onSelectWysiwyg, onSelectImmersive, onSelectZen, onExitImmersive, toolbarPinned, onToggleToolbar }: ActivityBarProps) {
   const [modeMenuOpen, setModeMenuOpen] = useState(false);
   const modePickerRef = useRef<HTMLDivElement>(null);
   const isDark = theme === 'system'
@@ -69,18 +72,28 @@ export function ActivityBar({ activeView, sidebarVisible, chatbotVisible, settin
         <div className="activity-immersive-picker" ref={modePickerRef}>
           <button
             type="button"
-            className={`activity-bar-button ${immersive || zen ? 'active' : ''}`}
+            className={`activity-bar-button ${immersive || zen || wysiwyg ? 'active' : ''}`}
             onClick={() => setModeMenuOpen((open) => !open)}
-            title="沉浸模式"
-            aria-label="选择沉浸模式"
+            title="编辑模式"
+            aria-label="选择编辑模式"
             aria-haspopup="menu"
             aria-expanded={modeMenuOpen}
           >
-            <ActivityIcon name={zen ? 'zen' : 'immersive'} />
+            <ActivityIcon name={wysiwyg ? 'format' : zen ? 'zen' : 'immersive'} />
           </button>
           {modeMenuOpen && (
-            <div className="immersive-mode-menu" role="menu" aria-label="选择沉浸模式">
-              <div className="immersive-mode-menu-title">选择沉浸模式</div>
+            <div className="immersive-mode-menu" role="menu" aria-label="选择编辑模式">
+              <div className="immersive-mode-menu-title">选择编辑模式</div>
+              <button type="button" className={`immersive-mode-option ${!immersive && !zen && !wysiwyg ? 'selected' : ''}`} role="menuitemradio" aria-checked={!immersive && !zen && !wysiwyg} onClick={() => { onSelectSplit(); setModeMenuOpen(false); }}>
+                <span className="immersive-mode-option-icon"><ActivityIcon name="format" /></span>
+                <span><strong>源码对照</strong><small>左侧源码，右侧实时预览</small></span>
+                <span className="immersive-mode-check">{!immersive && !zen && !wysiwyg ? <AppIcon name="check" size={14} /> : ''}</span>
+              </button>
+              <button type="button" className={`immersive-mode-option ${wysiwyg ? 'selected' : ''}`} role="menuitemradio" aria-checked={wysiwyg} onClick={() => { onSelectWysiwyg(); setModeMenuOpen(false); }}>
+                <span className="immersive-mode-option-icon"><ActivityIcon name="wysiwyg" /></span>
+                <span><strong>所见即所得</strong><small>像写文档一样直接编辑，不显示标记</small></span>
+                <span className="immersive-mode-check">{wysiwyg ? <AppIcon name="check" size={14} /> : ''}</span>
+              </button>
               <button type="button" className={`immersive-mode-option ${immersive ? 'selected' : ''}`} role="menuitemradio" aria-checked={immersive} onClick={() => { onSelectImmersive(); setModeMenuOpen(false); }}>
                 <span className="immersive-mode-option-icon"><ActivityIcon name="immersive" /></span>
                 <span><strong>沉浸阅读</strong><small>隐藏编辑器，专注阅读预览</small></span>
@@ -91,7 +104,7 @@ export function ActivityBar({ activeView, sidebarVisible, chatbotVisible, settin
                 <span><strong>沉浸写作</strong><small>隐藏预览与侧栏，专注写作</small></span>
                 <span className="immersive-mode-check">{zen ? <AppIcon name="check" size={14} /> : ''}</span>
               </button>
-              {(immersive || zen) && <button type="button" className="immersive-mode-exit" role="menuitem" onClick={() => { onExitImmersive(); setModeMenuOpen(false); }}>返回分屏模式</button>}
+              {(immersive || zen) && <button type="button" className="immersive-mode-exit" role="menuitem" onClick={() => { onExitImmersive(); setModeMenuOpen(false); }}>退出沉浸模式</button>}
             </div>
           )}
         </div>
