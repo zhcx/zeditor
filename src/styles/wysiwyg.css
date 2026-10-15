@@ -13,13 +13,35 @@
   padding: 32px 48px 45vh;
 }
 
-.wysiwyg-block {
+.wysiwyg-block-shell {
   position: relative;
 }
+
+.wysiwyg-block {
+  position: relative;
+  padding: 2px 0;
+}
+
+.wysiwyg-block:focus { outline: none; }
+.wysiwyg-block.is-editable:focus-within { border-radius: 4px; }
 
 .wysiwyg-block.is-readonly {
   /* 只读块（表格、图表、代码块）在编辑阶段由 P2 加上悬停操作条。 */
   content-visibility: auto;
+}
+
+/* 空段落要有可点击的光标位置（contenteditable 的空块高度为 0）。 */
+.wysiwyg-block p:empty::after,
+.wysiwyg-block h1:empty::after,
+.wysiwyg-block h2:empty::after,
+.wysiwyg-block h3:empty::after,
+.wysiwyg-block h4:empty::after,
+.wysiwyg-block h5:empty::after,
+.wysiwyg-block h6:empty::after {
+  content: '';
+  display: inline-block;
+  width: 1px;
+  height: 1em;
 }
 
 .wysiwyg-empty-state {
