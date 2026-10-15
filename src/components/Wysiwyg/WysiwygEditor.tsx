@@ -329,8 +329,15 @@ export function WysiwygEditor() {
       });
       return;
     }
-    // 链接保留浏览器行为（外部链接由系统浏览器打开），只对公式 / 脚注 / Wiki 弹编辑窗。
-    if (target.kind === 'link') return;
+    // contenteditable 里浏览器不会跟随链接：`Ctrl/Cmd+点击` 打开，普通点击进入编辑弹窗。
+    if (target.kind === 'link' && (event.ctrlKey || event.metaKey)) {
+      const url = target.url?.text ?? '';
+      if (url) {
+        event.preventDefault();
+        openUrl(url);
+      }
+      return;
+    }
     setInlineTarget({ target, anchor });
   }, [session, settings.editor.inline_popups]);
 
