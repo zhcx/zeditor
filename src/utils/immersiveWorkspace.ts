@@ -1,4 +1,6 @@
-export type WorkspaceMode = 'split' | 'immersive' | 'zen';
+import type { WorkspaceMode } from './workspaceMode.ts';
+
+export type { WorkspaceMode };
 
 export interface ImmersiveWorkspacePolicy {
   active: boolean;
@@ -13,7 +15,8 @@ export function getImmersiveWorkspacePolicy(
   mode: WorkspaceMode,
   chatbotVisible: boolean,
 ): ImmersiveWorkspacePolicy {
-  const active = mode !== 'split';
+  // 只有沉浸写作 / 沉浸阅读是沉浸态：源码对照与所见即所得都是常规工作区。
+  const active = mode === 'immersive' || mode === 'zen';
 
   return {
     active,

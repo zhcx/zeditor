@@ -267,6 +267,9 @@ pub struct EditorSettings {
     pub check_local_links: bool,
     #[serde(default = "default_true")]
     pub inline_popups: bool,
+    /// 用户选择的编辑方式："split" 或 "wysiwyg"；缺省表示尚未选择（首次启动会引导选择）。
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -387,6 +390,7 @@ impl Default for Settings {
                 pin_toolbar: false,
                 check_local_links: default_check_local_links(),
                 inline_popups: true,
+                mode: None,
             },
             image_hosting: ImageHostingSettings {
                 active_service: "local".into(),

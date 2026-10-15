@@ -1194,7 +1194,7 @@ function App() {
               {immersivePolicy.showOutline && (
                 <Suspense fallback={null}>
                   <ImmersiveOutline
-                    mode={mode}
+                    mode={mode === 'zen' ? 'zen' : 'immersive'}
                     collapsed={immersiveOutlineCollapsed}
                     previewScrollElement={immersivePreviewScrollElement}
                     onToggle={() => setImmersiveOutlineCollapsed((collapsed) => !collapsed)}

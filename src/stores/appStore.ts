@@ -10,6 +10,7 @@ import { readStoredStringArray } from '../utils/storage';
 import { useWebDavStore } from './webdavStore';
 import { useS3Store } from './s3Store';
 import { detectSystemLanguage, normalizeLanguage, type AppLanguage } from '../i18n';
+import type { WorkspaceMode, PersistentWorkspaceMode } from '../utils/workspaceMode';
 import type { AgentSettings } from '../types/agent';
 import type { ConverterDialogAction } from '../components/ConverterDialog/ConverterDialog';
 import { isConvertibleDocumentName } from '../utils/documentFormats';
@@ -63,6 +64,11 @@ export interface Settings {
      * - 'textarea'：供不支持 EditContext 的旧版 WebView 兼容回退。
      */
     input_engine?: 'textarea' | 'editContext';
+    /**
+     * 用户选择的编辑方式：'split' 源码对照、'wysiwyg' 所见即所得。
+     * 未定义表示从未选择过（首次启动会弹出选择框）；沉浸模式是临时态，不写这里。
+     */
+    mode?: PersistentWorkspaceMode;
   };
   image_hosting: {
     active_service: string;
@@ -231,6 +237,10 @@ export function providerNeedsKey(provider: AIProviderId | string): boolean {
   return provider !== 'ollama';
 }
 
+// 工作区模式的类型定义放在 utils 里（immersiveWorkspace 也要用），这里再导出一次，
+// 让 store 的既有调用方继续从 appStore 取类型。
+export type { WorkspaceMode, PersistentWorkspaceMode };
+
 export interface Tab {
   id: string;
   title: string;
@@ -275,7 +285,7 @@ interface ConverterInstallProgress {
 
 interface AppState {
   content: string;
-  mode: 'split' | 'immersive' | 'zen';
+  mode: WorkspaceMode;
   splitRatio: number;
   currentFile: string | null;
   settings: Settings;
@@ -303,7 +313,7 @@ interface AppState {
   reopenTabWithEncoding: (tabId: string, encoding: TextEncoding, cancelled?: () => boolean) => Promise<void>;
 
   setContent: (content: string) => void;
-  setMode: (mode: 'split' | 'immersive' | 'zen') => void;
+  setMode: (mode: WorkspaceMode) => void;
   setSplitRatio: (ratio: number) => void;
   setCurrentFile: (file: string | null) => void;
   setSettings: (settings: Settings) => void;
@@ -681,7 +691,14 @@ export const useAppStore = create<AppState>((set, get) => ({
     get().updateWordCount();
   },
 
-  setMode: (mode) => set({ mode }),
+  setMode: (mode) => {
+    set({ mode });
+    // 沉浸写作 / 沉浸阅读是临时态：只切运行时视图，不覆盖用户选择的默认编辑方式。
+    if (mode !== 'split' && mode !== 'wysiwyg') return;
+    const latest = get().settings;
+    if (latest.editor.mode === mode) return;
+    void get().saveSettings({ ...latest, editor: { ...latest.editor, mode } });
+  },
 
   setSplitRatio: (ratio) => set({ splitRatio: Math.max(0.1, Math.min(0.9, ratio)) }),
 
