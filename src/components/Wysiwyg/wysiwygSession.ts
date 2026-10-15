@@ -341,6 +341,36 @@ export class WysiwygSession {
     this.applySource(this.document.source.slice(0, from) + text + this.document.source.slice(to), caret ?? from + text.length);
   }
 
+  /** 删除块（悬停操作条「删除」）。 */
+  deleteBlock(index: number): boolean {
+    if (!this.document.blocks[index]) return false;
+    this.pushUndo({ coalesce: false });
+    const removed = removeBlockFromSource(this.document, index);
+    return this.applySource(removed.source, removed.caret);
+  }
+
+  /** 在指定块之后插入一个空段落并落光标（悬停操作条「在下方插入」）。 */
+  insertParagraphAfter(index: number): boolean {
+    const block = this.document.blocks[index];
+    if (!block) return false;
+    this.pushUndo({ coalesce: false });
+    const insertAt = block.offset + block.length;
+    const gap = `${this.document.eol}${this.document.eol}`;
+    return this.applySource(
+      this.document.source.slice(0, insertAt) + gap + this.document.source.slice(insertAt),
+      insertAt + gap.length,
+    );
+  }
+
+  /** 用新的块源码替换（源码弹窗保存）。 */
+  replaceBlock(index: number, source: string): boolean {
+    const block = this.document.blocks[index];
+    if (!block) return false;
+    if (source === block.source) return false;
+    this.pushUndo({ coalesce: false });
+    return this.applyBlockSource(block, source, block.offset);
+  }
+
   /** 代码块内容写回：围栏样式沿用原样，语言缺省时沿用原有信息串。 */
   writeCodeBlock(index: number, code: string, language?: string): boolean {
     const block = this.document.blocks[index];
@@ -417,6 +447,22 @@ export class WysiwygSession {
     this.pendingCaret = null;
     this.lastCaret = caret;
     this.applySelection(caret, caret);
+  }
+
+  /** 鼠标点击位置 → 块索引与文档偏移（行内目标定位用）。 */
+  blockPositionOfEvent(event: MouseEvent): { index: number; offset: number; blockStart: number } | null {
+    const target = event.target;
+    if (!(target instanceof Node)) return null;
+    const element = target.nodeType === 1 ? target as HTMLElement : target.parentElement;
+    const host = element?.closest<HTMLElement>('[data-block-index]');
+    const rawIndex = host?.dataset.blockIndex;
+    if (rawIndex === undefined) return null;
+    const index = Number(rawIndex);
+    const collected = this.collectBlock(index) ?? this.collectBlockForOffset(index);
+    if (!collected) return null;
+    const local = this.containerOffsetOfPoint(collected, target, 0);
+    if (local === null) return null;
+    return { index, offset: collected.block.offset + local, blockStart: collected.block.offset };
   }
 
   /** 控制器用：块索引 → 元素（滚动定位）。 */

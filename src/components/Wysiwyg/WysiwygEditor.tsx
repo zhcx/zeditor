@@ -1,15 +1,23 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
+import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { useAppStore } from '../../stores/appStore';
 import { useAIStore } from '../../stores/aiStore';
 import { renderMarkdownSource } from '../../utils/markdownPipeline';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
-import { splitMarkdownDocument, type WysiwygBlockKind, type WysiwygDocument } from '../../utils/wysiwyg/blocks';
+import type { WysiwygBlockKind, WysiwygDocument } from '../../utils/wysiwyg/blocks';
 import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
+import { findInlineTargetAt, type InlineTarget } from '../../utils/inlineTargets';
+import type { ImageSpec } from '../../utils/imageSyntax';
+import { ImagePropertiesModal } from '../Editor/ImagePropertiesModal';
+import { InlinePopup } from '../Editor/InlinePopup';
 import { WysiwygSession, type WysiwygSessionSnapshot } from './wysiwygSession';
 import { createWysiwygController } from './WysiwygController';
 import { WysiwygCodeBlock } from './WysiwygCodeBlock';
+import { BlockActions } from './BlockActions';
+import { SourcePopup } from './SourcePopup';
+import { imageSpecMarkdown, inlineTargetMarkdown } from './inlineEditing';
 
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
 const blockHtmlCache = new Map<string, string>();
@@ -24,6 +32,13 @@ function renderBlockHtml(kind: WysiwygBlockKind, source: string): string {
   const html = sanitizeRenderedHtml(renderMarkdownSource(source));
   blockHtmlCache.set(key, html);
   return html;
+}
+
+function sourcePopupTitle(kind: WysiwygBlockKind): string {
+  if (kind === 'table') return '编辑表格源码';
+  if (kind === 'fence') return '编辑代码块源码';
+  if (kind === 'html') return '编辑 HTML 块';
+  return '编辑块源码';
 }
 
 interface WysiwygBlockViewProps {
@@ -43,11 +58,16 @@ interface WysiwygBlockViewProps {
   onBlurBlock: (index: number) => void;
   onCompositionChange: (composing: boolean) => void;
   onCommitCode: (index: number, code: string, language?: string) => void;
+  onInlineClick: (event: React.MouseEvent<HTMLElement>) => void;
+  onEditSource: (index: number) => void;
+  onDeleteBlock: (index: number) => void;
+  onInsertAfter: (index: number) => void;
 }
 
 const WysiwygBlockView = memo(function WysiwygBlockView({
   index, kind, source, startLine, editable, skipRender, documentPath, workflowViewerEnabled,
-  scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange, onCommitCode,
+  scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
+  onCommitCode, onInlineClick, onEditSource, onDeleteBlock, onInsertAfter,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
 
@@ -72,6 +92,8 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
       documentPath,
       workflowViewerEnabled,
       theme,
+      // 回写要保留原始图片语法：解析失败时不要把 <img> 换成提示文本。
+      keepUnresolvedImages: true,
     });
   }, [documentPath, kind, scrollRoot, skipRender, source, theme, workflowViewerEnabled]);
 
@@ -91,6 +113,7 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         onBlur={() => onBlurBlock(index)}
         onCompositionStart={() => onCompositionChange(true)}
         onCompositionEnd={() => onCompositionChange(false)}
+        onClick={onInlineClick}
       />
       {kind === 'fence' && (
         <WysiwygCodeBlock
@@ -100,6 +123,14 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
           onCommit={onCommitCode}
         />
       )}
+      <BlockActions
+        index={index}
+        kind={kind}
+        editable={editable}
+        onEditSource={onEditSource}
+        onDelete={onDeleteBlock}
+        onInsertAfter={onInsertAfter}
+      />
     </div>
   );
 });
@@ -133,6 +164,20 @@ async function insertClipboardImage(file: File): Promise<boolean> {
   return insertImageFromBytes(dataUrl.split(',')[1], clipboardImageExtension(file.type), '粘贴的图片');
 }
 
+function openUrl(url: string): void {
+  let target = url;
+  try {
+    target = new URL(url, window.location.href).href;
+  } catch {
+    // 保持原样
+  }
+  if ('__TAURI_INTERNALS__' in window) {
+    void openExternal(target).catch(() => window.open(target, '_blank', 'noopener,noreferrer'));
+    return;
+  }
+  window.open(target, '_blank', 'noopener,noreferrer');
+}
+
 export function WysiwygEditor() {
   const { content, currentFile, settings, markEditorBootReady, setEditorView } = useAppStore(useShallow(state => ({
     content: state.content,
@@ -153,6 +198,9 @@ export function WysiwygEditor() {
     insertClipboardImage,
   }));
   const [snapshot, setSnapshot] = useState<WysiwygSessionSnapshot>(() => session.getSnapshot());
+  const [sourcePopup, setSourcePopup] = useState<{ index: number; title: string } | null>(null);
+  const [imageTarget, setImageTarget] = useState<{ target: InlineTarget; spec: ImageSpec } | null>(null);
+  const [inlineTarget, setInlineTarget] = useState<{ target: InlineTarget; anchor: { left: number; top: number } } | null>(null);
 
   const registerElement = useCallback((index: number, element: HTMLElement | null) => {
     if (element) blockElementsRef.current.set(index, element);
@@ -261,10 +309,43 @@ export function WysiwygEditor() {
     }
   }, [session]);
 
-  const blockKeys = useMemo(() => (snapshot?.document ?? splitMarkdownDocument('')).blocks
-    .map((block, index) => `${index}:${block.kind}`), [snapshot?.document]);
-  const isEmpty = (snapshot?.document.blocks.length ?? 0) === 0;
-  const blockDocument: WysiwygDocument = snapshot?.document ?? { source: '', eol: '\n', blocks: [] };
+  // 点击行内结构（链接 / 公式 / 图片）：用点击位置反查源码目标，复用既有弹窗。
+  const handleInlineClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
+    if (!(settings.editor.inline_popups ?? true)) return;
+    const position = session.blockPositionOfEvent(event.nativeEvent);
+    if (!position) return;
+    const target = findInlineTargetAt(useAppStore.getState().content, position.offset);
+    if (!target) return;
+    const anchor = { left: event.clientX, top: event.clientY };
+    if (target.kind === 'image') {
+      setImageTarget({
+        target,
+        spec: {
+          alt: target.alt?.text ?? '',
+          src: target.src?.text ?? '',
+          ...(target.title ? { title: target.title } : {}),
+          ...(target.attrs ? { attributes: target.attrs } : {}),
+        } as ImageSpec,
+      });
+      return;
+    }
+    // 链接保留浏览器行为（外部链接由系统浏览器打开），只对公式 / 脚注 / Wiki 弹编辑窗。
+    if (target.kind === 'link') return;
+    setInlineTarget({ target, anchor });
+  }, [session, settings.editor.inline_popups]);
+
+  const handleEditSource = useCallback((index: number) => {
+    const block = session.getBlocks()[index];
+    setSourcePopup({ index, title: sourcePopupTitle(block?.kind ?? 'other') });
+  }, [session]);
+
+  const blockDocument: WysiwygDocument = snapshot.document;
+  const blockKeys = useMemo(
+    () => blockDocument.blocks.map((block, index) => `${index}:${block.kind}`),
+    [blockDocument],
+  );
+  const isEmpty = blockDocument.blocks.length === 0;
+  const popupBlock = sourcePopup ? blockDocument.blocks[sourcePopup.index] ?? null : null;
 
   return (
     <div
@@ -300,7 +381,7 @@ export function WysiwygEditor() {
             source={block.source}
             startLine={block.startLine}
             editable={block.editable}
-            skipRender={snapshot?.skipRenderIndex === index}
+            skipRender={snapshot.skipRenderIndex === index}
             documentPath={currentFile}
             workflowViewerEnabled={settings.workflow?.render_in_preview !== false}
             scrollRoot={scrollRoot}
@@ -311,6 +392,10 @@ export function WysiwygEditor() {
             onBlurBlock={(position) => session.normalizeBlock(position)}
             onCompositionChange={(composing) => session.markComposing(composing)}
             onCommitCode={(position, code, language) => { session.writeCodeBlock(position, code, language); }}
+            onInlineClick={handleInlineClick}
+            onEditSource={handleEditSource}
+            onDeleteBlock={(position) => session.deleteBlock(position)}
+            onInsertAfter={(position) => session.insertParagraphAfter(position)}
           />
         ))}
       </article>
@@ -319,6 +404,55 @@ export function WysiwygEditor() {
           <strong>开始写作</strong>
           <span>输入内容即可看到排版结果，Markdown 标记会自动隐藏。</span>
         </div>
+      )}
+      {sourcePopup && popupBlock && (
+        <SourcePopup
+          title={sourcePopup.title}
+          source={popupBlock.source}
+          onApply={(next) => {
+            session.replaceBlock(sourcePopup.index, next);
+            setSourcePopup(null);
+            surfaceRef.current?.focus();
+          }}
+          onClose={() => {
+            setSourcePopup(null);
+            surfaceRef.current?.focus();
+          }}
+        />
+      )}
+      {imageTarget && (
+        <ImagePropertiesModal
+          spec={imageTarget.spec}
+          onApply={(spec) => {
+            session.replaceRange(imageTarget.target.from, imageTarget.target.to, imageSpecMarkdown(spec));
+            setImageTarget(null);
+          }}
+          onClose={() => setImageTarget(null)}
+        />
+      )}
+      {inlineTarget && (
+        <InlinePopup
+          target={inlineTarget.target}
+          anchor={inlineTarget.anchor}
+          autoFocus={false}
+          language={settings.appearance.language}
+          onApply={(fields) => {
+            session.replaceRange(inlineTarget.target.from, inlineTarget.target.to, inlineTargetMarkdown(inlineTarget.target, fields));
+            setInlineTarget(null);
+          }}
+          onOpen={openUrl}
+          onCopy={(text) => { void navigator.clipboard.writeText(text); }}
+          onDelete={() => {
+            session.replaceRange(inlineTarget.target.from, inlineTarget.target.to, '');
+            setInlineTarget(null);
+          }}
+          onJumpToDefinition={() => {
+            const definition = inlineTarget.target.definition;
+            if (definition) session.setSelectionOffsets(definition.from);
+            setInlineTarget(null);
+          }}
+          onClose={() => setInlineTarget(null)}
+        />
       )}
     </div>
   );

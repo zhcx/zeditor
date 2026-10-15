@@ -85,6 +85,81 @@
   padding: 12px 14px;
 }
 
+/* 解析不到的本地图片：保留元素本身（回写要原样保留语法），只用虚线提示。 */
+.wysiwyg-block img.is-unresolved { outline: 1px dashed var(--border-strong); }
+
+/* 块悬停操作条：只读块的「源码」入口，以及所有块的插入 / 删除。 */
+.wysiwyg-block-actions {
+  position: absolute;
+  top: 2px;
+  right: -6px;
+  display: flex;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity .12s ease;
+  z-index: 3;
+}
+
+.wysiwyg-block-shell:hover > .wysiwyg-block-actions,
+.wysiwyg-block-shell:focus-within > .wysiwyg-block-actions { opacity: 1; }
+
+.wysiwyg-block-actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 2px 6px;
+  cursor: pointer;
+}
+
+.wysiwyg-block-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.wysiwyg-block-actions button.is-danger:hover { border-color: #e5534b; color: #e5534b; }
+
+/* 块源码弹窗（表格 / 图表 / 媒体 / 块级公式 / HTML 块） */
+.wysiwyg-source-overlay { display: flex; align-items: center; justify-content: center; }
+
+.wysiwyg-source-popup {
+  width: min(720px, calc(100vw - 48px));
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-elevated);
+  box-shadow: 0 20px 48px rgba(0, 0, 0, .28);
+}
+
+.wysiwyg-source-popup header { display: flex; align-items: center; justify-content: space-between; }
+.wysiwyg-source-popup textarea {
+  min-height: 320px;
+  resize: vertical;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-panel);
+  color: var(--text-primary);
+  font-family: ui-monospace, Consolas, monospace;
+  font-size: 13px;
+  line-height: 1.6;
+  padding: 10px 12px;
+}
+
+.wysiwyg-source-popup footer { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
+.wysiwyg-source-popup footer button {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--bg-panel);
+  color: var(--text-secondary);
+  padding: 4px 10px;
+  cursor: pointer;
+}
+
+.wysiwyg-source-popup footer button.is-primary { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
 /* 空段落要有可点击的光标位置（contenteditable 的空块高度为 0）。 */
 .wysiwyg-block p:empty::after,
 .wysiwyg-block h1:empty::after,

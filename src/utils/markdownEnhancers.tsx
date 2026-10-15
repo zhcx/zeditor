@@ -281,6 +281,11 @@ export interface EnhanceRenderedMarkdownOptions {
   onOpenImageEditor?: (index: number) => void;
   /** 提供后，图片右键打开尺寸菜单。 */
   onOpenImageMenu?: (event: MouseEvent, index: number) => void;
+  /**
+   * 解析失败的图片保持 `<img>` 原样（加 `is-unresolved` 类与标题），不替换成提示文本。
+   * 所见即所得表面必须开启：替换成文本后「DOM → 源码」回写会丢掉图片。
+   */
+  keepUnresolvedImages?: boolean;
 }
 
 let mermaidSequence = 0;
@@ -519,6 +524,11 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
         if (url) {
           img.src = url;
           if (options.onContentRendered) img.addEventListener('load', notify);
+          return;
+        }
+        if (options.keepUnresolvedImages) {
+          img.classList.add('is-unresolved');
+          img.title = `无法读取图片：${source}`;
           return;
         }
         const missing = document.createElement('span');
