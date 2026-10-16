@@ -2,7 +2,7 @@
 
 日期：2026-10-16
 支线：`feature/wysiwyg-editor`
-交接时的支线顶端：`f084f90df9400091bcca4361b07da8759db7c224`（已推送到 `origin`，本地与远端一致）
+本轮工作范围：`eaa0252`..`f084f90`（共 10 个提交，已推送到 `origin`；本文自身提交在其上）
 起始基点：`eaa0252 docs: record the wysiwyg repair and its remaining limits`
 
 本文面向继续这条支线的下一位维护者或 Agent，记录这一轮改了什么、为什么这样做、哪些前提不能被破坏、怎么验证，以及还剩什么问题。
@@ -258,8 +258,9 @@ const browser = await chromium.launch({ channel: 'msedge', headless: true });
 ```powershell
 cd D:\Documents\Code\zeditor
 git rev-parse --abbrev-ref HEAD      # feature/wysiwyg-editor
-git log --oneline -10                # 顶端应为 f084f90
 git status --short                   # 应为空
+git log --oneline -1                 # 顶端包含本文档
+git log --oneline -1 f084f90         # 本轮代码的最后一个提交
 npx tsc -b --force; npm test         # 基线：552 通过
 ```
 
