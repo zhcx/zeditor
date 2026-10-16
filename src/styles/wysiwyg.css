@@ -216,17 +216,41 @@
 .wysiwyg-document .wysiwyg-block > :last-child { margin-bottom: 0; }
 .wysiwyg-document .wysiwyg-block > p { margin: 0; }
 .wysiwyg-document .wysiwyg-block :is(table, pre) { margin-block: 0; }
+/* 分隔线是唯一的例外：把上下留白压成 0 会贴在段落上，看不出是分隔线。 */
+.wysiwyg-document .wysiwyg-block[data-block-kind="hr"] > hr { margin-block: 1.5em; }
+/*
+   紧凑间距本身是对的（编辑时不必翻页），但块内边距被清成 0 之后，
+   标题与段落只差字体大小，层级读不出来。这里在壳上补一个分级上边距：
+   标题 0.9em、重块（表格/代码/引用）0.7em，其余保持 0.45em。
+ */
+.wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="heading"]) { margin-top: .9em; }
+.wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="table"]),
+.wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="fence"]),
+.wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="blockquote"]) { margin-top: .7em; }
 .wysiwyg-block[data-block-kind="table"] { content-visibility: visible; }
 .wysiwyg-block :is(td, th)[contenteditable="true"] { cursor: text; min-width: 70px; user-select: text; }
 .wysiwyg-block :is(td, th)[contenteditable="true"]:focus { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .wysiwyg-block mark { background: color-mix(in srgb, #e8c547 40%, transparent); color: inherit; }
 
-/* 块操作集中在左侧手柄中，只有悬停、键盘聚焦或展开菜单时显示。 */
-.wysiwyg-block-actions { top: 0; left: -34px; right: auto; pointer-events: auto; }
-.wysiwyg-block-shell:focus-within > .wysiwyg-block-actions { opacity: 0; pointer-events: auto; }
+/* 块操作集中在左侧手柄中，只有悬停、键盘聚焦或展开菜单时显示。
+   隐藏时必须一并关掉命中：否则一个透明的手柄会吃掉正文左侧留白的点击
+   （点左留白定位光标是常见动作，会被误判成“打开块菜单”）。 */
+.wysiwyg-block-actions { top: 0; left: -34px; right: auto; pointer-events: none; }
+.wysiwyg-block-shell:focus-within > .wysiwyg-block-actions { opacity: 0; pointer-events: none; }
 .wysiwyg-block-shell:hover > .wysiwyg-block-actions,
 .wysiwyg-block-shell > .wysiwyg-block-actions:focus-within,
 .wysiwyg-block-shell > .wysiwyg-block-actions.is-open { opacity: 1; pointer-events: auto; }
+/* 左留白是手柄的发现区：透明桥接层让指针移入留白时也能触发壳的悬停，
+   免得手柄“看不见就找不到”。它铺在手柄所在的 34px 竖条上（在壳的盒子之外），
+   所以不会挡住正文，也不会再吃掉正文区的光标定位点击。 */
+.wysiwyg-block-shell::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  right: 100%;
+  width: 34px;
+}
 .wysiwyg-block-actions .wysiwyg-block-handle { width: 28px; height: 28px; justify-content: center; border-color: transparent; background: transparent; font-size: 22px; cursor: pointer; }
 .wysiwyg-block-menu { position: absolute; top: 30px; left: 0; z-index: 80; width: 190px; padding: 5px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-elevated); box-shadow: 0 8px 24px #0004; }
 .wysiwyg-block-menu button { width: 100%; padding: 7px 10px; border: 0; background: transparent; font-size: 12px; text-align: left; }
