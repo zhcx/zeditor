@@ -38,6 +38,7 @@ import { prepareMarkdownPaste } from '../../utils/markdownPaste.ts';
 import { pointInContainer, rangeInContainer } from './domCaret.ts';
 import { parseTableAt } from '../../utils/markdownTable.ts';
 import { escapeInlineText, serializeInlineNodes } from '../../utils/wysiwyg/inlineSerialize.ts';
+import { INLINE_MARKER_TAGS, matchInlineMarker } from '../../utils/wysiwyg/inlineMarkers.ts';
 
 export interface WysiwygSessionSnapshot {
   document: WysiwygDocument;
@@ -161,7 +162,60 @@ export class WysiwygSession {
   handleInput(index: number): void {
     this.pendingIndex = index;
     if (this.composing) return;
+    this.renderInlineMarker(index);
     this.scheduleWriteBack(index);
+  }
+
+  /**
+   * 输入即渲染：光标前刚好闭合了一个行内标记时，当场把它换成真正的行内元素。
+   *
+   * 不做这一步的话，`**粗体**` 会以字面字符写回源码（`*` 是必须转义的字符，源码成了
+   * `\*\*粗体\*\*`），此后无论怎么重渲染都变不成粗体。转换只改 DOM，源码仍由正常
+   * 写回生成，因此改完 DOM 与改完源码必然一致。
+   *
+   * 组合输入期间不介入：输入法选字过程中文本还会被替换，提前改写会打断候选。
+   */
+  private renderInlineMarker(index: number): void {
+    const surface = this.accessors.getSurface();
+    const host = this.accessors.getBlockElement(index);
+    if (!surface || !host) return;
+    const selection = surface.ownerDocument.getSelection();
+    if (!selection || selection.rangeCount === 0) return;
+    const range = selection.getRangeAt(0);
+    if (!range.collapsed || !host.contains(range.startContainer)) return;
+    // 光标落在元素边界上时拿不到完整文本，等下一个字符。
+    const textNode = range.startContainer;
+    if (textNode.nodeType !== 3) return;
+    // 已经处于代码里就不再解释标记：行内代码要显示字面文本。
+    const parentElement = textNode.parentElement;
+    if (parentElement && parentElement.closest('code, pre')) return;
+    const text = textNode.textContent ?? '';
+    const match = matchInlineMarker(text, range.startOffset);
+    if (!match) return;
+    const tagName = INLINE_MARKER_TAGS[match.kind];
+    // 同种标记不能套自己：`**a**` 在已有的粗体里敲下会得到 `<strong><strong>a</strong></strong>`，
+    // 回写成源码是 `****a****`，重新解析已经不再是粗体了。
+    if (parentElement?.closest(tagName)) return;
+
+    const document_ = textNode.ownerDocument;
+    const wrapper = document_.createElement(tagName);
+    wrapper.textContent = match.content;
+    const fragment = document_.createDocumentFragment();
+    if (match.from > 0) fragment.append(document_.createTextNode(text.slice(0, match.from)));
+    fragment.append(wrapper);
+    const tail = text.slice(match.to);
+    if (tail.length > 0) fragment.append(document_.createTextNode(tail));
+    // 用 replaceChild 而不是 replaceWith：参数类型就是 Node，不必依赖 ChildNode 断言。
+    const parent = textNode.parentNode;
+    if (!parent) return;
+    parent.replaceChild(fragment, textNode);
+
+    // 光标停在标记之后，用户可以继续输入。
+    const caret = document_.createRange();
+    caret.setStartAfter(wrapper);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
   }
 
   private scheduleWriteBack(index: number): void {
