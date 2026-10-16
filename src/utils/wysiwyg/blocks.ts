@@ -120,15 +120,20 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
     if (previous && startIndex + 1 <= previous.endLine) continue;
 
     const offset = lines[startIndex].start;
-    const length = lines[endIndex].start + lines[endIndex].text.length - offset;
+    const rawLength = lines[endIndex].start + lines[endIndex].text.length - offset;
+    // 块源码不含块尾换行。列表 token 会把块尾的空行算进自己的范围（`- a\n\n` 的长度是 4 而不是 3），
+    // 空行被块吃掉后，块后的光标落点就合成不出来：在列表末尾按「在下方插入段落」或退出列表时，
+    // 空段落无处安放，光标直接落空。把换行还给块之间的间隙，落点统一由 pairEnds 合成。
+    const blockSource = source.slice(offset, offset + rawLength).replace(/(?:\r\n|\n|\r)+$/, '');
+    const length = blockSource.length;
     blocks.push({
       kind,
       startLine: startIndex + 1,
       endLine: endIndex + 1,
       offset,
       length,
-      source: source.slice(offset, offset + length),
-      editable: isEditableBlock(kind, source.slice(offset, offset + length)),
+      source: blockSource,
+      editable: isEditableBlock(kind, blockSource),
     });
   }
 

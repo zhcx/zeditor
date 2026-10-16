@@ -73,6 +73,53 @@ it('handles documents without a trailing newline and empty documents', () => {
   ]);
 });
 
+it('leaves trailing blank lines outside a list block so the caret can land there', () => {
+  // 列表 token 会把块尾空行算进自己的范围；若直接采信，块后的空段落就合成不出来，
+  // 「在下方插入段落」和空块退块都会把光标丢在无法落脚的位置。
+  // 修正后：列表与段落一致——`\n\n` 之后的空行属于块后间隙，会合出一个空段落。
+  const withCaretTarget = splitMarkdownDocument('- 一项\n\n');
+  assert.deepEqual(
+    withCaretTarget.blocks.map(({ kind, offset, length, source }) => ({ kind, offset, length, source })),
+    [
+      { kind: 'list', offset: 0, length: 4, source: '- 一项' },
+      { kind: 'paragraph', offset: 6, length: 0, source: '' },
+    ],
+  );
+
+  // 多出来的空行同样落在块后，不会堆进列表里。
+  const extraBlank = splitMarkdownDocument('- 一项\n\n\n');
+  assert.deepEqual(extraBlank.blocks.map(({ kind, offset, length }) => ({ kind, offset, length })), [
+    { kind: 'list', offset: 0, length: 4 },
+    { kind: 'paragraph', offset: 6, length: 0 },
+  ]);
+
+  // 只有一个换行时和段落一样：它只是行结束符，不是空行。
+  for (const source of ['- 一项', '- 一项\n']) {
+    const document = splitMarkdownDocument(source);
+    assert.deepEqual(
+      document.blocks.map(({ kind, offset, length }) => ({ kind, offset, length })),
+      [{ kind: 'list', offset: 0, length: 4 }],
+      `源码 ${JSON.stringify(source)} 不应凭空多出空段落`,
+    );
+  }
+
+  // 列表后面本来就有内容时，间隔不受影响。
+  const followed = splitMarkdownDocument('- 一项\n\n下一段');
+  assert.deepEqual(followed.blocks.map(({ kind, offset, length }) => ({ kind, offset, length })), [
+    { kind: 'list', offset: 0, length: 4 },
+    { kind: 'paragraph', offset: 6, length: 3 },
+  ]);
+
+  // 引用/标题原本就不会吞空行，行为保持不变。
+  assert.deepEqual(
+    splitMarkdownDocument('> 引用\n\n').blocks.map(({ kind, offset, length }) => ({ kind, offset, length })),
+    [
+      { kind: 'blockquote', offset: 0, length: 4 },
+      { kind: 'paragraph', offset: 6, length: 0 },
+    ],
+  );
+});
+
 it('replaces one block source without touching the rest of the document', () => {
   const document = splitMarkdownDocument('# 标题\n\n段落一\n\n段落二\n');
   const target = document.blocks[1];

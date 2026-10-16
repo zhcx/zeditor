@@ -2,12 +2,16 @@ import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   contentStartOffset,
+  exitEmptyItem,
+  hasTrailingEmptyQuoteLine,
   mergeBlocks,
+  mergeForward,
   setHeadingLevel,
   splitBlock,
   stripBlockPrefix,
   adjustListIndent,
 } from '../src/utils/wysiwyg/blockOps.ts';
+import { splitMarkdownDocument } from '../src/utils/wysiwyg/blocks.ts';
 
 it('reports where the block content starts', () => {
   assert.equal(contentStartOffset('# 标题', 'heading'), 2);
@@ -38,11 +42,57 @@ it('splits paragraphs, headings, quotes and list items on Enter', () => {
     tail: '4. ',
     separator: '\n',
   });
+  // 引用必须用「空引用行」分隔：单换行的 `> a\n> b` 在 CommonMark 里是同一个段落里的
+  // 软换行，显示成一个空格，用户会觉得回车没反应。
   assert.deepEqual(splitBlock({ source: '> 引用', kind: 'blockquote', caret: 4 }), {
     head: '> 引用',
     tail: '> ',
-    separator: '\n',
+    separator: '\n>\n',
   });
+});
+
+it('breaks a quote into two quote paragraphs, not one soft-wrapped line', () => {
+  const result = splitBlock({ source: '> 第一段', kind: 'blockquote', caret: 5 });
+  assert.ok(result);
+  const joined = result.head + result.separator + result.tail;
+  assert.equal(joined, '> 第一段\n>\n> ');
+  const blocks = splitMarkdownDocument(joined).blocks;
+  assert.deepEqual(blocks.map(block => block.kind), ['blockquote']);
+  // 分隔符里必须出现空引用行，否则两段会落在同一个引用段落里。
+  assert.match(blocks[0].source, /\n>\n/);
+});
+
+it('keeps the quote marker of nested quotes when splitting', () => {
+  const result = splitBlock({ source: '> > 深', kind: 'blockquote', caret: 5 });
+  assert.ok(result);
+  assert.equal(result.tail, '> > ');
+  assert.equal(splitMarkdownDocument(result.head + result.separator + result.tail).blocks[0].kind, 'blockquote');
+});
+
+it('detects the trailing empty quote line that markdown-it does not render', () => {
+  // 回车拆出的新引用段落是空的：markdown-it 不生成 <p>，DOM 里没有落点，
+  // 外壳据此补一个空段落节点。
+  const result = splitBlock({ source: '> 第一段', kind: 'blockquote', caret: 5 });
+  assert.ok(result);
+  assert.equal(hasTrailingEmptyQuoteLine(result.head + result.separator + result.tail), true);
+  // 有内容的引用行不需要补节点。
+  assert.equal(hasTrailingEmptyQuoteLine('> 第一段\n>\n> 第二段'), false);
+  assert.equal(hasTrailingEmptyQuoteLine('> 单行引用'), false);
+  // 块里的换行还可能是引用内部的空行，只有末行才算。
+  assert.equal(hasTrailingEmptyQuoteLine('>'), true);
+  assert.equal(hasTrailingEmptyQuoteLine('>   '), true);
+  // 末尾换行只是行结束符，后面没有空的引用行。
+  assert.equal(hasTrailingEmptyQuoteLine('> a\n'), false);
+  assert.equal(hasTrailingEmptyQuoteLine('> a\n>'), true);
+  assert.equal(hasTrailingEmptyQuoteLine('> a\n> '), true);
+});
+
+it('refuses to split blocks that own their own interaction surface', () => {
+  // 表格源码拆开后的第二半会被解析成 `- ` 列表项，整张表就此损坏。
+  assert.equal(splitBlock({ source: '| a | b |\n| --- | --- |\n| 1 | 2 |', kind: 'table', caret: 14 }), null);
+  assert.equal(splitBlock({ source: '```js\na\n```', kind: 'fence', caret: 8 }), null);
+  assert.equal(splitBlock({ source: '---', kind: 'hr', caret: 1 }), null);
+  assert.equal(splitBlock({ source: '<div>x</div>', kind: 'html', caret: 5 }), null);
 });
 
 it('strips the block prefix to fall back to a paragraph', () => {
@@ -55,6 +105,22 @@ it('strips the block prefix to fall back to a paragraph', () => {
 it('merges two paragraphs at the junction', () => {
   assert.deepEqual(mergeBlocks('前一段', '后一段'), { source: '前一段后一段', caret: 3 });
   assert.equal(mergeBlocks('- 列表', '段落'), null);
+  // 表格行与围栏拼进段落会被重新解析成表格 / 代码块，吞掉两侧正文。
+  assert.equal(mergeBlocks('前一段', '| a |'), null);
+  assert.equal(mergeBlocks('前一段', '```js'), null);
+});
+
+it('absorbs only plain paragraphs on forward delete', () => {
+  assert.deepEqual(mergeForward('前一段', '后一段'), { source: '前一段后一段', caret: 3 });
+  // 当前块自己的前缀保留，所以标题、列表项、引用都能吞掉下一段正文。
+  assert.deepEqual(mergeForward('## 标题', '正文'), { source: '## 标题正文', caret: 5 });
+  assert.deepEqual(mergeForward('- 一项', '续写'), { source: '- 一项续写', caret: 4 });
+  // 被吸收块带前缀时不能硬拼：前缀会变成正文里的符号。
+  assert.equal(mergeForward('前一段', '- 列表'), null);
+  assert.equal(mergeForward('前一段', '# 标题'), null);
+  assert.equal(mergeForward('前一段', '> 引用'), null);
+  assert.equal(mergeForward('前一段', '| a |'), null);
+  assert.equal(mergeForward('前一段', '```'), null);
 });
 
 it('changes heading level and clears it with level 0', () => {
@@ -68,4 +134,28 @@ it('indents and outdents list items', () => {
   assert.deepEqual(adjustListIndent('  - 一项', 'list', 'outdent'), { source: '- 一项', caret: 2 });
   assert.equal(adjustListIndent('- 一项', 'list', 'outdent'), null);
   assert.equal(adjustListIndent('段落', 'paragraph', 'indent'), null);
+});
+
+it('exits an empty list item or quote line instead of stacking another one', () => {
+  // 只标注记的空块：直接降级成段落，源码不再含块标记。
+  assert.deepEqual(exitEmptyItem({ source: '- ', kind: 'list', caret: 2 }), { source: '', caret: 0 });
+  assert.deepEqual(exitEmptyItem({ source: '1. ', kind: 'list', caret: 3 }), { source: '', caret: 0 });
+  assert.deepEqual(exitEmptyItem({ source: '- [ ] ', kind: 'list', caret: 6 }), { source: '', caret: 0 });
+  assert.deepEqual(exitEmptyItem({ source: '> ', kind: 'blockquote', caret: 2 }), { source: '', caret: 0 });
+  // 空项前的正文保留，空行把新段落与列表/引用分开，光标落在新段落。
+  assert.deepEqual(exitEmptyItem({ source: '- 甲\n- ', kind: 'list', caret: 6 }), { source: '- 甲\n\n', caret: 5 });
+  assert.deepEqual(exitEmptyItem({ source: '> 甲\n> ', kind: 'blockquote', caret: 6 }), { source: '> 甲\n\n', caret: 5 });
+  assert.deepEqual(exitEmptyItem({ source: '- 甲\n  - ', kind: 'list', caret: 8 }), { source: '- 甲\n\n', caret: 5 });
+});
+
+it('keeps stacking items when the empty item is not the last line', () => {
+  // 列表中间的空项不能把列表劈成两半，交回普通拆行。
+  assert.equal(exitEmptyItem({ source: '- 甲\n- \n- 乙', kind: 'list', caret: 6 }), null);
+  assert.equal(exitEmptyItem({ source: '> 甲\n> \n> 乙', kind: 'blockquote', caret: 6 }), null);
+  // 有内容的行不是空块。
+  assert.equal(exitEmptyItem({ source: '- 甲', kind: 'list', caret: 3 }), null);
+  assert.equal(exitEmptyItem({ source: '> 甲', kind: 'blockquote', caret: 3 }), null);
+  // 只处理列表与引用，段落与标题走普通拆行。
+  assert.equal(exitEmptyItem({ source: '', kind: 'paragraph', caret: 0 }), null);
+  assert.equal(exitEmptyItem({ source: '## ', kind: 'heading', caret: 3 }), null);
 });
