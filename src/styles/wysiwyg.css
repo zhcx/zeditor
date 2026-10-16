@@ -131,46 +131,56 @@
 .wysiwyg-block-actions button:hover { border-color: var(--accent); color: var(--accent); }
 .wysiwyg-block-actions button.is-danger:hover { border-color: #e5534b; color: #e5534b; }
 
-/* 块源码弹窗（表格 / 图表 / 媒体 / 块级公式 / HTML 块） */
-.wysiwyg-source-overlay { display: flex; align-items: center; justify-content: center; }
+/* 块源码就地编辑（表格 / 图表 / 媒体 / 块级公式 / HTML 块）：
+   面板占用块自身的位置、参与正常文档流，前后文保持原位可见。 */
+.wysiwyg-source-layer { display: flex; flex-direction: column; margin: 0; }
 
-.wysiwyg-source-popup {
-  width: min(720px, calc(100vw - 48px));
+.wysiwyg-source-toolbar {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
-  padding: 16px;
-  border: 1px solid var(--border);
-  border-radius: 12px;
-  background: var(--bg-elevated);
-  box-shadow: 0 20px 48px rgba(0, 0, 0, .28);
+  align-items: center;
+  gap: 8px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-color);
+  border-radius: 7px 7px 0 0;
+  background: var(--bg-panel);
+  font-size: 12px;
 }
 
-.wysiwyg-source-popup header { display: flex; align-items: center; justify-content: space-between; }
-.wysiwyg-source-popup textarea {
-  min-height: 320px;
+.wysiwyg-source-toolbar > strong { font-size: 12px; color: var(--text-secondary); }
+.wysiwyg-source-toolbar > span { flex: 1; color: var(--text-muted); font-size: 11px; }
+.wysiwyg-source-toolbar button {
+  border: 1px solid var(--border-color);
+  border-radius: 4px;
+  padding: 3px 10px;
+  background: var(--bg-elevated);
+  color: var(--text-secondary);
+  font: inherit;
+  cursor: pointer;
+}
+
+.wysiwyg-source-toolbar button:hover { border-color: var(--accent); color: var(--accent); }
+.wysiwyg-source-toolbar button.is-primary { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+
+.wysiwyg-source-editor {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  min-height: 120px;
   resize: vertical;
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--bg-panel);
+  border: 1px solid var(--border-color);
+  border-top: 0;
+  border-radius: 0 0 7px 7px;
+  background: var(--bg-document);
   color: var(--text-primary);
   font-family: ui-monospace, Consolas, monospace;
   font-size: 13px;
   line-height: 1.6;
-  padding: 10px 12px;
+  padding: 12px 14px;
+  tab-size: 2;
 }
 
-.wysiwyg-source-popup footer { display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-muted); }
-.wysiwyg-source-popup footer button {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  background: var(--bg-panel);
-  color: var(--text-secondary);
-  padding: 4px 10px;
-  cursor: pointer;
-}
-
-.wysiwyg-source-popup footer button.is-primary { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); }
+/* 编辑期间原渲染让位：手柄仍在壳上，但块本身不再显示。 */
+.wysiwyg-block.is-source-editing { display: none; }
 
 /* 空段落要有可点击的光标位置（contenteditable 的空块高度为 0）。 */
 .wysiwyg-block p:empty::after,
@@ -217,6 +227,15 @@
 .wysiwyg-document .wysiwyg-block-shell { margin: 0 0 .45em; }
 .wysiwyg-document .wysiwyg-block { padding: 0; }
 .wysiwyg-document .wysiwyg-block.is-editable { min-height: 1.5em; }
+/*
+   直接承载文本的段落块（刚回车出来的空段落、正在就地输入的段落）必须与渲染出的
+   <p> 使用同一行高：main.css 里 .preview-document p 的行高是 1.84，而壳自身继承
+   normal，于是「输入态 21px → 重渲染后 25.76px」每次回车都会跳一次高度，写下去
+   的段间距看起来越来越大。空段落没有内容行盒，min-height 也要同步（1.84em 与
+   1.84 行高相等），否则它仍是旧高度、与相邻段落对不齐。
+ */
+.wysiwyg-document .wysiwyg-block[data-block-kind="paragraph"] { line-height: 1.84; }
+.wysiwyg-document .wysiwyg-block[data-block-kind="paragraph"].is-editable { min-height: 1.84em; }
 .wysiwyg-document .wysiwyg-block > :first-child { margin-top: 0; }
 .wysiwyg-document .wysiwyg-block > :last-child { margin-bottom: 0; }
 .wysiwyg-document .wysiwyg-block > p { margin: 0; }
@@ -233,14 +252,36 @@
 .wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="fence"]),
 .wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="blockquote"]) { margin-top: .7em; }
 .wysiwyg-block[data-block-kind="table"] { content-visibility: visible; }
-.wysiwyg-block :is(td, th)[contenteditable="true"] { cursor: text; min-width: 70px; user-select: text; }
+/*
+   表格与阅读预览（.preview-container table）保持一致：内容宽度、合并边框、外框
+   与圆角。模板规则里的 display: block; width: 100% 会把表格画成一整行空框，
+   且编辑器里没有 .preview-container 祖先，UA 默认的 border-collapse: separate
+   让相邻单元格各画一遍边框，比预览里的单线更重。
+   宽表格仍由 .table-resize-wrap 判定溢出后出滚动条（不是预览的压缩换行），
+   这样列宽拖拽功能不受影响。
+ */
+.wysiwyg-document .wysiwyg-block[data-block-kind="table"] table {
+  display: inline-table;
+  width: auto;
+  table-layout: auto;
+  vertical-align: top;
+  border-collapse: collapse;
+  border: 1px solid var(--border-color);
+  border-radius: 0;
+  box-shadow: none;
+}
+/* 单元格最小宽度沿用模板的 108px（与预览一致），不再压到 70px。 */
+.wysiwyg-block :is(td, th)[contenteditable="true"] { cursor: text; user-select: text; }
 .wysiwyg-block :is(td, th)[contenteditable="true"]:focus { outline: 2px solid var(--accent-color); outline-offset: -2px; }
 .wysiwyg-block mark { background: color-mix(in srgb, #e8c547 40%, transparent); color: inherit; }
 
 /* 块操作集中在左侧手柄中，只有悬停、键盘聚焦或展开菜单时显示。
    隐藏时必须一并关掉命中：否则一个透明的手柄会吃掉正文左侧留白的点击
    （点左留白定位光标是常见动作，会被误判成“打开块菜单”）。 */
-.wysiwyg-block-actions { top: 0; left: -34px; right: auto; pointer-events: none; }
+/* 手柄的垂直中心对齐块首行的行盒中心：行高由块视图测量后写到壳的自定义属性上
+   （段落的 1.84 行高、各级标题、表格首格各不相同），拿不到测量值时回退到段落的
+   1.84em——与段落块的 min-height 相等，中心一致。 */
+.wysiwyg-block-actions { top: 0; left: -34px; right: auto; pointer-events: none; height: var(--wysiwyg-first-line, 1.84em); align-items: center; }
 .wysiwyg-block-shell:focus-within > .wysiwyg-block-actions { opacity: 0; pointer-events: none; }
 .wysiwyg-block-shell:hover > .wysiwyg-block-actions,
 .wysiwyg-block-shell > .wysiwyg-block-actions:focus-within,
@@ -256,7 +297,8 @@
   right: 100%;
   width: 34px;
 }
-.wysiwyg-block-actions .wysiwyg-block-handle { width: 28px; height: 28px; justify-content: center; border-color: transparent; background: transparent; font-size: 22px; cursor: pointer; }
+.wysiwyg-block-actions .wysiwyg-block-handle { width: 28px; height: 28px; justify-content: center; border-color: transparent; background: transparent; cursor: pointer; }
+.wysiwyg-block-actions .wysiwyg-block-handle .app-icon { display: block; }
 .wysiwyg-block-menu { position: absolute; top: 30px; left: 0; z-index: 80; width: 190px; padding: 5px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-elevated); box-shadow: 0 8px 24px #0004; }
 .wysiwyg-block-menu button { width: 100%; padding: 7px 10px; border: 0; background: transparent; font-size: 12px; text-align: left; }
 .wysiwyg-block-menu button:disabled { opacity: .35; cursor: default; }

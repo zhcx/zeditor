@@ -649,7 +649,7 @@ export class WysiwygSession {
     );
   }
 
-  /** 用新的块源码替换（源码弹窗保存）。 */
+  /** 用新的块源码替换（块源码就地编辑保存）。 */
   replaceBlock(index: number, source: string): boolean {
     this.flushWriteBack();
     const block = this.document.blocks[index];

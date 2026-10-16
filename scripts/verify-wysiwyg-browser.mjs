@@ -345,6 +345,51 @@ try {
     assert.equal(await page.locator('.wysiwyg-block strong').innerText(), 'bold');
     assert.equal(await getSource(), '内容 **bold**\n\n第二段');
   });
+  await test('paragraph height stays stable across Enter and write-back re-render', async () => {
+    await setDocument('');
+    const shellHeight = index => page.locator('.wysiwyg-block-shell').nth(index).evaluate(node => node.getBoundingClientRect().height);
+    await page.locator('.wysiwyg-block').first().click();
+    await page.keyboard.type('AAA');
+    await page.waitForTimeout(400);
+    const typed = await shellHeight(0);
+    await page.keyboard.press('Enter');
+    await page.waitForTimeout(400);
+    const afterEnter = await shellHeight(0);
+    await page.keyboard.type('BBB');
+    await page.waitForTimeout(400);
+    assert.equal(await getSource(), 'AAA\n\nBBB');
+    // 输入态与重建后的 <p> 必须同高：此前 21px 会在写回后跳成 25.76px。
+    assert.ok(Math.abs(typed - (await shellHeight(0))) < 0.5, `paragraph height changed: ${typed} -> ${await shellHeight(0)}`);
+    assert.ok(Math.abs(afterEnter - typed) < 0.5, `Enter changed paragraph height: ${typed} -> ${afterEnter}`);
+  });
+  await test('block source editing stays inline and writes back', async () => {
+    await setDocument('前段\n\n| A | B |\n| --- | --- |\n| 1 | 2 |\n\n后段');
+    const shell = page.locator('.wysiwyg-block-shell').filter({ has: page.locator('.wysiwyg-block[data-block-kind="table"]') });
+    await page.locator('.wysiwyg-block[data-block-kind="table"]').hover();
+    await shell.locator('.wysiwyg-block-handle').click();
+    await shell.locator('.wysiwyg-block-menu button', { hasText: '编辑块源码' }).click();
+    const layer = shell.locator('.wysiwyg-source-layer');
+    await layer.waitFor({ state: 'visible' });
+    assert.equal(await page.locator('.modal-overlay').count(), 0, 'source editing must not open a modal');
+    assert.equal(await shell.locator('.wysiwyg-block.is-source-editing').count(), 1, 'rendered block yields to the inline panel');
+    await layer.locator('.wysiwyg-source-editor').fill('| A | B |\n| --- | --- |\n| 9 | 8 |');
+    await layer.locator('.wysiwyg-source-toolbar button.is-primary').click();
+    await page.waitForTimeout(400);
+    assert.equal(await shell.locator('.wysiwyg-source-layer').count(), 0);
+    assert.match(await getSource(), /\| 9 \| 8 \|/);
+  });
+  await test('editor tables render like the preview surface', async () => {
+    await setDocument('| 甲 | 乙 |\n| --- | --- |\n| 1 | 2 |');
+    const metrics = await page.locator('.wysiwyg-block[data-block-kind="table"] table').evaluate(table => ({
+      display: getComputedStyle(table).display,
+      collapse: getComputedStyle(table).borderCollapse,
+      width: table.getBoundingClientRect().width,
+      columnWidth: table.closest('.wysiwyg-document').getBoundingClientRect().width,
+    }));
+    assert.equal(metrics.display, 'inline-table');
+    assert.equal(metrics.collapse, 'collapse');
+    assert.ok(metrics.width < metrics.columnWidth - 40, `table should shrink to content width, got ${metrics.width}`);
+  });
   assert.deepEqual(errors, [], 'no uncaught page errors');
   console.log(JSON.stringify({ results, errors }, null, 2));
   if (results.some(result => !result.pass)) process.exitCode = 1;

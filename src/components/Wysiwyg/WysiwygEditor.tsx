@@ -17,7 +17,7 @@ import { WysiwygSession, type WysiwygSessionSnapshot } from './wysiwygSession';
 import { createWysiwygController } from './WysiwygController';
 import { WysiwygCodeBlock } from './WysiwygCodeBlock';
 import { BlockActions } from './BlockActions';
-import { SourcePopup } from './SourcePopup';
+import { BlockSourceEditor } from './BlockSourceEditor';
 import { imageSpecMarkdown, inlineTargetMarkdown } from './inlineEditing';
 import { WysiwygChrome } from './WysiwygChrome';
 import { ProofreadHighlights } from './ProofreadHighlights';
@@ -25,7 +25,7 @@ import { ProofreadHighlights } from './ProofreadHighlights';
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
 const renderBlockHtml = createBlockHtmlRenderer(source => sanitizeRenderedHtml(renderMarkdownSource(source)));
 
-function sourcePopupTitle(kind: WysiwygBlockKind): string {
+function sourceEditorTitle(kind: WysiwygBlockKind): string {
   if (kind === 'table') return '编辑表格源码';
   if (kind === 'fence') return '编辑代码块源码';
   if (kind === 'html') return '编辑 HTML 块';
@@ -51,8 +51,9 @@ interface WysiwygBlockViewProps {
   onBlurBlock: (index: number, nextFocus: Node | null) => void;
   onCompositionChange: (composing: boolean, index: number) => void;
   onCommitCode: (index: number, code: string, language?: string) => void;
-  onInlineClick: (event: React.MouseEvent<HTMLElement>) => void;
-  onEditSource: (index: number) => void;
+  onInlineClick: (event: React.MouseEvent<HTMLElement>) => boolean;
+  onApplyBlockSource: (index: number, source: string) => void;
+  onEndSourceEditing: (index: number) => void;
   onDeleteBlock: (index: number) => void;
   onInsertAfter: (index: number) => void;
   onMove: (from: number, to: number) => void;
@@ -63,13 +64,15 @@ interface WysiwygBlockViewProps {
 const WysiwygBlockView = memo(function WysiwygBlockView({
   index, kind, source, startLine, editable, skipRender, renderRevision, emptyDocument, documentPath, workflowViewerEnabled,
   scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
-  onCommitCode, onInlineClick, onEditSource, onDeleteBlock, onInsertAfter, onMove, onDuplicate, count,
+  onCommitCode, onInlineClick, onApplyBlockSource, onEndSourceEditing, onDeleteBlock, onInsertAfter, onMove, onDuplicate, count,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
   const renderedSourceRef = useRef<string | null>(null);
   const renderedRevisionRef = useRef<number | null>(null);
   const [codeEditing, setCodeEditing] = useState(kind === 'fence' && extractFenceCode(source).length === 0);
   const [codeSelection, setCodeSelection] = useState<{ from: number; to: number; preserveFocus?: boolean } | null>(null);
+  // 非文本块（表格 / 图表 / 公式 / HTML 等）的就地源码编辑开关。
+  const [sourceEditing, setSourceEditing] = useState(false);
 
   // 注册与内容渲染都必须放在 useLayoutEffect：React 先跑子节点的 layout effect、再跑父节点，
   // 而父节点正是在 layout effect 里恢复光标——用 useEffect（被动效应）会晚于光标恢复执行，
@@ -144,15 +147,43 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         container.appendChild(placeholder);
       });
     }
+    // 块手柄的垂直中心要落在块首行的行盒中心上：段落、各级标题、列表项、表格首格
+    // 的行高与位移各不相同，CSS 无法从壳上得知，这里测量首个文本盒（优先真正的
+    // 段落 / 列表项 / 标题 / 代码行，而不是它的容器），把「到首行中心的两倍距离」
+    // 写到壳的自定义属性，手柄按它居中。
+    const shell = host.parentElement;
+    const first = kind === 'table'
+      ? host.querySelector('th, td')
+      : host.querySelector('p, li, h1, h2, h3, h4, h5, h6, pre code') ?? host.firstElementChild;
+    if (shell instanceof HTMLElement && first instanceof HTMLElement) {
+      const styles = window.getComputedStyle(first);
+      const measured = Number.parseFloat(styles.lineHeight);
+      const lineHeight = Number.isFinite(measured) ? measured : Number.parseFloat(styles.fontSize) * 1.2;
+      const padding = Number.parseFloat(styles.paddingTop) || 0;
+      // 基准是壳而不是块：围栏块的代码工具栏在块之外、壳之内（体积上是块的一部分），
+      // 代码区整体被它推下去，用块作基准会漏掉这段位移。
+      const offset = first.getBoundingClientRect().top - shell.getBoundingClientRect().top + padding;
+      shell.style.setProperty('--wysiwyg-first-line', `${offset * 2 + lineHeight}px`);
+    } else {
+      shell?.style.removeProperty('--wysiwyg-first-line');
+    }
     return cleanup;
   }, [documentPath, editable, kind, renderRevision, scrollRoot, skipRender, source, theme, workflowViewerEnabled]);
 
   return (
     <div className={`wysiwyg-block-shell${kind === 'fence' ? ' has-code' : ''}`}>
       {kind === 'fence' && <WysiwygCodeBlock index={index} code={extractFenceCode(source)} language={extractFenceLanguage(source)} onCommit={(position, code, language) => { onCommitCode(position, code, language); if (!codeEditing) onBlurBlock(index, null); }} editing={codeEditing} selection={codeSelection} onEditingChange={editing => { setCodeEditing(editing); if (!editing) onBlurBlock(index, null); }} />}
+      {sourceEditing && (
+        <BlockSourceEditor
+          title={sourceEditorTitle(kind)}
+          source={source}
+          onApply={(next) => { setSourceEditing(false); onApplyBlockSource(index, next); }}
+          onClose={() => { setSourceEditing(false); onEndSourceEditing(index); }}
+        />
+      )}
       <section
         ref={hostRef}
-        className={`wysiwyg-block ${editable ? 'is-editable' : 'is-readonly'}${kind === 'fence' && codeEditing ? ' is-code-editing' : ''}`}
+        className={`wysiwyg-block ${editable ? 'is-editable' : 'is-readonly'}${kind === 'fence' && codeEditing ? ' is-code-editing' : ''}${sourceEditing ? ' is-source-editing' : ''}`}
         data-block-index={index}
         data-block-kind={kind}
         data-source-line={startLine}
@@ -166,13 +197,19 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onBlurBlock(index, event.relatedTarget as Node | null); }}
         onCompositionStart={() => onCompositionChange(true, index)}
         onCompositionEnd={() => onCompositionChange(false, index)}
-        onClick={(event) => { if (kind === 'fence') setCodeEditing(true); else onInlineClick(event); }}
+        onClick={(event) => {
+          if (kind === 'fence') { setCodeEditing(true); return; }
+          const handled = onInlineClick(event);
+          // 没有其他交互面的只读块（HTML 块、解析不出结构的块）：点击直接就地编辑源码，
+          // 不必先展开悬停菜单。媒体与公式有自己的交互，不在此列。
+          if (!handled && !editable && (kind === 'html' || kind === 'other')) setSourceEditing(true);
+        }}
       />
       <BlockActions
         index={index}
         kind={kind}
         editable={editable}
-        onEditSource={onEditSource}
+        onEditSource={() => setSourceEditing(true)}
         onDelete={onDeleteBlock}
         onInsertAfter={onInsertAfter}
         onMove={onMove}
@@ -259,7 +296,6 @@ export function WysiwygEditor() {
     });
   });
   const [snapshot, setSnapshot] = useState<WysiwygSessionSnapshot>(() => session.getSnapshot());
-  const [sourcePopup, setSourcePopup] = useState<{ index: number; title: string } | null>(null);
   const [imageTarget, setImageTarget] = useState<{ target: InlineTarget; spec: ImageSpec } | null>(null);
   const [inlineTarget, setInlineTarget] = useState<{ target: InlineTarget; anchor: { left: number; top: number }; autoFocus?: boolean } | null>(null);
 
@@ -395,9 +431,10 @@ export function WysiwygEditor() {
   }, [session]);
 
   // 点击行内结构（链接 / 公式 / 图片）：用点击位置反查源码目标，复用既有弹窗。
-  const handleInlineClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
-    if (window.getSelection()?.isCollapsed === false) return;
-    if (!(settings.editor.inline_popups ?? true)) return;
+  // 返回值告诉块视图点击是否已被消化——未消化时只读块会改为进入就地源码编辑。
+  const handleInlineClick = useCallback((event: React.MouseEvent<HTMLElement>): boolean => {
+    if (window.getSelection()?.isCollapsed === false) return false;
+    if (!(settings.editor.inline_popups ?? true)) return false;
     const displayMath = (event.target as Element).closest('.katex-block');
     if (displayMath) {
       const host = displayMath.closest<HTMLElement>('[data-block-index]');
@@ -405,13 +442,13 @@ export function WysiwygEditor() {
       const target = block ? findInlineTargetAt(session.getSource(), block.offset) : null;
       if (target?.kind === 'math') {
         setInlineTarget({ target, anchor: { left: event.clientX, top: event.clientY } });
-        return;
+        return true;
       }
     }
     const position = session.blockPositionOfEvent(event.nativeEvent);
-    if (!position) return;
+    if (!position) return false;
     const target = findInlineTargetAt(useAppStore.getState().content, position.offset);
-    if (!target) return;
+    if (!target) return false;
     const anchor = { left: event.clientX, top: event.clientY };
     if (target.kind === 'image') {
       setImageTarget({
@@ -423,7 +460,7 @@ export function WysiwygEditor() {
           ...(target.attrs ? { attributes: target.attrs } : {}),
         } as ImageSpec,
       });
-      return;
+      return true;
     }
     // contenteditable 里浏览器不会跟随链接：`Ctrl/Cmd+点击` 打开，普通点击进入编辑弹窗。
     if (target.kind === 'link' && (event.ctrlKey || event.metaKey)) {
@@ -432,15 +469,18 @@ export function WysiwygEditor() {
         event.preventDefault();
         openUrl(url);
       }
-      return;
+      return true;
     }
     setInlineTarget({ target, anchor });
+    return true;
   }, [session, settings.editor.inline_popups]);
 
-  const handleEditSource = useCallback((index: number) => {
-    const block = session.getBlocks()[index];
-    setSourcePopup({ index, title: sourcePopupTitle(block?.kind ?? 'other') });
+  const handleApplyBlockSource = useCallback((index: number, next: string) => {
+    session.replaceBlock(index, next);
+    session.focus();
   }, [session]);
+
+  const handleEndSourceEditing = useCallback(() => { session.focus(); }, [session]);
 
   const handleInput = useCallback((index: number) => session.handleInput(index), [session]);
   const handleBlurBlock = useCallback((index: number, nextFocus: Node | null) => session.normalizeBlock(index, nextFocus), [session]);
@@ -453,7 +493,6 @@ export function WysiwygEditor() {
 
   const blockDocument: WysiwygDocument = snapshot.document;
   const emptyDocument = blockDocument.source.trim().length === 0;
-  const popupBlock = sourcePopup ? blockDocument.blocks[sourcePopup.index] ?? null : null;
 
   return (
     <div
@@ -517,7 +556,8 @@ export function WysiwygEditor() {
             onCompositionChange={handleCompositionChange}
             onCommitCode={handleCommitCode}
             onInlineClick={handleInlineClick}
-            onEditSource={handleEditSource}
+            onApplyBlockSource={handleApplyBlockSource}
+            onEndSourceEditing={handleEndSourceEditing}
             onDeleteBlock={handleDeleteBlock}
             onInsertAfter={handleInsertAfter}
             onMove={handleMoveBlock}
@@ -527,21 +567,6 @@ export function WysiwygEditor() {
       </article>
       <WysiwygChrome session={session} surface={scrollRoot} version={snapshot.version} pinned={Boolean(settings.editor.pin_toolbar)} />
       <ProofreadHighlights session={session} version={snapshot.version} />
-      {sourcePopup && popupBlock && (
-        <SourcePopup
-          title={sourcePopup.title}
-          source={popupBlock.source}
-          onApply={(next) => {
-            session.replaceBlock(sourcePopup.index, next);
-            setSourcePopup(null);
-            session.focus();
-          }}
-          onClose={() => {
-            setSourcePopup(null);
-            session.focus();
-          }}
-        />
-      )}
       {imageTarget && (
         <ImagePropertiesModal
           spec={imageTarget.spec}

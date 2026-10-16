@@ -31,7 +31,7 @@ export function BlockActions({ index, onEditSource, onDelete, onInsertAfter, onM
   const run = (action: () => void) => { setOpen(false); action(); };
   return (
     <div ref={rootRef} className={`wysiwyg-block-actions${open ? ' is-open' : ''}`} contentEditable={false} onMouseDown={event => event.preventDefault()}>
-      <button className="wysiwyg-block-handle" type="button" aria-label={`第 ${index + 1} 块操作`} aria-expanded={open} title="块操作：移动、复制、插入和删除" onClick={() => setOpen(value => !value)}>⠿</button>
+      <button className="wysiwyg-block-handle" type="button" aria-label={`第 ${index + 1} 块操作`} aria-expanded={open} title="块操作：移动、复制、插入和删除" onClick={() => setOpen(value => !value)}><AppIcon name="grip" size={17} /></button>
       {open && <div className="wysiwyg-block-menu" role="menu" aria-label="块操作">
         <button type="button" role="menuitem" onClick={() => run(() => onInsertAfter(index))}><AppIcon name="plus" size={14} />在下方插入段落</button>
         <button type="button" role="menuitem" disabled={index === 0} onClick={() => run(() => onMove(index, index - 1))}><AppIcon name="arrowUp" size={14} />上移</button>
