@@ -7,7 +7,17 @@ const REPO = 'zhcx/zeditor'
 const BASE = '/zeditor/'
 
 // 导航栏版本号直接从应用 package.json 读取，避免每次发布漏改文档（曾漏过一次，页面停留在 v0.5.9）。
-const APP_VERSION = `v${JSON.parse(readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8')).version}`
+// 解析失败时回退到占位值，避免文档站因无关的格式问题整个构建失败。
+function readAppVersion(): string {
+  try {
+    const raw = readFileSync(resolve(dirname(fileURLToPath(import.meta.url)), '../../package.json'), 'utf8')
+    return JSON.parse(raw).version ?? 'unknown'
+  } catch {
+    return 'unknown'
+  }
+}
+
+const APP_VERSION = `v${readAppVersion()}`
 
 export default defineConfig({
   lang: 'zh-CN',
