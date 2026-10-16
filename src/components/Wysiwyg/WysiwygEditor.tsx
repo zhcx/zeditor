@@ -377,6 +377,18 @@ export function WysiwygEditor() {
       if (session.handleDelete(index)) event.preventDefault();
       return;
     }
+    if (
+      !modified && !event.altKey && !event.shiftKey && !event.nativeEvent.isComposing
+      && event.key.startsWith('Arrow')
+    ) {
+      // 块是各自独立的 contenteditable，贴边时浏览器无处可去（块尾按 ↓ 原地不动），
+      // 这里把光标交给相邻块；Shift/Alt/Ctrl 组合键是原生选择与按词移动，不能接管。
+      const direction = event.key.slice(5).toLowerCase();
+      if (direction === 'up' || direction === 'down' || direction === 'left' || direction === 'right') {
+        if (session.handleArrow(index, direction)) event.preventDefault();
+      }
+      return;
+    }
   }, [session]);
 
   // 点击行内结构（链接 / 公式 / 图片）：用点击位置反查源码目标，复用既有弹窗。

@@ -1,6 +1,7 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  arrowLeavesBlock,
   contentStartOffset,
   exitEmptyItem,
   hasTrailingEmptyQuoteLine,
@@ -168,4 +169,34 @@ it('keeps stacking items when the empty item is not the last line', () => {
   // 只处理列表与引用，段落与标题走普通拆行。
   assert.equal(exitEmptyItem({ source: '', kind: 'paragraph', caret: 0 }), null);
   assert.equal(exitEmptyItem({ source: '## ', kind: 'heading', caret: 3 }), null);
+});
+
+it('lets the arrow keys leave a block only from its content boundary', () => {
+  // 块内的行间移动交回浏览器：文件里的软换行与行首前缀都由原生行为处理得更准。
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 1, direction: 'left' }), false);
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 1, direction: 'up' }), false);
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 1, direction: 'down' }), false);
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 1, direction: 'right' }), false);
+  // 贴边界时可以跨块：左/上看内容开头，右/下看内容末尾。
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 0, direction: 'left' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 0, direction: 'up' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 3, direction: 'right' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '前段甲', caret: 3, direction: 'down' }), true);
+  // 空块：开头就是末尾，四个方向都能离开。
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '', caret: 0, direction: 'up' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'paragraph', markdown: '', caret: 0, direction: 'down' }), true);
+});
+
+it('treats the whole block prefix as the block start', () => {
+  // 前缀区间（含 `# ` 内部）都还在块开头：往左/往上离开时才和 isCaretAtBlockStart 一致。
+  assert.equal(arrowLeavesBlock({ kind: 'heading', markdown: '# 标题', caret: 2, direction: 'up' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'heading', markdown: '# 标题', caret: 1, direction: 'up' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'heading', markdown: '# 标题', caret: 3, direction: 'up' }), false);
+  assert.equal(arrowLeavesBlock({ kind: 'list', markdown: '- 一项', caret: 2, direction: 'left' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'list', markdown: '- 一项', caret: 3, direction: 'left' }), false);
+  assert.equal(arrowLeavesBlock({ kind: 'blockquote', markdown: '> 引用', caret: 2, direction: 'up' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'blockquote', markdown: '> 引用', caret: 3, direction: 'up' }), false);
+  // 末尾侧不看前缀，整段源码长度就是边界。
+  assert.equal(arrowLeavesBlock({ kind: 'heading', markdown: '# 标题', caret: 4, direction: 'down' }), true);
+  assert.equal(arrowLeavesBlock({ kind: 'heading', markdown: '# 标题', caret: 3, direction: 'down' }), false);
 });

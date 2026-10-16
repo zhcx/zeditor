@@ -186,3 +186,22 @@ export function adjustListIndent(
   const next = source.slice(2);
   return { source: next, caret: contentStartOffset(next, 'list') };
 }
+
+export type BlockArrowDirection = 'up' | 'down' | 'left' | 'right';
+
+/**
+ * 方向键是否应该离开本块：左/上要求光标在内容开头，右/下要求光标在内容末尾。
+ *
+ * 每个块都是独立的 contenteditable，浏览器无法把光标交给兄弟块，因此贴边时的原生行为是
+ * 原地不动——与源码模式不一致。这里只判断内容边界（不看几何），块内的行间移动交给浏览器。
+ */
+export function arrowLeavesBlock(input: {
+  kind: WysiwygBlockKind;
+  markdown: string;
+  caret: number;
+  direction: BlockArrowDirection;
+}): boolean {
+  const { kind, markdown, caret, direction } = input;
+  if (direction === 'left' || direction === 'up') return caret <= contentStartOffset(markdown, kind);
+  return caret >= markdown.length;
+}

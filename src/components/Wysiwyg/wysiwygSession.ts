@@ -21,6 +21,7 @@ import { blockOffsetFromPoint, pointFromBlockOffset, type ContainerInput } from 
 import { toInlineNodes } from '../../utils/wysiwyg/inlineNodes.ts';
 import {
   adjustListIndent,
+  arrowLeavesBlock,
   contentStartOffset,
   exitEmptyItem,
   mergeBlocks,
@@ -28,6 +29,7 @@ import {
   setHeadingLevel,
   splitBlock,
   stripBlockPrefix,
+  type BlockArrowDirection,
 } from '../../utils/wysiwyg/blockOps.ts';
 import { createUndoStack } from '../../utils/wysiwyg/undoStack.ts';
 import { extractFenceInfo, extractFenceLanguage, extractFenceMarker, formatFence, withFenceLanguage } from '../../utils/wysiwyg/codeFence.ts';
@@ -399,6 +401,56 @@ export class WysiwygSession {
       result.source,
       collected.block.offset + contentStartOffset(result.source, targetKind) + innerCaret,
     );
+  }
+
+  /**
+   * 方向键跨块：光标贴到块的上下/左右边界时，把光标交给相邻的可编辑块。
+   *
+   * 每个块是独立的 contenteditable，浏览器原生不会把光标送到兄弟块，所以不接管的话
+   * 块尾按 ↓ 会原地不动。只有真正贴着内容边界才接管，块内行间移动仍然交给浏览器。
+   * 未处理时返回 false，调用方不要 preventDefault。
+   */
+  handleArrow(index: number, direction: BlockArrowDirection): boolean {
+    const collected = this.collectBlock(index);
+    if (!collected || !collected.block.editable) return false;
+    const caret = this.caretOffsetInBlock(collected);
+    if (caret === null) return false;
+    if (!arrowLeavesBlock({
+      kind: collected.block.kind,
+      markdown: collected.serialized.markdown,
+      caret,
+      direction,
+    })) return false;
+
+    const forward = direction === 'down' || direction === 'right';
+    const targetIndex = this.adjacentEditableBlock(index, forward ? 1 : -1);
+    if (targetIndex === null) return false;
+    const target = this.document.blocks[targetIndex];
+    const targetElement = this.accessors.getBlockElement(targetIndex);
+    if (!target || !targetElement) return false;
+
+    // 去下一块落在内容开头（跳过前缀），去上一块落在末尾——与源码模式的方向一致。
+    let local: number;
+    try {
+      const markdown = serializeBlockMarkdown(target.kind, toInlineNodes(targetElement), EDITING_SERIALIZE_OPTIONS).markdown;
+      local = forward ? contentStartOffset(markdown, target.kind) : markdown.length;
+    } catch {
+      return false;
+    }
+    // 这里只移动光标，不改源码：setSelectionOffsets 在非等待渲染时直接落选区。
+    // applySelection 会自己聚焦最近的 contenteditable；围栏块则走 zeditor-code-selection，
+    // 所以不能改用 focus()，它会把不可编辑的目标改送到第一个可编辑块。
+    this.setSelectionOffsets(target.offset + local);
+    return true;
+  }
+
+  /** 相邻的可编辑块：跳过表格、代码块、分隔线这些自带交互表面的只读块。 */
+  private adjacentEditableBlock(index: number, step: 1 | -1): number | null {
+    const blocks = this.document.blocks;
+    for (let cursor = index + step; cursor >= 0 && cursor < blocks.length; cursor += step) {
+      if (blocks[cursor].editable) return cursor;
+    }
+    return null;
   }
 
   /** Ctrl+Z / Ctrl+Shift+Z。 */
