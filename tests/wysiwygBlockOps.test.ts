@@ -129,6 +129,16 @@ it('changes heading level and clears it with level 0', () => {
   assert.deepEqual(setHeadingLevel('# 标题', 'heading', 2), { source: '## 标题', caret: 3 });
 });
 
+it('refuses to retitle blocks that own their own interaction surface', () => {
+  // 表格源码没有块前缀，加上 `# ` 之后整张表会重新解析成标题 + 段落。
+  assert.equal(setHeadingLevel('| a |\n| --- |\n| 1 |', 'table', 1), null);
+  assert.equal(setHeadingLevel('```js\na\n```', 'fence', 2), null);
+  assert.equal(setHeadingLevel('---', 'hr', 1), null);
+  assert.equal(setHeadingLevel('<div>a</div>', 'html', 1), null);
+  // 正文类块不受影响。
+  assert.deepEqual(setHeadingLevel('引用', 'blockquote', 1), { source: '# 引用', caret: 2 });
+});
+
 it('indents and outdents list items', () => {
   assert.deepEqual(adjustListIndent('- 一项', 'list', 'indent'), { source: '  - 一项', caret: 4 });
   assert.deepEqual(adjustListIndent('  - 一项', 'list', 'outdent'), { source: '- 一项', caret: 2 });

@@ -387,7 +387,10 @@ export class WysiwygSession {
     if (!collected) return false;
     const caret = this.caretOffsetInBlock(collected);
     if (caret === null) return false;
+    // 表格里的 Ctrl+1..6 不是「改标题」，而是把整张表的前缀换掉：单元格自己负责编辑，
+    // 这里拿到 null 就交回浏览器（在 checkpoint 之前返回，不留下空的撤销步骤）。
     const result = setHeadingLevel(collected.serialized.markdown, collected.block.kind, level);
+    if (!result) return false;
     const innerCaret = Math.max(0, caret - contentStartOffset(collected.serialized.markdown, collected.block.kind));
     const targetKind = level > 0 ? 'heading' : 'paragraph';
     this.checkpointBlock(collected);

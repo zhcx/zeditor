@@ -15,13 +15,16 @@ const TABLE_ROW_PATTERN = /^[ \t]*\|/;
 const FENCE_PATTERN = /^[ \t]*(?:```|~~~)/;
 
 /**
- * 可以按光标拆行的块类型。
+ * 「行首前缀 + 纯文本」的块类型：段落、标题、引用、列表项。
+ *
+ * 只有这些块的源码是「可选前缀 + 内容」，所以依赖这一点成立的两类操作也只对它们开放：
+ * - 按光标拆行：表格源码 `| a |\n| --- |` 拆开后第二半会被解析成一个 `- ` 列表项，整张表就此损坏；
+ * - 换掉行首前缀：Ctrl+1..6 给整张表加上 `# `，整表会重新解析成标题 + 段落。
  *
  * 表格、代码块、分隔线、HTML 块各有自己的交互入口（表格用单元格导航，代码块用编辑器图层），
- * 按光标拆行会把它们拆成不成形的东西——表格源码 `| a |\n| --- |` 拆开后第二半会被解析成
- * 一个 `- ` 列表项，整张表就此损坏。因此这些类型一律拒绝拆行，交回调用方。
+ * 一律拒绝，交回调用方。
  */
-const SPLITTABLE_KINDS: ReadonlySet<WysiwygBlockKind> = new Set<WysiwygBlockKind>([
+const PREFIXED_TEXT_KINDS: ReadonlySet<WysiwygBlockKind> = new Set<WysiwygBlockKind>([
   'paragraph',
   'heading',
   'list',
@@ -66,7 +69,7 @@ export interface SplitBlockResult {
  * 不要 `preventDefault`。
  */
 export function splitBlock(input: { source: string; kind: WysiwygBlockKind; caret: number }): SplitBlockResult | null {
-  if (!SPLITTABLE_KINDS.has(input.kind)) return null;
+  if (!PREFIXED_TEXT_KINDS.has(input.kind)) return null;
   const caret = Math.max(0, Math.min(input.caret, input.source.length));
   const head = input.source.slice(0, caret);
   const rest = input.source.slice(caret);
@@ -151,8 +154,13 @@ export function mergeForward(current: string, next: string): { source: string; c
   return { source: `${current}${next}`, caret: current.length };
 }
 
-/** Ctrl+0..6：设置标题级别（0 表示还原为段落）。 */
-export function setHeadingLevel(source: string, kind: WysiwygBlockKind, level: number): { source: string; caret: number } {
+/** Ctrl+0..6：设置标题级别（0 表示还原为段落）；表格等自带交互的块返回 null。 */
+export function setHeadingLevel(
+  source: string,
+  kind: WysiwygBlockKind,
+  level: number,
+): { source: string; caret: number } | null {
+  if (!PREFIXED_TEXT_KINDS.has(kind)) return null;
   const stripped = kind === 'heading'
     ? source.replace(HEADING_PATTERN, '')
     : source.slice(contentStartOffset(source, kind));
