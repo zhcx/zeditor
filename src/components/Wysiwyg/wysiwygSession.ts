@@ -22,7 +22,9 @@ import { toInlineNodes } from '../../utils/wysiwyg/inlineNodes.ts';
 import {
   adjustListIndent,
   contentStartOffset,
+  exitEmptyItem,
   mergeBlocks,
+  mergeForward,
   setHeadingLevel,
   splitBlock,
   stripBlockPrefix,
@@ -76,6 +78,16 @@ function pathToNode(element: HTMLElement, path: number[]): Node | null {
   return current;
 }
 
+/**
+ * 失焦时焦点是否已经交给了别的元素。
+ *
+ * `relatedTarget` 是接收焦点的元素：用户点向另一个块或面板控件时它是那个元素；
+ * 只有元素被重渲染移除而导致的失焦才是 null。前者不能把焦点抢回来，后者必须恢复。
+ */
+function focusMovedToAnotherTarget(relatedTarget: Node | null | undefined): boolean {
+  return Boolean(relatedTarget && relatedTarget.nodeType === 1);
+}
+
 interface CollectedBlock {
   block: WysiwygBlock;
   element: HTMLElement;
@@ -97,6 +109,8 @@ export class WysiwygSession {
   private pendingCaret: number | null = null;
   private pendingSelectionEnd: number | null = null;
   private awaitingRender = false;
+  /** 渲染后是否把焦点拉回待恢复的光标；用户主动点去别处时为 false。 */
+  private restoreFocus = true;
   /** 变更通知由外壳在挂载后注入（避免外壳在渲染期读取会话实例）。 */
   private notify: () => void = () => undefined;
   private accessors: WysiwygSessionAccessors = NO_ACCESSORS;
@@ -172,12 +186,15 @@ export class WysiwygSession {
   prepareExternalEdit(): void { this.flushWriteBack(); }
 
   /** 失焦时把用户敲出的标记规范化为真正的排版。 */
-  normalizeBlock(index: number): void {
+  normalizeBlock(index: number, nextFocus?: Node | null): void {
     this.flushWriteBack();
     if (this.skipRenderIndex !== index) return;
     this.skipRenderIndex = null;
     this.pendingCaret = this.locateCaretOffset();
     this.pendingSelectionEnd = null;
+    // 失焦往往是用户点去了另一个块或面板：重渲染不能把焦点抢回来，
+    // 否则 mousedown 期间会把用户刚点中的目标又拽回离开的块。
+    this.restoreFocus = !focusMovedToAnotherTarget(nextFocus);
     this.emit();
   }
 
@@ -224,10 +241,21 @@ export class WysiwygSession {
     if (!collected) return false;
     const caret = this.caretOffsetInBlock(collected);
     if (caret === null) return false;
-    this.checkpointBlock(collected);
     const kind = splitMarkdownDocument(collected.serialized.markdown).blocks[0]?.kind ?? collected.block.kind;
     const balanced = this.splitContentAtSelection(collected);
-    const result = splitBlock({ source: balanced?.source ?? collected.serialized.markdown, kind, caret: balanced?.caret ?? caret });
+    const source = balanced?.source ?? collected.serialized.markdown;
+    const caretAt = balanced?.caret ?? caret;
+    // 空块退块：空列表项 / 空引用行上再按回车，离开列表或引用，而不是继续堆空项。
+    const exited = exitEmptyItem({ source, kind, caret: caretAt });
+    if (exited) {
+      this.checkpointBlock(collected);
+      return this.applyBlockSource(collected.block, exited.source, collected.block.offset + exited.caret);
+    }
+    const result = splitBlock({ source, kind, caret: caretAt });
+    // 表格、代码块、分隔线不在块尾拆行：拆开后的两半会被重新解析成别的东西（表格会碎成段落 + 列表项）。
+    // 必须先判空再记撤销点，否则一次无效的回车会留下一个空的撤销步骤。
+    if (!result) return false;
+    this.checkpointBlock(collected);
     const tailPrefix = kind === 'list' || kind === 'blockquote' ? contentStartOffset(result.tail, kind) : 0;
     return this.applyBlockSource(
       collected.block,
@@ -292,6 +320,46 @@ export class WysiwygSession {
     if (!collected) return false;
     const caret = this.caretOffsetInBlock(collected);
     return caret !== null && caret >= collected.serialized.markdown.length;
+  }
+
+  /**
+   * 块尾 Delete：与退格互为镜像。
+   *
+   * 顺序：空块直接删掉 → 否则把下一段正文吸进当前块。后一块带前缀（标题 / 列表 / 引用）
+   * 或本身不可编辑时返回 false，交回浏览器（跨块合并会丢掉前缀，不能硬拼）。
+   */
+  handleDelete(index: number): boolean {
+    const collected = this.collectBlock(index);
+    if (!collected || !collected.block.editable) return false;
+    const caret = this.caretOffsetInBlock(collected);
+    if (caret === null) return false;
+    const markdown = collected.serialized.markdown;
+    if (caret < markdown.length) return false;
+
+    if (markdown.trim().length === 0) {
+      this.checkpointBlock(collected);
+      const removed = removeBlockFromSource(this.document, index);
+      return this.applySource(removed.source, removed.caret);
+    }
+
+    const next = this.document.blocks[index + 1];
+    if (!next || !next.editable) return false;
+    const nextElement = this.accessors.getBlockElement(index + 1);
+    if (!nextElement) return false;
+    let nextMarkdown: string;
+    try {
+      nextMarkdown = serializeBlockMarkdown(next.kind, toInlineNodes(nextElement), EDITING_SERIALIZE_OPTIONS).markdown;
+    } catch {
+      return false;
+    }
+    const merged = mergeForward(markdown, nextMarkdown);
+    if (!merged) return false;
+
+    this.checkpointBlock(collected);
+    const source = this.document.source.slice(0, collected.block.offset)
+      + merged.source
+      + this.document.source.slice(next.offset + next.length);
+    return this.applySource(source, collected.block.offset + merged.caret);
   }
 
   /** Tab / Shift+Tab：列表层级调整。 */
@@ -552,9 +620,14 @@ export class WysiwygSession {
     if (this.pendingCaret === null) return;
     const caret = this.pendingCaret;
     const selectionEnd = this.pendingSelectionEnd ?? caret;
+    const restoreFocus = this.restoreFocus;
+    this.restoreFocus = true;
     this.pendingCaret = null;
     this.pendingSelectionEnd = null;
     this.lastCaret = caret;
+    // 焦点已经交给别处：只记住偏移，等下一次聚焦时再落光标。
+    // 此刻写选区会把用户刚点击的位置顶掉。
+    if (!restoreFocus) return;
     const index = this.blockIndexAtOffset(caret);
     if (index !== null && this.document.blocks[index]?.editable) {
       this.accessors.getBlockElement(index)?.focus();

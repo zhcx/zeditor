@@ -7,6 +7,7 @@ import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
 import type { WysiwygBlockKind, WysiwygDocument } from '../../utils/wysiwyg/blocks';
 import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
+import { hasTrailingEmptyQuoteLine } from '../../utils/wysiwyg/blockOps';
 import { findInlineTargetAt, type InlineTarget } from '../../utils/inlineTargets';
 import type { ImageSpec } from '../../utils/imageSyntax';
 import { ImagePropertiesModal } from '../Editor/ImagePropertiesModal';
@@ -57,7 +58,7 @@ interface WysiwygBlockViewProps {
   registerElement: (index: number, element: HTMLElement | null) => void;
   onInput: (index: number) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLElement>, index: number) => void;
-  onBlurBlock: (index: number) => void;
+  onBlurBlock: (index: number, nextFocus: Node | null) => void;
   onCompositionChange: (composing: boolean, index: number) => void;
   onCommitCode: (index: number, code: string, language?: string) => void;
   onInlineClick: (event: React.MouseEvent<HTMLElement>) => void;
@@ -123,6 +124,15 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         });
       });
     }
+    if (kind === 'blockquote') {
+      // markdown-it 不给空的引用行生成段落（`> a\n>\n> ` 只剩一个 <p>），
+      // 于是回车拆出的新引用段落在 DOM 里没有落点。这里补一个空段落，
+      // 与文档级空段落一样由序列化还原成同一个空引用行。
+      const quote = host.querySelector(':scope > blockquote');
+      const trailing = quote ? Array.from(quote.children).at(-1) : undefined;
+      const alreadyEmpty = trailing?.tagName === 'P' && trailing.textContent === '' && !trailing.querySelector('img,video,audio,iframe,svg,table');
+      if (quote && hasTrailingEmptyQuoteLine(source) && !alreadyEmpty) quote.appendChild(host.ownerDocument.createElement('p'));
+    }
     if (editable || kind === 'table') {
       // 空列表项需要真正的光标占位；只有 CSS 高度时 Chromium 会把输入移到前一项。
       host.querySelectorAll('li:empty, p:empty, h1:empty, h2:empty, h3:empty, h4:empty, h5:empty, h6:empty, th:empty, td:empty').forEach(container => {
@@ -136,7 +146,7 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
 
   return (
     <div className={`wysiwyg-block-shell${kind === 'fence' ? ' has-code' : ''}`}>
-      {kind === 'fence' && <WysiwygCodeBlock index={index} code={extractFenceCode(source)} language={extractFenceLanguage(source)} onCommit={(position, code, language) => { onCommitCode(position, code, language); if (!codeEditing) onBlurBlock(index); }} editing={codeEditing} selection={codeSelection} onEditingChange={editing => { setCodeEditing(editing); if (!editing) onBlurBlock(index); }} />}
+      {kind === 'fence' && <WysiwygCodeBlock index={index} code={extractFenceCode(source)} language={extractFenceLanguage(source)} onCommit={(position, code, language) => { onCommitCode(position, code, language); if (!codeEditing) onBlurBlock(index, null); }} editing={codeEditing} selection={codeSelection} onEditingChange={editing => { setCodeEditing(editing); if (!editing) onBlurBlock(index, null); }} />}
       <section
         ref={hostRef}
         className={`wysiwyg-block ${editable ? 'is-editable' : 'is-readonly'}${kind === 'fence' && codeEditing ? ' is-code-editing' : ''}`}
@@ -150,7 +160,7 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         onInput={() => onInput(index)}
         onFocus={(event) => { if (kind === 'table' && (event.target as Element).closest('td,th')) onInput(index); }}
         onKeyDown={(event) => onKeyDown(event, index)}
-        onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onBlurBlock(index); }}
+        onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onBlurBlock(index, event.relatedTarget as Node | null); }}
         onCompositionStart={() => onCompositionChange(true, index)}
         onCompositionEnd={() => onCompositionChange(false, index)}
         onClick={(event) => { if (kind === 'fence') setCodeEditing(true); else onInlineClick(event); }}
@@ -362,9 +372,10 @@ export function WysiwygEditor() {
       if (session.handleBackspace(index) || session.isCaretAtBlockStart(index)) event.preventDefault();
       return;
     }
-    if (event.key === 'Delete' && !event.nativeEvent.isComposing && session.isCaretAtBlockEnd(index)) {
-      // 块尾的删除不跨块合并：跨块合并会破坏块结构，留给后续评估。
-      event.preventDefault();
+    if (event.key === 'Delete' && !event.nativeEvent.isComposing) {
+      // 与退格镜像：块尾的 Delete 把下一段吸进当前块（只吸不带块前缀的段落）。
+      if (session.handleDelete(index)) event.preventDefault();
+      return;
     }
   }, [session]);
 
@@ -471,7 +482,7 @@ export function WysiwygEditor() {
             registerElement={registerElement}
             onInput={(position) => session.handleInput(position)}
             onKeyDown={handleBlockKeyDown}
-            onBlurBlock={(position) => session.normalizeBlock(position)}
+            onBlurBlock={(position, nextFocus) => session.normalizeBlock(position, nextFocus)}
             onCompositionChange={(composing, position) => session.markComposing(composing, position)}
             onCommitCode={(position, code, language) => { session.writeCodeBlock(position, code, language); }}
             onInlineClick={handleInlineClick}
