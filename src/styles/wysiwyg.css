@@ -1,4 +1,9 @@
 /* 所见即所得的编辑表面：排版沿用 .preview-document，这里只加编辑态相关的样式。 */
+::highlight(wysiwyg-proofread) {
+  text-decoration: underline wavy var(--text-error, #e07070);
+  background-color: rgba(220, 70, 70, 0.12);
+}
+
 .wysiwyg-surface {
   flex: 1;
   min-height: 0;

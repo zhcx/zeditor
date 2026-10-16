@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { useAppStore } from '../../stores/appStore';
@@ -6,6 +6,7 @@ import { renderMarkdownSource } from '../../utils/markdownPipeline';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
 import type { WysiwygBlockKind, WysiwygDocument } from '../../utils/wysiwyg/blocks';
+import { createBlockHtmlRenderer } from '../../utils/wysiwyg/blockHtml';
 import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
 import { hasTrailingEmptyQuoteLine } from '../../utils/wysiwyg/blockOps';
 import { findInlineTargetAt, type InlineTarget } from '../../utils/inlineTargets';
@@ -19,21 +20,10 @@ import { BlockActions } from './BlockActions';
 import { SourcePopup } from './SourcePopup';
 import { imageSpecMarkdown, inlineTargetMarkdown } from './inlineEditing';
 import { WysiwygChrome } from './WysiwygChrome';
+import { ProofreadHighlights } from './ProofreadHighlights';
 
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
-const blockHtmlCache = new Map<string, string>();
-/** 缓存上界：长文档连续编辑会不断产生新键，超限直接整体丢弃，避免内存无界增长。 */
-const BLOCK_HTML_CACHE_LIMIT = 600;
-
-function renderBlockHtml(kind: WysiwygBlockKind, source: string): string {
-  const key = `${kind}\u0000${source}`;
-  const cached = blockHtmlCache.get(key);
-  if (cached !== undefined) return cached;
-  if (blockHtmlCache.size >= BLOCK_HTML_CACHE_LIMIT) blockHtmlCache.clear();
-  const html = sanitizeRenderedHtml(renderMarkdownSource(source));
-  blockHtmlCache.set(key, html);
-  return html;
-}
+const renderBlockHtml = createBlockHtmlRenderer(source => sanitizeRenderedHtml(renderMarkdownSource(source)));
 
 function sourcePopupTitle(kind: WysiwygBlockKind): string {
   if (kind === 'table') return '编辑表格源码';
@@ -76,6 +66,7 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
   onCommitCode, onInlineClick, onEditSource, onDeleteBlock, onInsertAfter, onMove, onDuplicate, count,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
+  const renderedSourceRef = useRef<string | null>(null);
   const renderedRevisionRef = useRef<number | null>(null);
   const [codeEditing, setCodeEditing] = useState(kind === 'fence' && extractFenceCode(source).length === 0);
   const [codeSelection, setCodeSelection] = useState<{ from: number; to: number; preserveFocus?: boolean } | null>(null);
@@ -99,10 +90,15 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
     const host = hostRef.current;
     if (!host) return undefined;
     // 由用户输入触发的写回：DOM 就是最新的，重建反而会丢光标。
-    if (skipRender) return undefined;
+    if (skipRender) {
+      // DOM 已由输入改写；失焦后仍需规范化，即便源码恰好回到了上次渲染值。
+      renderedSourceRef.current = null;
+      return undefined;
+    }
     // StrictMode 会重复运行 layout effect；同一轮不能在恢复光标后再次清空 DOM。
-    if ((!editable && kind !== 'table') || renderedRevisionRef.current !== renderRevision) {
+    if ((!editable && kind !== 'table') || renderedSourceRef.current !== source || renderedRevisionRef.current !== renderRevision) {
       host.innerHTML = renderBlockHtml(kind, source);
+      renderedSourceRef.current = source;
       renderedRevisionRef.current = renderRevision;
     }
     const cleanup = enhanceRenderedMarkdown(host, {
@@ -124,11 +120,18 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         });
       });
     }
-    if (kind === 'blockquote') {
+    if (kind === 'blockquote' || kind === 'list') {
       // markdown-it 不给空的引用行生成段落（`> a\n>\n> ` 只剩一个 <p>），
       // 于是回车拆出的新引用段落在 DOM 里没有落点。这里补一个空段落，
       // 与文档级空段落一样由序列化还原成同一个空引用行。
-      const quote = host.querySelector(':scope > blockquote');
+      const depth = (source.split(/\r?\n/).at(-1)?.match(/>/g) ?? []).length;
+      const quote = Array.from(host.querySelectorAll('blockquote')).filter(element => {
+        let level = 0;
+        for (let parent: Element | null = element; parent && parent !== host; parent = parent.parentElement) {
+          if (parent.tagName === 'BLOCKQUOTE') level += 1;
+        }
+        return level === depth;
+      }).at(-1);
       const trailing = quote ? Array.from(quote.children).at(-1) : undefined;
       const alreadyEmpty = trailing?.tagName === 'P' && trailing.textContent === '' && !trailing.querySelector('img,video,audio,iframe,svg,table');
       if (quote && hasTrailingEmptyQuoteLine(source) && !alreadyEmpty) quote.appendChild(host.ownerDocument.createElement('p'));
@@ -395,6 +398,16 @@ export function WysiwygEditor() {
   const handleInlineClick = useCallback((event: React.MouseEvent<HTMLElement>) => {
     if (window.getSelection()?.isCollapsed === false) return;
     if (!(settings.editor.inline_popups ?? true)) return;
+    const displayMath = (event.target as Element).closest('.katex-block');
+    if (displayMath) {
+      const host = displayMath.closest<HTMLElement>('[data-block-index]');
+      const block = session.getBlocks()[Number(host?.dataset.blockIndex)];
+      const target = block ? findInlineTargetAt(session.getSource(), block.offset) : null;
+      if (target?.kind === 'math') {
+        setInlineTarget({ target, anchor: { left: event.clientX, top: event.clientY } });
+        return;
+      }
+    }
     const position = session.blockPositionOfEvent(event.nativeEvent);
     if (!position) return;
     const target = findInlineTargetAt(useAppStore.getState().content, position.offset);
@@ -429,11 +442,17 @@ export function WysiwygEditor() {
     setSourcePopup({ index, title: sourcePopupTitle(block?.kind ?? 'other') });
   }, [session]);
 
+  const handleInput = useCallback((index: number) => session.handleInput(index), [session]);
+  const handleBlurBlock = useCallback((index: number, nextFocus: Node | null) => session.normalizeBlock(index, nextFocus), [session]);
+  const handleCompositionChange = useCallback((composing: boolean, index: number) => session.markComposing(composing, index), [session]);
+  const handleCommitCode = useCallback((index: number, code: string, language?: string) => { session.writeCodeBlock(index, code, language); }, [session]);
+  const handleDeleteBlock = useCallback((index: number) => { session.deleteBlock(index); }, [session]);
+  const handleInsertAfter = useCallback((index: number) => { session.insertParagraphAfter(index); }, [session]);
+  const handleMoveBlock = useCallback((from: number, to: number) => { session.moveBlock(from, to); }, [session]);
+  const handleDuplicateBlock = useCallback((index: number) => { session.duplicateBlock(index); }, [session]);
+
   const blockDocument: WysiwygDocument = snapshot.document;
-  const blockKeys = useMemo(
-    () => blockDocument.blocks.map((block, index) => `${index}:${block.kind}`),
-    [blockDocument],
-  );
+  const emptyDocument = blockDocument.source.trim().length === 0;
   const popupBlock = sourcePopup ? blockDocument.blocks[sourcePopup.index] ?? null : null;
 
   return (
@@ -477,36 +496,37 @@ export function WysiwygEditor() {
       <article className="wysiwyg-document preview-document markdown-body">
         {blockDocument.blocks.map((block, index) => (
           <WysiwygBlockView
-            key={blockKeys[index]}
+            key={`${index}:${block.kind}`}
             index={index}
             kind={block.kind}
             source={block.source}
             startLine={block.startLine}
             editable={block.editable}
             skipRender={snapshot.skipRenderIndex === index}
-            renderRevision={snapshot.renderRevision}
-            emptyDocument={blockDocument.source.trim().length === 0}
+            renderRevision={snapshot.blockRenderRevisions.get(index) ?? 0}
+            emptyDocument={emptyDocument}
             count={blockDocument.blocks.length}
             documentPath={currentFile}
             workflowViewerEnabled={settings.workflow?.render_in_preview !== false}
             scrollRoot={scrollRoot}
             theme={theme}
             registerElement={registerElement}
-            onInput={(position) => session.handleInput(position)}
+            onInput={handleInput}
             onKeyDown={handleBlockKeyDown}
-            onBlurBlock={(position, nextFocus) => session.normalizeBlock(position, nextFocus)}
-            onCompositionChange={(composing, position) => session.markComposing(composing, position)}
-            onCommitCode={(position, code, language) => { session.writeCodeBlock(position, code, language); }}
+            onBlurBlock={handleBlurBlock}
+            onCompositionChange={handleCompositionChange}
+            onCommitCode={handleCommitCode}
             onInlineClick={handleInlineClick}
             onEditSource={handleEditSource}
-            onDeleteBlock={(position) => session.deleteBlock(position)}
-            onInsertAfter={(position) => session.insertParagraphAfter(position)}
-            onMove={(from, to) => session.moveBlock(from, to)}
-            onDuplicate={(position) => session.duplicateBlock(position)}
+            onDeleteBlock={handleDeleteBlock}
+            onInsertAfter={handleInsertAfter}
+            onMove={handleMoveBlock}
+            onDuplicate={handleDuplicateBlock}
           />
         ))}
       </article>
       <WysiwygChrome session={session} surface={scrollRoot} version={snapshot.version} pinned={Boolean(settings.editor.pin_toolbar)} />
+      <ProofreadHighlights session={session} version={snapshot.version} />
       {sourcePopup && popupBlock && (
         <SourcePopup
           title={sourcePopup.title}

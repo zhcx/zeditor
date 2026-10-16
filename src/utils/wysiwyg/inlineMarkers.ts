@@ -13,7 +13,7 @@
 import { renderMarkdownSource } from '../markdownPipeline.ts';
 
 /** 支持的标记种类。 */
-export type InlineMarkerKind = 'strong' | 'em' | 'del' | 'code';
+export type InlineMarkerKind = 'strong' | 'em' | 'del' | 'code' | 'strong-em';
 
 /**
  * 标记种类 → 生成的行内元素。
@@ -21,14 +21,14 @@ export type InlineMarkerKind = 'strong' | 'em' | 'del' | 'code';
  * 删除线用 `<s>`：markdown-it 对 `~~x~~` 输出的是 `<s>`，而 `EMPHASIS_MARKERS` 里
  * `del` 也回写成 `~~`，两边一致才能保证「改写 DOM → 回写源码 → 重新渲染」不再变形。
  *
- * 下划线（`_` / `__`）刻意不支持：CommonMark 只在标点或空白边界才认它，中文正文里
- * `文件_名称` 这类写法很常见，而纯文本判断无法可靠覆盖全部边界规则，宁可交回字面文本。
+ * 下划线与三重强调也交给渲染器核对边界，`文件_名称_` 等词内写法不转换。
  */
 export const INLINE_MARKER_TAGS: Record<InlineMarkerKind, string> = {
   strong: 'strong',
   em: 'em',
   del: 's',
   code: 'code',
+  'strong-em': 'em',
 };
 
 export interface InlineMarkerMatch {
@@ -48,9 +48,13 @@ interface MarkerRule {
 
 /** 长标记在前：`**` 必须先于 `*` 尝试，否则 `**粗**` 会被当成 `*` 加 `*粗*`。 */
 const MARKER_RULES: readonly MarkerRule[] = [
+  { marker: '***', kind: 'strong-em' },
+  { marker: '___', kind: 'strong-em' },
   { marker: '**', kind: 'strong' },
+  { marker: '__', kind: 'strong' },
   { marker: '~~', kind: 'del' },
   { marker: '*', kind: 'em' },
+  { marker: '_', kind: 'em' },
   { marker: '`', kind: 'code' },
 ];
 
@@ -81,7 +85,8 @@ function rendersAsMarker(text: string, match: InlineMarkerMatch): boolean {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;');
-  return renderMarkdownSource(text).trim().endsWith(`<${tag}>${escaped}</${tag}></p>`);
+  const body = match.kind === 'strong-em' ? `<strong>${escaped}</strong>` : escaped;
+  return renderMarkdownSource(text).trim().endsWith(`<${tag}>${body}</${tag}></p>`);
 }
 
 /**

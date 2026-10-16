@@ -10,6 +10,8 @@ import { textContentOf, type InlineElementNode, type InlineNode } from './inline
 import type { WysiwygBlockKind } from './blocks.ts';
 
 export interface BlockContainerOffset {
+  /** Enter 的容器语义：包括所有祖先引用和列表的前缀。 */
+  continuation?: { prefix: string; separator: string; kind: WysiwygBlockKind; exitPrefix?: string };
   escapePipes?: boolean;
   /** 文本容器在块节点树中的路径（`[]` 表示块内容本身就是容器，如段落）。 */
   path: number[];
@@ -72,8 +74,8 @@ function createWriter(): Writer {
   };
 }
 
-function isElement(node: InlineNode, tags: string[]): node is InlineElementNode {
-  return node.type === 'element' && tags.includes(node.tag);
+function isElement<Tag extends string>(node: InlineNode, tags: Tag[]): node is InlineElementNode & { tag: Tag } {
+  return node.type === 'element' && tags.some(tag => tag === node.tag);
 }
 
 function headingLevel(node: InlineNode): number {
@@ -94,10 +96,12 @@ function writeContainer(
   escapeLineStart: boolean,
   singleLine = false,
   allowBlockMarkers = false,
+  continuation?: BlockContainerOffset['continuation'],
 ): void {
   // 段落里刚敲出的块标记不转义，其余情况保持行首转义（`#不是标题` 仍然是普通文本）。
   const lineStart = escapeLineStart && !(allowBlockMarkers && BLOCK_MARKER_PATTERN.test(textContentOf(nodes)));
   writer.openContainer(path, writer.length(), lineStart);
+  if (continuation) writer.containers[writer.containers.length - 1].continuation = continuation;
   const markdown = serializeInlineNodes(nodes, { escapeLineStart: lineStart });
   writer.write(singleLine ? markdown.replace(/\n/g, ' ') : markdown);
 }
@@ -107,20 +111,30 @@ function writeHeading(writer: Writer, index: number, node: InlineElementNode): v
   writeContainer(writer, [index], node.children, false);
 }
 
-function writeBlockquote(writer: Writer, nodes: InlineNode[], parentPath: number[] = []): void {
+function writeBlockquote(writer: Writer, nodes: InlineNode[], parentPath: number[] = [], prefix = '> '): void {
+  let written = false;
   nodes.forEach((node, index) => {
     if (node.type === 'text' && node.text.trim().length === 0) return;
     const path = [...parentPath, index];
-    if (writer.length() > 0) writer.write('\n>\n');
-    writer.write('> ');
+    if (written) writer.write(`\n${prefix.trimEnd()}\n`);
+    written = true;
+    if (isElement(node, ['blockquote'])) {
+      writeBlockquote(writer, node.children, path, `${prefix}> `);
+      return;
+    }
+    if (isElement(node, ['ul', 'ol'])) {
+      writeList(writer, path, node, prefix, prefix);
+      return;
+    }
+    writer.write(prefix);
     const level = headingLevel(node);
     if (level > 0 && node.type === 'element') {
       writer.write(`${'#'.repeat(level)} `);
-      writeContainer(writer, path, node.children, false, true);
+      writeContainer(writer, path, node.children, false, true, false, { prefix, separator: `\n${prefix.trimEnd()}\n`, kind: 'blockquote', exitPrefix: prefix.replace(/>[ \t]*$/, '') });
       return;
     }
     if (isElement(node, ['p'])) {
-      writeContainer(writer, path, node.children, false, true);
+      writeContainer(writer, path, node.children, false, true, false, { prefix, separator: `\n${prefix.trimEnd()}\n`, kind: 'blockquote', exitPrefix: prefix.replace(/>[ \t]*$/, '') });
       return;
     }
     writeContainer(writer, path, [node], false, true);
@@ -129,9 +143,15 @@ function writeBlockquote(writer: Writer, nodes: InlineNode[], parentPath: number
 
 /** 任务项：`null` 表示不是任务项；`true` / `false` 表示勾选状态。 */
 function checkboxState(item: InlineElementNode): boolean | null {
-  const input = item.children.find(
-    (child): child is InlineElementNode => isElement(child, ['input']) && child.attrs.type === 'checkbox',
-  );
+  const find = (nodes: InlineNode[]): InlineElementNode | undefined => {
+    for (const node of nodes) {
+      if (node.type !== 'element' || ['ul', 'ol', 'blockquote'].includes(node.tag)) continue;
+      if (node.tag === 'input' && node.attrs.type === 'checkbox') return node;
+      const nested = find(node.children);
+      if (nested) return nested;
+    }
+  };
+  const input = find(item.children);
   return input ? input.attrs.checked === 'true' : null;
 }
 
@@ -140,24 +160,47 @@ function itemTextNodes(item: InlineElementNode): InlineNode[] {
   return item.children.filter((child) => !isElement(child, ['input']));
 }
 
-function writeList(writer: Writer, listPath: number[], list: InlineElementNode, depth: number): void {
+function writeList(writer: Writer, listPath: number[], list: InlineElementNode, indent = '', exitPrefix = ''): void {
   const ordered = list.tag === 'ol';
-  let ordinal = 1;
+  const start = Number(list.attrs.start ?? 1);
+  let ordinal = ordered && Number.isSafeInteger(start) && start >= 0 ? start : 1;
   list.children.forEach((child, childIndex) => {
     if (!isElement(child, ['li'])) return;
     writer.ensureNewline();
-    const indent = '  '.repeat(depth);
     const task = checkboxState(child);
     const marker = task === null ? (ordered ? `${ordinal}.` : '-') : task ? '- [x]' : '- [ ]';
     writer.write(`${indent}${marker} `);
-    writeContainer(writer, [...listPath, childIndex], itemTextNodes(child), false, true);
-    ordinal += 1;
-
-    const nestedIndex = child.children.findIndex(candidate => isElement(candidate, ['ul', 'ol']));
-    if (nestedIndex >= 0) {
-      writer.ensureNewline();
-      writeList(writer, [...listPath, childIndex, nestedIndex], child.children[nestedIndex] as InlineElementNode, depth + 1);
+    const itemPath = [...listPath, childIndex];
+    // 任务框属于正文；缩进宽度只取列表标记本身（- / 10.）。
+    const markerWidth = (ordered && task === null ? `${ordinal}.` : '-').length + 1;
+    const continuationIndent = `${indent}${' '.repeat(markerWidth)}`;
+    const nextMarker = task !== null ? '- [ ]' : ordered ? `${ordinal + 1}.` : '-';
+    const continuation = { prefix: `${indent}${nextMarker} `, separator: '\n', kind: 'list' as const, exitPrefix };
+    const hasBlocks = child.children.some(node => isElement(node, ['p', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6']));
+    let textWritten = false;
+    if (!hasBlocks) {
+      writeContainer(writer, itemPath, itemTextNodes(child), false, true, false, continuation);
+      textWritten = true;
     }
+    child.children.forEach((nested, nestedIndex) => {
+      const path = [...itemPath, nestedIndex];
+      if (isElement(nested, ['ul', 'ol', 'blockquote'])) {
+        writer.ensureNewline();
+        if (nested.tag === 'blockquote') writeBlockquote(writer, nested.children, path, `${continuationIndent}> `);
+        else writeList(writer, path, nested, continuationIndent, continuation.prefix);
+      } else if (hasBlocks && (isElement(nested, ['p']) || headingLevel(nested) > 0)) {
+        if (textWritten) writer.write(`\n${indent.trimEnd()}\n${continuationIndent}`);
+        const level = headingLevel(nested);
+        if (level > 0) writer.write(`${'#'.repeat(level)} `);
+        if (nested.type === 'element') {
+          writeContainer(writer, path, nested.children, false, true, false, textWritten
+            ? { prefix: continuationIndent, separator: `\n${indent.trimEnd()}\n`, kind: 'paragraph' }
+            : continuation);
+        }
+        textWritten = true;
+      }
+    });
+    ordinal += 1;
   });
 }
 
@@ -221,7 +264,7 @@ export function serializeBlockMarkdown(
       writeBlockquote(writer, nodes);
     }
   } else if (kind === 'list' && listIndex >= 0) {
-    writeList(writer, [listIndex], nodes[listIndex] as InlineElementNode, 0);
+    writeList(writer, [listIndex], nodes[listIndex] as InlineElementNode);
   } else if (paragraphIndex >= 0) {
     writeContainer(writer, [paragraphIndex], (nodes[paragraphIndex] as InlineElementNode).children, true, false, allowMarkers);
   } else {

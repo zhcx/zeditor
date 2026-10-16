@@ -13,12 +13,14 @@ interface FenceParts {
 }
 
 function parseFence(source: string): FenceParts | null {
-  const lines = source.split('\n');
+  const lines = source.split(/\r\n|\n|\r/);
   const opening = lines[0]?.match(/^([ \t]*)(`{3,}|~{3,})[ \t]*([^\s`]*)[^\n]*$/);
   if (!opening) return null;
   const [, indent, marker, language] = opening;
   const closingIndex = lines.length > 1 ? lines.length - 1 : -1;
-  const closing = closingIndex > 0 && /^[ \t]*(?:`{3,}|~{3,})[ \t]*$/.test(lines[closingIndex] ?? '');
+  const closingMarker = lines[closingIndex]?.trim() ?? '';
+  const closing = closingIndex > 0 && closingMarker.length >= marker.length
+    && [...closingMarker].every(char => char === marker[0]);
   const body = lines.slice(1, closing ? closingIndex : undefined);
   return { indent, marker, language: language ?? '', lines: body };
 }
@@ -59,7 +61,7 @@ export function extractFenceCode(source: string): string {
   const stripped = indent.length > 0
     ? lines.map(line => line.startsWith(indent) ? line.slice(indent.length) : line.replace(/^[ \t]{1,2}/, ''))
     : lines;
-  return stripped.join('\n').replace(/\n+$/, '');
+  return stripped.join('\n');
 }
 
 export interface FormatFenceOptions {
@@ -83,6 +85,6 @@ export function formatFence(code: string, language: string, options: FormatFence
   const indent = options.indent ?? '';
   const marker = safeMarker(code, baseMarker);
   const info = options.info ?? language;
-  const body = code.replace(/\n+$/, '').split('\n').map(line => `${indent}${line}`).join('\n');
+  const body = code.split(/\r\n|\n|\r/).map(line => `${indent}${line}`).join('\n');
   return `${indent}${marker}${info}\n${body}\n${indent}${marker}`;
 }

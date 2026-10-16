@@ -16,6 +16,7 @@ import {
   serializeBlockMarkdown,
   type BlockSerializeOptions,
   type BlockSerializeResult,
+  type BlockContainerOffset,
 } from '../../utils/wysiwyg/blockSerialize.ts';
 import { blockOffsetFromPoint, pointFromBlockOffset, type ContainerInput } from '../../utils/wysiwyg/offsetMap.ts';
 import { toInlineNodes } from '../../utils/wysiwyg/inlineNodes.ts';
@@ -36,7 +37,8 @@ import { extractFenceInfo, extractFenceLanguage, extractFenceMarker, formatFence
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown.ts';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste.ts';
 import { pointInContainer, rangeInContainer } from './domCaret.ts';
-import { parseTableAt } from '../../utils/markdownTable.ts';
+import { navigateTableCell, parseTableAt } from '../../utils/markdownTable.ts';
+import { caretAtVisualEdge, caretOnVisualLine } from './caretGeometry.ts';
 import { escapeInlineText, serializeInlineNodes } from '../../utils/wysiwyg/inlineSerialize.ts';
 import { INLINE_MARKER_TAGS, matchInlineMarker } from '../../utils/wysiwyg/inlineMarkers.ts';
 
@@ -48,6 +50,8 @@ export interface WysiwygSessionSnapshot {
   version: number;
   /** 仅规范化或结构变化时递增，用于避免重复重建已恢复选区的 DOM。 */
   renderRevision: number;
+  /** 需要规范化的脏块版本；即使 React 合并中间快照，也能让该块重建 DOM。 */
+  blockRenderRevisions: ReadonlyMap<number, number>;
 }
 
 export interface WysiwygSessionOptions {
@@ -108,6 +112,8 @@ export class WysiwygSession {
   private skipRenderIndex: number | null = null;
   private version = 0;
   private renderRevision = 0;
+  private blockRenderRevisions = new Map<number, number>();
+  private readonly dirtyBlockIndices = new Set<number>();
   private lastCaret = 0;
   private pendingCaret: number | null = null;
   private pendingSelectionEnd: number | null = null;
@@ -121,7 +127,7 @@ export class WysiwygSession {
   constructor(source: string, options: WysiwygSessionOptions) {
     this.options = options;
     this.document = splitMarkdownDocument(source);
-    this.snapshot = { document: this.document, skipRenderIndex: null, version: 0, renderRevision: 0 };
+    this.snapshot = { document: this.document, skipRenderIndex: null, version: 0, renderRevision: 0, blockRenderRevisions: this.blockRenderRevisions };
   }
 
   /** 注入变更监听：外壳挂载时调用，卸载时可传回空实现。 */
@@ -195,11 +201,15 @@ export class WysiwygSession {
     const tagName = INLINE_MARKER_TAGS[match.kind];
     // 同种标记不能套自己：`**a**` 在已有的粗体里敲下会得到 `<strong><strong>a</strong></strong>`，
     // 回写成源码是 `****a****`，重新解析已经不再是粗体了。
-    if (parentElement?.closest(tagName)) return;
+    if (parentElement?.closest(tagName) || (match.kind === 'strong-em' && parentElement?.closest('strong'))) return;
 
     const document_ = textNode.ownerDocument;
     const wrapper = document_.createElement(tagName);
-    wrapper.textContent = match.content;
+    if (match.kind === 'strong-em') {
+      const strong = document_.createElement('strong');
+      strong.textContent = match.content;
+      wrapper.appendChild(strong);
+    } else wrapper.textContent = match.content;
     const fragment = document_.createDocumentFragment();
     if (match.from > 0) fragment.append(document_.createTextNode(text.slice(0, match.from)));
     fragment.append(wrapper);
@@ -269,6 +279,7 @@ export class WysiwygSession {
    */
   private commit(block: WysiwygBlock, nextBlockSource: string): void {
     const index = this.document.blocks.indexOf(block);
+    if (index >= 0) this.dirtyBlockIndices.add(index);
     const caretBefore = this.locateCaretOffset();
     this.pushUndo({ coalesce: true });
 
@@ -301,11 +312,32 @@ export class WysiwygSession {
     const balanced = this.splitContentAtSelection(collected);
     const source = balanced?.source ?? collected.serialized.markdown;
     const caretAt = balanced?.caret ?? caret;
+    if (balanced?.empty && balanced.continuation?.exitPrefix !== undefined && !source.slice(caretAt).trim()) {
+      const prefix = balanced.continuation.exitPrefix;
+      const lineStart = source.lastIndexOf('\n', Math.max(0, caretAt - 1)) + 1;
+      const lines = source.slice(0, lineStart).split(/\r?\n/);
+      while (lines.length && /^[ \t>]*$/.test(lines.at(-1)!)) lines.pop();
+      const head = lines.join(this.document.eol);
+      const next = /^(?:[ \t]*>[ \t]*)+$/.test(prefix)
+        ? `${head}${this.document.eol}${prefix.trimEnd()}${this.document.eol}${prefix}`
+        : prefix.trim() ? source.slice(0, lineStart) + prefix
+          : head + (head ? this.document.eol.repeat(2) : '') + prefix;
+      this.checkpointBlock(collected);
+      return this.applyBlockSource(collected.block, next + source.slice(caretAt), collected.block.offset + next.length);
+    }
     // 空块退块：空列表项 / 空引用行上再按回车，离开列表或引用，而不是继续堆空项。
     const exited = exitEmptyItem({ source, kind, caret: caretAt });
     if (exited) {
       this.checkpointBlock(collected);
       return this.applyBlockSource(collected.block, exited.source, collected.block.offset + exited.caret);
+    }
+    if (balanced?.continuation) {
+      const { prefix, separator } = balanced.continuation;
+      this.checkpointBlock(collected);
+      const insertion = `${separator}${prefix}`;
+      return this.applyBlockSource(collected.block,
+        source.slice(0, caretAt) + insertion + source.slice(caretAt),
+        collected.block.offset + caretAt + insertion.length);
     }
     const result = splitBlock({ source, kind, caret: caretAt });
     // 表格、代码块、分隔线不在块尾拆行：拆开后的两半会被重新解析成别的东西（表格会碎成段落 + 列表项）。
@@ -421,17 +453,16 @@ export class WysiwygSession {
   /** Tab / Shift+Tab：列表层级调整。 */
   handleIndent(index: number, direction: 'indent' | 'outdent'): boolean {
     const collected = this.collectBlock(index);
-    if (!collected || collected.block.kind !== 'list') return false;
+    if (!collected || (collected.block.kind !== 'list' && collected.block.kind !== 'blockquote')) return false;
     const caret = this.caretOffsetInBlock(collected);
     if (caret === null) return false;
-    const result = adjustListIndent(collected.serialized.markdown, collected.block.kind, direction);
+    const result = adjustListIndent(collected.serialized.markdown, 'list', direction, caret);
     if (!result) return false;
-    const innerCaret = Math.max(0, caret - contentStartOffset(collected.serialized.markdown, collected.block.kind));
     this.checkpointBlock(collected);
     return this.applyBlockSource(
       collected.block,
       result.source,
-      collected.block.offset + contentStartOffset(result.source, 'list') + innerCaret,
+      collected.block.offset + result.caret,
     );
   }
 
@@ -469,12 +500,46 @@ export class WysiwygSession {
     if (!collected || !collected.block.editable) return false;
     const caret = this.caretOffsetInBlock(collected);
     if (caret === null) return false;
-    if (!arrowLeavesBlock({
+    const selection = this.accessors.getSurface()?.ownerDocument.getSelection();
+    const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+    if (range?.collapsed === false) return false;
+    const visualEdge = range ? caretAtVisualEdge(collected.element, range, direction) : null;
+    if (!(visualEdge ?? arrowLeavesBlock({
       kind: collected.block.kind,
       markdown: collected.serialized.markdown,
       caret,
       direction,
-    })) return false;
+    }))) return false;
+
+    return this.moveToAdjacentBlock(index, direction);
+  }
+
+  /** 表格内仅在单元格的视觉/文字边界跨格；表格外边界接到相邻正文。 */
+  handleTableArrow(index: number, direction: BlockArrowDirection): boolean {
+    const host = this.accessors.getBlockElement(index);
+    const selection = this.accessors.getSurface()?.ownerDocument.getSelection();
+    if (!host || !selection?.rangeCount || this.document.blocks[index]?.kind !== 'table') return false;
+    const range = selection.getRangeAt(0);
+    const element = range.startContainer.nodeType === 1 ? range.startContainer as Element : range.startContainer.parentElement;
+    const cell = element?.closest<HTMLTableCellElement>('td,th');
+    if (!cell || !host.contains(cell) || !caretAtVisualEdge(cell, range, direction)) return false;
+    this.flushWriteBack();
+    const current = this.getSelectionOffsets().from;
+    const table = parseTableAt(this.document.source, current);
+    const row = (cell.parentElement as HTMLTableRowElement).rowIndex;
+    const sourceCell = table?.rows.filter((_, index) => index !== 1)[row]?.cells[cell.cellIndex];
+    if (!sourceCell) return false;
+    const offset = direction === 'left' ? sourceCell.from : direction === 'right' ? sourceCell.to : current;
+    const key = { left: 'ArrowLeft', right: 'ArrowRight', up: 'ArrowUp', down: 'ArrowDown' } as const;
+    const navigation = navigateTableCell(this.document.source, offset, key[direction]);
+    if (navigation?.kind === 'move') {
+      this.setSelectionOffsets(navigation.cursor);
+      return true;
+    }
+    return this.moveToAdjacentBlock(index, direction);
+  }
+
+  private moveToAdjacentBlock(index: number, direction: BlockArrowDirection): boolean {
 
     const forward = direction === 'down' || direction === 'right';
     const targetIndex = this.adjacentEditableBlock(index, forward ? 1 : -1);
@@ -490,6 +555,15 @@ export class WysiwygSession {
       local = forward ? contentStartOffset(markdown, target.kind) : markdown.length;
     } catch {
       return false;
+    }
+    if (direction === 'up' || direction === 'down') {
+      const selection = this.accessors.getSurface()?.ownerDocument.getSelection();
+      const range = selection?.rangeCount ? selection.getRangeAt(0) : null;
+      if (range && typeof range.getBoundingClientRect === 'function') {
+        const landing = caretOnVisualLine(targetElement, range.getBoundingClientRect().left, forward);
+        const offset = landing ? this.offsetOfDomPoint(landing.startContainer, landing.startOffset) : null;
+        if (offset !== null) local = offset - target.offset;
+      }
     }
     // 这里只移动光标，不改源码：setSelectionOffsets 在非等待渲染时直接落选区。
     // applySelection 会自己聚焦最近的 contenteditable；围栏块则走 zeditor-code-selection，
@@ -554,6 +628,7 @@ export class WysiwygSession {
 
   /** 删除块（悬停操作条「删除」）。 */
   deleteBlock(index: number): boolean {
+    this.flushWriteBack();
     if (!this.document.blocks[index]) return false;
     this.pushUndo({ coalesce: false });
     const removed = removeBlockFromSource(this.document, index);
@@ -562,6 +637,7 @@ export class WysiwygSession {
 
   /** 在指定块之后插入一个空段落并落光标（悬停操作条「在下方插入」）。 */
   insertParagraphAfter(index: number): boolean {
+    this.flushWriteBack();
     const block = this.document.blocks[index];
     if (!block) return false;
     this.pushUndo({ coalesce: false });
@@ -575,6 +651,7 @@ export class WysiwygSession {
 
   /** 用新的块源码替换（源码弹窗保存）。 */
   replaceBlock(index: number, source: string): boolean {
+    this.flushWriteBack();
     const block = this.document.blocks[index];
     if (!block) return false;
     if (source === block.source) return false;
@@ -786,12 +863,15 @@ export class WysiwygSession {
   // ── 内部实现 ───────────────────────────────────────────────
 
   /** 按 DOM 选区拆开行内树，Range 会为两侧保留完整的 strong/em/link 包装。 */
-  private splitContentAtSelection(collected: CollectedBlock): { source: string; caret: number } | null {
+  private splitContentAtSelection(collected: CollectedBlock): { source: string; caret: number; continuation?: BlockContainerOffset['continuation']; empty: boolean } | null {
     const owner = this.accessors.getSurface()?.ownerDocument;
     const selection = owner?.getSelection();
     if (!owner?.createRange || !selection?.rangeCount) return null;
     const range = selection.getRangeAt(0);
-    for (const entry of collected.serialized.containers) {
+    // 列表父项的 DOM 包含整棵子列表，但其行内源码不包含子列表。
+    // 先找最深的文本容器，避免把子项内的回车错误应用到父项。
+    const entries = [...collected.serialized.containers].sort((left, right) => right.path.length - left.path.length);
+    for (const entry of entries) {
       const container = pathToNode(collected.element, entry.path);
       if (!container?.contains(range.startContainer) || !container.contains(range.endContainer)) continue;
       const options = { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes };
@@ -807,6 +887,8 @@ export class WysiwygSession {
       return {
         source: collected.serialized.markdown.slice(0, entry.contentOffset) + head + tail + collected.serialized.markdown.slice(entry.contentOffset + originalLength),
         caret: entry.contentOffset + head.length,
+        continuation: entry.continuation,
+        empty: originalLength === 0,
       };
     }
     return null;
@@ -824,6 +906,8 @@ export class WysiwygSession {
 
   /** 结构操作前，先保留尚未防抖写回的文字，再建立结构操作的撤销边界。 */
   private checkpointBlock(collected: CollectedBlock): void {
+    const index = this.document.blocks.indexOf(collected.block);
+    if (index >= 0) this.dirtyBlockIndices.add(index);
     const visibleSource = replaceBlockSource(this.document, collected.block, collected.serialized.markdown).source;
     if (visibleSource !== this.document.source) this.pushUndo({ coalesce: true });
     this.pushUndo({ coalesce: false, source: visibleSource });
@@ -848,8 +932,21 @@ export class WysiwygSession {
 
   private emit(): void {
     this.version += 1;
-    if (this.skipRenderIndex === null) { this.renderRevision += 1; this.awaitingRender = true; }
-    this.snapshot = { document: this.document, skipRenderIndex: this.skipRenderIndex, version: this.version, renderRevision: this.renderRevision };
+    if (this.skipRenderIndex === null) {
+      this.renderRevision += 1;
+      this.awaitingRender = true;
+      if (this.dirtyBlockIndices.size > 0) {
+        this.blockRenderRevisions = new Map(this.blockRenderRevisions);
+        for (const index of this.blockRenderRevisions.keys()) {
+          if (index >= this.document.blocks.length) this.blockRenderRevisions.delete(index);
+        }
+        for (const index of this.dirtyBlockIndices) {
+          if (index < this.document.blocks.length) this.blockRenderRevisions.set(index, this.renderRevision);
+        }
+        this.dirtyBlockIndices.clear();
+      }
+    }
+    this.snapshot = { document: this.document, skipRenderIndex: this.skipRenderIndex, version: this.version, renderRevision: this.renderRevision, blockRenderRevisions: this.blockRenderRevisions };
     this.notify();
   }
 

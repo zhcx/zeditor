@@ -185,12 +185,12 @@ function addListItemContentAnchors(container: HTMLElement) {
     .forEach((checkbox) => { checkbox.disabled = false; });
   container.querySelectorAll<HTMLLIElement>('li[data-source-line]').forEach((item) => {
     // Loose lists already have a paragraph anchor that excludes nested lists.
-    if (item.querySelector(':scope > p[data-source-line]')) return;
+    if (item.querySelector(':scope > p[data-source-line], :scope > .preview-list-item-content')) return;
 
     const sourceLine = item.dataset.sourceLine;
     const directNodes = Array.from(item.childNodes);
     const nestedListIndex = directNodes.findIndex(
-      (node) => node instanceof HTMLElement && (node.tagName === 'UL' || node.tagName === 'OL'),
+      (node) => node instanceof HTMLElement && ['UL', 'OL', 'BLOCKQUOTE', 'PRE', 'TABLE', 'H1', 'H2', 'H3', 'H4', 'H5', 'H6'].includes(node.tagName),
     );
     const contentNodes = nestedListIndex >= 0 ? directNodes.slice(0, nestedListIndex) : directNodes;
     if (!sourceLine || contentNodes.length === 0) return;

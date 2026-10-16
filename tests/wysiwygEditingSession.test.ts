@@ -62,6 +62,37 @@ it('returns and persists the latest DOM text before the debounce expires', () =>
   assert.deepEqual(fixture.persisted, ['abc\\*\\[\\]中文']);
 });
 
+it('preserves pending text before inserting a paragraph from block actions', () => {
+  const fixture = editingFixture('原文');
+  fixture.setText('原文刚输入');
+  fixture.session.handleInput(0);
+  fixture.session.insertParagraphAfter(0);
+  assert.equal(fixture.session.getSource(), '原文刚输入\n\n');
+  fixture.session.setAccessors({ getSurface: () => null, getBlockElement: () => null });
+  fixture.session.handleUndo();
+  assert.equal(fixture.session.getSource(), '原文刚输入');
+});
+
+it('records pending text before deleting a block so undo recovers it', () => {
+  const fixture = editingFixture('原文');
+  fixture.setText('原文刚输入');
+  fixture.session.handleInput(0);
+  fixture.session.deleteBlock(0);
+  fixture.session.setAccessors({ getSurface: () => null, getBlockElement: () => null });
+  fixture.session.handleUndo();
+  assert.equal(fixture.session.getSource(), '原文刚输入');
+});
+
+it('records pending text before applying block source so undo recovers it', () => {
+  const fixture = editingFixture('原文');
+  fixture.setText('原文刚输入');
+  fixture.session.handleInput(0);
+  fixture.session.replaceBlock(0, '替换');
+  fixture.session.setAccessors({ getSurface: () => null, getBlockElement: () => null });
+  fixture.session.handleUndo();
+  assert.equal(fixture.session.getSource(), '原文刚输入');
+});
+
 it('undoes Enter without also removing the typing that preceded it', () => {
   const fixture = editingFixture();
   fixture.setText('原文XYZ');
@@ -73,6 +104,20 @@ it('undoes Enter without also removing the typing that preceded it', () => {
   assert.equal(fixture.session.getSource(), '原文XYZ');
   fixture.session.handleUndo();
   assert.equal(fixture.session.getSource(), '原文');
+});
+
+it('invalidates only the dirty block when undo batches away the intermediate input snapshot', () => {
+  const fixture = editingFixture('原文');
+  const before = fixture.session.getSnapshot();
+  fixture.setText('原文刚输入');
+  fixture.session.handleInput(0);
+  fixture.session.handleUndo();
+  const after = fixture.session.getSnapshot();
+  assert.equal(after.document.source, before.document.source);
+  assert.equal(after.skipRenderIndex, before.skipRenderIndex);
+  assert.notEqual(after.blockRenderRevisions.get(0), before.blockRenderRevisions.get(0));
+  assert.equal(after.blockRenderRevisions.size, 1);
+  assert.equal(before.blockRenderRevisions.size, 0, '旧快照的渲染版本不可被修改');
 });
 
 it('continues a newly typed list even before the input debounce fires', () => {

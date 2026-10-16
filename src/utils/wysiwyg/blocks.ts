@@ -77,14 +77,13 @@ export function detectEol(source: string): '\n' | '\r\n' {
  * - 媒体嵌入渲染成播放器后无法从 DOM 还原语法；
  * - 块级公式渲染成 KaTeX 结构，正文编辑会破坏它（行内公式不受影响）；
  * - 围栏代码在文本容器里是只读岛屿，列表或引用中出现时整块重写会丢掉它；
- * - 引用里嵌套列表 / 表格同理（逐行前缀处理不在 v1 范围内）。
+ * - 代码、HTML、表格等专用块嵌在列表/引用内时仍由 token 守卫保护；文本容器可递归往返。
  */
 function isEditableBlock(kind: WysiwygBlockKind, source: string): boolean {
   if (!EDITABLE_KINDS.has(kind)) return false;
   if (findMediaEmbeds(source).length > 0) return false;
   if (/^\s*(?:\$\$|\\\[)/.test(source)) return false;
   if (/^[ \t]*(?:```|~~~)/m.test(source)) return false;
-  if (kind === 'blockquote' && /^[ \t]*>[ \t]*(?:[-*+]|\d+[.)])[ \t]/m.test(source)) return false;
   if (kind === 'blockquote' && /^[ \t]*>[ \t]*\|/m.test(source)) return false;
   return true;
 }
@@ -110,6 +109,14 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
   const tokens = source.length > 0 ? markdownRenderer.parse(source, {}) : [];
 
   for (const token of tokens) {
+    if (token.level > 0) {
+      const block = blocks[blocks.length - 1];
+      if (!block?.editable) continue;
+      // 判断实际 token 结构，避免引用前缀、懒续行等写法绕过源码正则。
+      // 行内序列化会跳过这些岛屿；整块改为源码编辑才能保留其内容。
+      if (['fence', 'code_block', 'html_block', 'hr', 'table_open'].includes(token.type)) block.editable = false;
+      continue;
+    }
     if (token.level !== 0 || token.hidden || !token.map) continue;
     const kind = KIND_BY_TOKEN[token.type];
     if (!kind) continue;
@@ -145,7 +152,18 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
     });
   }
 
-  const lineNumberAt = (offset: number) => source.slice(0, offset).split(/\r\n|\n|\r/).length;
+  // 空段落可能有数千个；在已建好的行索引上定位，避免每次都重扫整篇前缀。
+  const lineNumberAt = (offset: number) => {
+    if (offset === source.length && /[\r\n]$/.test(source)) return lines.length + 1;
+    let low = 0;
+    let high = lines.length;
+    while (low < high) {
+      const middle = (low + high) >>> 1;
+      if (lines[middle].start <= offset) low = middle + 1;
+      else high = middle;
+    }
+    return Math.max(1, low);
+  };
   const emptyParagraph = (offset: number, length = 0): WysiwygBlock => ({
     kind: 'paragraph',
     startLine: lineNumberAt(offset),

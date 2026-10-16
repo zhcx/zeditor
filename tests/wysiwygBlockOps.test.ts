@@ -70,6 +70,22 @@ it('keeps the quote marker of nested quotes when splitting', () => {
   assert.equal(splitMarkdownDocument(result.head + result.separator + result.tail).blocks[0].kind, 'blockquote');
 });
 
+it('continues the list item at the caret rather than the first item', () => {
+  for (const [source, expected] of [
+    ['3. 甲\n4. 乙', '5. '],
+    ['- 父项\n  7. 子项', '  8. '],
+    ['- 普通项\n- [x] 任务', '- [ ] '],
+  ]) {
+    assert.equal(splitBlock({ source, kind: 'list', caret: source.length })?.tail, expected);
+  }
+});
+
+it('uses the existing CRLF separator when splitting a multiline block', () => {
+  const source = '3. 甲\r\n4. 乙';
+  const result = splitBlock({ source, kind: 'list', caret: source.length });
+  assert.equal(result?.separator, '\r\n');
+});
+
 it('detects the trailing empty quote line that markdown-it does not render', () => {
   // 回车拆出的新引用段落是空的：markdown-it 不生成 <p>，DOM 里没有落点，
   // 外壳据此补一个空段落节点。
@@ -141,10 +157,32 @@ it('refuses to retitle blocks that own their own interaction surface', () => {
 });
 
 it('indents and outdents list items', () => {
-  assert.deepEqual(adjustListIndent('- 一项', 'list', 'indent'), { source: '  - 一项', caret: 4 });
+  assert.equal(adjustListIndent('- 一项', 'list', 'indent'), null, '首项不能缩进到不存在的上一项下');
   assert.deepEqual(adjustListIndent('  - 一项', 'list', 'outdent'), { source: '- 一项', caret: 2 });
   assert.equal(adjustListIndent('- 一项', 'list', 'outdent'), null);
   assert.equal(adjustListIndent('段落', 'paragraph', 'indent'), null);
+});
+
+it('indents only the item at the caret together with its descendants', () => {
+  const source = '- 甲\n- 乙\n  - 子项\n- 丙';
+  const caret = source.indexOf('乙') + 1;
+  const result = adjustListIndent(source, 'list', 'indent', caret);
+  assert.deepEqual(result, { source: '- 甲\n  - 乙\n    - 子项\n- 丙', caret: caret + 2 });
+  assert.deepEqual(adjustListIndent(result!.source, 'list', 'outdent', result!.caret), { source, caret });
+});
+
+it('uses ordered-marker width and preserves CRLF when changing item level', () => {
+  const source = '10. 甲\r\n11. 乙';
+  const result = adjustListIndent(source, 'list', 'indent', source.length);
+  assert.equal(result?.source, '10. 甲\r\n    1. 乙');
+  assert.equal(result?.caret, result?.source.length);
+});
+
+it('changes list depth within quotes without moving or removing the quote prefix', () => {
+  const source = '> - 甲\n> - 乙\n>   > 子引用\n> - 丙';
+  const result = adjustListIndent(source, 'list', 'indent', source.indexOf('乙') + 1);
+  assert.equal(result?.source, '> - 甲\n>   - 乙\n>     > 子引用\n> - 丙');
+  assert.equal(adjustListIndent(result!.source, 'list', 'outdent', result!.caret)?.source, source);
 });
 
 it('exits an empty list item or quote line instead of stacking another one', () => {

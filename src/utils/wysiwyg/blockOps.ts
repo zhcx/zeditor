@@ -7,6 +7,7 @@
  * 原样保留，块类型交给随后的重新解析决定。
  */
 import type { WysiwygBlockKind } from './blocks.ts';
+import { changeListIndent } from './listEditing.ts';
 
 const HEADING_PATTERN = /^#{1,6}[ \t]+/;
 const QUOTE_PATTERN = /^(?:[ \t]*>[ \t]?)+/;
@@ -73,15 +74,18 @@ export function splitBlock(input: { source: string; kind: WysiwygBlockKind; care
   const caret = Math.max(0, Math.min(input.caret, input.source.length));
   const head = input.source.slice(0, caret);
   const rest = input.source.slice(caret);
-  if (input.kind === 'list') return { head, tail: `${listMarkerForSplit(input.source)}${rest}`, separator: '\n' };
+  const eol = input.source.includes('\r\n') ? '\r\n' : '\n';
+  const lineStart = input.source.lastIndexOf('\n', Math.max(0, caret - 1)) + 1;
+  const currentLine = input.source.slice(lineStart);
+  if (input.kind === 'list') return { head, tail: `${listMarkerForSplit(currentLine)}${rest}`, separator: eol };
   if (input.kind === 'blockquote') {
     // 沿用该块自己的引用符，嵌套引用（`> > `）才不会被降级成单层。
-    const marker = QUOTE_PATTERN.exec(input.source)?.[0] ?? '> ';
+    const marker = QUOTE_PATTERN.exec(currentLine)?.[0] ?? '> ';
     // 光标已在引用内容开头：拆出来只有空引用行，等价于原块，不必插分隔符。
-    const separator = head.length === 0 ? '' : `\n${marker.trimEnd()}\n`;
+    const separator = head.length === 0 ? '' : `${eol}${marker.trimEnd()}${eol}`;
     return { head, tail: `${marker}${rest}`, separator };
   }
-  return { head, tail: rest, separator: '\n\n' };
+  return { head, tail: rest, separator: eol.repeat(2) };
 }
 
 /**
@@ -93,7 +97,7 @@ export function splitBlock(input: { source: string; kind: WysiwygBlockKind; care
  * 序列化时它又会还原成同一个空引用行。
  */
 export function hasTrailingEmptyQuoteLine(source: string): boolean {
-  return /^[ \t]*>[ \t]*$/.test(source.split('\n').at(-1) ?? '');
+  return /^(?:[ \t]*>[ \t]*)+$/.test(source.split(/\r?\n/).at(-1) ?? '');
 }
 
 /**
@@ -169,22 +173,15 @@ export function setHeadingLevel(
   return { source: `${'#'.repeat(clamped)} ${stripped}`, caret: clamped + 1 };
 }
 
-/** Tab / Shift+Tab：列表层级缩进（v1 统一 2 个空格）。 */
+/** Tab / Shift+Tab：当前项及后代的层级调整，缩进宽度由前一项的实际标记决定。 */
 export function adjustListIndent(
   source: string,
   kind: WysiwygBlockKind,
   direction: 'indent' | 'outdent',
+  caret = contentStartOffset(source, kind),
 ): { source: string; caret: number } | null {
   if (kind !== 'list') return null;
-  const match = LIST_PATTERN.exec(source);
-  if (!match) return null;
-  if (direction === 'indent') {
-    const next = `  ${source}`;
-    return { source: next, caret: contentStartOffset(next, 'list') };
-  }
-  if ((match[1] ?? '').length < 2) return null;
-  const next = source.slice(2);
-  return { source: next, caret: contentStartOffset(next, 'list') };
+  return changeListIndent(source, direction, caret);
 }
 
 export type BlockArrowDirection = 'up' | 'down' | 'left' | 'right';

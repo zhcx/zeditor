@@ -171,6 +171,13 @@ export function WysiwygChrome({ session, surface, version, pinned }: Props) {
         setSelectedIndex(index => (index + (event.key === 'ArrowDown' ? 1 : -1) + visible.length) % Math.max(1, visible.length));
         return;
       }
+      if ((event.target as Element)?.closest('td,th') && !event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey) {
+        const direction = ({ ArrowUp: 'up', ArrowDown: 'down', ArrowLeft: 'left', ArrowRight: 'right' } as const)[event.key as 'ArrowUp'];
+        const host = (event.target as Element).closest<HTMLElement>('[data-block-index]');
+        if (direction && host && session.handleTableArrow(Number(host.dataset.blockIndex), direction)) {
+          event.preventDefault(); event.stopPropagation(); return;
+        }
+      }
       if ((event.target as Element)?.closest('td,th') && (event.key === 'Tab' || event.key === 'Enter')) {
         event.preventDefault(); event.stopPropagation();
         session.flushWriteBack();

@@ -48,12 +48,19 @@ it('refuses content that markdown would not render as emphasis', () => {
   assert.equal(matchInlineMarker('`a`b`', 5), null);
 });
 
-it('leaves underscore emphasis as literal text', () => {
-  // CommonMark 只在标点或空白边界才认 `_`，中文正文里 `文件_名称` 很常见；
-  // 纯文本判断覆盖不全边界规则，因此一律不接管。
-  assert.equal(matchInlineMarker('_斜体_', 4), null);
-  assert.equal(matchInlineMarker('__粗体__', 6), null);
-  assert.equal(matchInlineMarker('文件_名称_', 7), null);
+it('accepts underscore emphasis only at boundaries confirmed by the renderer', () => {
+  assert.deepEqual(matchInlineMarker('_斜体_', 4), { kind: 'em', from: 0, to: 4, content: '斜体' });
+  assert.deepEqual(matchInlineMarker('__粗体__', 6), { kind: 'strong', from: 0, to: 6, content: '粗体' });
+  assert.equal(matchInlineMarker('文件_名称_', 6), null);
+  assert.equal(matchInlineMarker('a__name__', 9), null);
+  assert.equal(matchInlineMarker('\\_name_', 7), null);
+});
+
+it('recognizes complete triple emphasis without converting partially closed markers', () => {
+  for (const source of ['***粗斜***', '___粗斜___']) {
+    assert.deepEqual(matchInlineMarker(source, source.length), { kind: 'strong-em', from: 0, to: source.length, content: '粗斜' });
+    assert.equal(matchInlineMarker(source.slice(0, -1), source.length - 1), null);
+  }
 });
 
 it('serializes a converted marker back to the source the user typed', () => {

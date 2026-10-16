@@ -160,7 +160,7 @@ it('keeps structures the inline serializer cannot round-trip read-only', () => {
   assert.deepEqual(document.blocks.map(block => [block.kind, block.editable]), [
     ['list', false],
     ['blockquote', true],
-    ['blockquote', false],
+    ['blockquote', true],
     ['fence', false],
   ]);
 });
@@ -171,6 +171,21 @@ it('keeps CRLF intact when a block is replaced', () => {
   assert.equal(next.source, '改过的第一段\r\n\r\n第二段\r\n');
 });
 
+it('protects nested block structures that the serializer cannot round-trip', () => {
+  for (const source of [
+    '> ```ts\n> const x = 1;\n> ```',
+    '- 项\n\n      indented code',
+    '> 内容\n>\n> ---',
+  ]) {
+    const block = splitMarkdownDocument(source).blocks[0];
+    assert.equal(block.editable, false, source);
+    assert.equal(block.source, source);
+  }
+  for (const source of ['> 单层引用\n>\n> 第二段', '> > 嵌套引用', '- 项\n  > 子引用', '- 项\n\n  # 子标题', '- 项\n\n  另一段', '- 甲\n  - 子项\n- 乙', '- 甲\n\n- 乙']) {
+    assert.equal(splitMarkdownDocument(source).blocks[0].editable, true, source);
+  }
+});
+
 it('keeps editable empty paragraphs before and between nonempty blocks', () => {
   const source = '\n\n第一段\n\n\n\n第二段';
   const document = splitMarkdownDocument(source);
@@ -179,6 +194,19 @@ it('keeps editable empty paragraphs before and between nonempty blocks', () => {
   ]);
   const next = replaceBlockSource(document, document.blocks[2], '新段落');
   assert.equal(next.source, '\n\n第一段\n\n新段落\n\n第二段');
+});
+
+it('indexes every empty caret block correctly in large LF, CRLF and CR documents', () => {
+  for (const eol of ['\n', '\r\n', '\r']) {
+    const source = eol.repeat(4) + Array.from({ length: 200 }, (_, index) => `段落 ${index}${eol.repeat(4)}`).join('');
+    const document = splitMarkdownDocument(source);
+    for (const block of document.blocks) {
+      const expectedLine = source.slice(0, block.offset).split(/\r\n|\n|\r/).length;
+      assert.equal(block.startLine, expectedLine);
+      assert.equal(source.slice(block.offset, block.offset + block.length), block.source);
+    }
+    assert.equal(document.blocks.at(-1)?.startLine, 805);
+  }
 });
 
 it('preserves reference definitions that do not produce rendered tokens', () => {

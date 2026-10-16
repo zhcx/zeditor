@@ -42,8 +42,8 @@ it('serializes blockquotes line by line with quote markers', () => {
   ]);
   assert.equal(result.markdown, '> 第一段\n>\n> 第二段');
   assert.deepEqual(result.containers, [
-    { path: [0], contentOffset: 2, escapeLineStart: false },
-    { path: [1], contentOffset: 10, escapeLineStart: false },
+    { path: [0], contentOffset: 2, escapeLineStart: false, continuation: { prefix: '> ', separator: '\n>\n', kind: 'blockquote', exitPrefix: '' } },
+    { path: [1], contentOffset: 10, escapeLineStart: false, continuation: { prefix: '> ', separator: '\n>\n', kind: 'blockquote', exitPrefix: '' } },
   ]);
 });
 
@@ -57,9 +57,44 @@ it('serializes nested lists with two-space indentation and task markers', () => 
   assert.equal(result.markdown, '- 一\n  - 一之一\n- 二');
 });
 
+it('preserves all child lists when one item contains multiple list types', () => {
+  const result = serializeBlockMarkdown('list', [ul(li(
+    textNode('父项'),
+    ul(li(textNode('无序子项'))),
+    elementNode('ol', {}, [li(textNode('有序子项'))]),
+  ))]);
+  assert.equal(result.markdown, '- 父项\n  - 无序子项\n  1. 有序子项');
+});
+
+it('preserves paragraph boundaries inside a loose list item', () => {
+  const result = serializeBlockMarkdown('list', [ul(li(p(textNode('第一段')), p(strong(textNode('第二段')))), li(p(textNode('后项'))))]);
+  assert.equal(result.markdown, '- 第一段\n\n  **第二段**\n- 后项');
+  assert.deepEqual(result.containers.map(entry => entry.path), [[0, 0, 0], [0, 0, 1], [0, 1, 0]]);
+});
+
+it('serializes quotes and lists recursively with the full container prefix', () => {
+  const quote = (...children: InlineNode[]) => elementNode('blockquote', {}, children);
+  assert.equal(serializeBlockMarkdown('blockquote', [quote(p(textNode('外层')), quote(p(textNode('内层'))))]).markdown, '> 外层\n>\n> > 内层');
+  assert.equal(serializeBlockMarkdown('blockquote', [quote(ul(li(textNode('引用项'), ul(li(textNode('子项'))))))]).markdown, '> - 引用项\n>   - 子项');
+  assert.equal(serializeBlockMarkdown('list', [ul(li(textNode('父项'), quote(p(textNode('引用')))))]).markdown, '- 父项\n  > 引用');
+});
+
+it('indents descendants to the full width of an ordered marker', () => {
+  const result = serializeBlockMarkdown('list', [elementNode('ol', { start: '10' }, [li(textNode('父'), ul(li(textNode('子'))))])]);
+  assert.equal(result.markdown, '10. 父\n    - 子');
+});
+
 it('serializes ordered lists with sequential numbers', () => {
   const result = serializeBlockMarkdown('list', [elementNode('ol', {}, [li(textNode('甲')), li(textNode('乙'))])]);
   assert.equal(result.markdown, '1. 甲\n2. 乙');
+});
+
+it('preserves the start number of each ordered list, including nested lists', () => {
+  const result = serializeBlockMarkdown('list', [elementNode('ol', { start: '7' }, [
+    li(textNode('甲'), elementNode('ol', { start: '3' }, [li(textNode('子项'))])),
+    li(textNode('乙')),
+  ])]);
+  assert.equal(result.markdown, '7. 甲\n   3. 子项\n8. 乙');
 });
 
 it('serializes task items from the checkbox state', () => {
@@ -86,7 +121,7 @@ it('unwraps the rendered blockquote without dropping its content', () => {
     textNode('\n'),
   ]);
   assert.equal(result.markdown, '> 引用正文');
-  assert.deepEqual(result.containers, [{ path: [0, 1], contentOffset: 2, escapeLineStart: false }]);
+  assert.deepEqual(result.containers, [{ path: [0, 1], contentOffset: 2, escapeLineStart: false, continuation: { prefix: '> ', separator: '\n>\n', kind: 'blockquote', exitPrefix: '' } }]);
 });
 
 it('serializes editable table cells through renderer wrappers with alignment and escaped pipes', () => {

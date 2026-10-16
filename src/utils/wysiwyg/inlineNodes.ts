@@ -79,7 +79,12 @@ export function toInlineNodes(parent: Node): InlineNode[] {
   const nodes: InlineNode[] = [];
   Array.from(parent.childNodes).forEach((child) => {
     if (child.nodeType === TEXT_NODE_TYPE) {
-      nodes.push(textNode(child.textContent ?? ''));
+      let text = child.textContent ?? '';
+      if ((parent.nodeType === 11 || (parent.nodeType === ELEMENT_NODE_TYPE && /^(?:LI|UL|OL|BLOCKQUOTE)$/.test((parent as Element).tagName)))
+        && /\n/.test(text) && !text.trim()) text = '';
+      // 渲染器在紧凑列表锚点末尾输出的换行是排版空白，软换行由 <br> 表达。
+      if (parent.nodeType === ELEMENT_NODE_TYPE && (parent as Element).classList?.contains('preview-list-item-content')) text = text.replace(/\n$/, '');
+      nodes.push(textNode(text));
       return;
     }
     if (child.nodeType !== ELEMENT_NODE_TYPE) return;

@@ -22,6 +22,24 @@ it('treats a fence without a language as plain text', () => {
   assert.equal(extractFenceCode(source), 'plain');
 });
 
+it('reads CRLF fences without exposing the closing marker as code', () => {
+  const source = '```ts\r\nconst a = 1;\r\n```';
+  assert.equal(extractFenceCode(source), 'const a = 1;');
+  assert.equal(extractFenceLanguage(source), 'ts');
+});
+
+it('keeps blank lines at the end of code while editing', () => {
+  const code = 'const a = 1;\n\n';
+  assert.equal(formatFence(code, 'ts'), '```ts\nconst a = 1;\n\n\n```');
+  assert.equal(extractFenceCode(formatFence(code, 'ts')), code);
+});
+
+it('does not treat a shorter or different closing marker as the fence end', () => {
+  for (const source of ['~~~~\ncode\n~~~', '```\ncode\n~~~']) {
+    assert.equal(extractFenceCode(source), 'code\n~~~');
+  }
+});
+
 it('rebuilds a fence from code and language, preserving style', () => {
   assert.equal(formatFence('const a = 1;', 'ts'), '```ts\nconst a = 1;\n```');
   assert.equal(formatFence('plain', ''), '```\nplain\n```');
