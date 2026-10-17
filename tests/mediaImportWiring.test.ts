@@ -74,6 +74,7 @@ test('desktop side whitelists media extensions, caps size and enables the asset 
 
   assert.equal(config.app.security.assetProtocol.enable, true);
   // 开启 assetProtocol 必须同时启用 tauri 的 protocol-asset feature，否则桌面端无法构建。
-  assert.match(cargo, /tauri = \{ version = "2", features = \["protocol-asset"\] \}/);
+  // features 列表可能同时包含 macos-private-api，这里只要求 protocol-asset 存在。
+  assert.match(cargo, /tauri = \{ version = "2", features = \[[^\]]*"protocol-asset"[^\]]*\] \}/);
   assert.match(config.app.security.csp, /media-src 'self' asset: http:\/\/asset\.localhost data: blob: https:/);
 });

@@ -871,6 +871,8 @@ fn hide_converter_window(command: &mut Command) {
         use std::os::windows::process::CommandExt;
         command.creation_flags(0x0800_0000);
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = command;
 }
 
 #[tauri::command]

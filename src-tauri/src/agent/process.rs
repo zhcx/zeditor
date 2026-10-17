@@ -16,6 +16,8 @@ const CREATE_NO_WINDOW: u32 = 0x0800_0000;
 fn hide_console(command: &mut Command) {
     #[cfg(windows)]
     command.creation_flags(CREATE_NO_WINDOW);
+    #[cfg(not(windows))]
+    let _ = command;
 }
 
 pub fn system_command(program: impl AsRef<OsStr>) -> Command {
@@ -65,6 +67,8 @@ fn discover_executable_uncached(name: &str) -> Option<PathBuf> {
         }
     }
 
+    // 仅 Windows 会追加 npm / WinGet / 用户目录候选，其它平台只读 PATH。
+    #[allow(unused_mut)]
     let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect())
         .unwrap_or_default();
@@ -116,7 +120,7 @@ fn official_claude_candidates_from_roots(roots: impl IntoIterator<Item = PathBuf
         .collect()
 }
 
-#[cfg(test)]
+#[cfg(all(test, windows))]
 fn discover_in_directories(
     name: &str,
     directories: impl IntoIterator<Item = PathBuf>,
@@ -263,6 +267,8 @@ pub fn resolve_executable(path: PathBuf) -> Result<PathBuf, String> {
 }
 
 pub fn select_discovered(paths: impl IntoIterator<Item = PathBuf>) -> Option<PathBuf> {
+    // 排序只在 Windows 上生效（按 exe/cmd/ps1 优先级），其它平台保持发现顺序。
+    #[allow(unused_mut)]
     let mut paths: Vec<PathBuf> = paths.into_iter().filter(|path| path.is_file()).collect();
     #[cfg(windows)]
     paths.sort_by_key(|path| {
@@ -286,7 +292,10 @@ pub fn select_discovered(paths: impl IntoIterator<Item = PathBuf>) -> Option<Pat
 
 #[cfg(test)]
 mod tests {
+    // 该模块的测试全部是 Windows 专用的，非 Windows 平台不引入这些依赖。
+    #[cfg(windows)]
     use super::*;
+    #[cfg(windows)]
     use std::fs;
 
     #[cfg(windows)]

@@ -181,32 +181,32 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.6.3 更新
+## v0.6.4 更新
 
 ### 更新日志
 
-- **修复启动时「预览框先出现，编辑框与资源管理器栏后出现」**：编辑区是懒加载的，Monaco 的首次布局与文字绘制是**异步**的，预览的 Markdown 却是**同步**渲染的；启动页此前只在 React 首帧后（双 `requestAnimationFrame`）就淡出，揭开时预览已有内容、编辑区仍在加载。现在启动页等到**编辑区首帧真正画出**且**字体就绪**后再淡出，保证揭开时界面已完整。
-- **字体就绪纳入等待**：等待 `document.fonts.ready`，避免字体替换引起的二次重排被看见。
-- **编辑区始终有占位骨架**：Monaco 就绪前渲染「正在加载编辑器…」占位层，任何时刻都不再是一片空背景；该占位样式此前已存在但无渲染点（死代码），本次接入。
-- **超时兜底**：启动页最多等待 3 秒，极端情况下也不会滞留。
+- **新增「所见即所得」编辑模式**：整篇文档按最终排版渲染，直接在渲染结果上写作，不需要认识 Markdown 标记。支持段落、标题、引用、嵌套列表、表格单元格、代码块的就地编辑，行首快捷输入（`# ` / `- ` / `> ` / ```` ``` ````）、块级菜单（移动 / 复制 / 插入 / 删除 / 编辑源码）、内容级撤销栈与输入法安全写回；首次安装可选择默认编辑方式，随时用 `Ctrl+Alt+M`（macOS `⌥⌘M`）切换。
+- **macOS 原生体验回归**：原生红绿灯与叠层标题栏、系统菜单栏（应用 / 文件 / 编辑 / 功能 / 窗口 / 帮助）、macOS 惯例快捷键（`⌘S`、`⇧⌘S`、`⇧⌘Z`、`⌃⌘F`、`⌘,`）、`⌘W` 隐藏窗口而 `⌘Q` 退出、Finder 双击 `.md` 打开、Dock 点击恢复窗口、系统「打开 / 保存」面板跟随界面语言。
+- **编辑器打磨**：修复段落行高跳变与段间距递增、块手柄对齐、有序列表续号、代码块尾部空行、方向键跨块、`Delete` 合并段落、大纲误识别 Setext 标题等问题；表格按内容宽度渲染并对齐预览。
+- **性能**：规范化只重建脏块，普通编辑不再刷新整篇块 DOM；稳定块组件回调与 HTML 缓存按最近使用淘汰。
 
-### v0.6.3 平台安装包对照
+### v0.6.4 平台安装包对照
 
-> 以下链接指向 v0.6.3 Release 资产；安装包由 GitHub Actions 根据 v0.6.3 标签源码构建。
+> 以下链接指向 v0.6.4 Release 资产；安装包由 GitHub Actions 根据 v0.6.4 标签源码构建。macOS 安装包为临时签名、未公证，首次打开需右键「打开」放行。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor-0.6.3-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.3/Zeditor_0.6.3_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor-0.6.4-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.3.md`](docs/releases/v0.6.3.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.4.md`](docs/releases/v0.6.4.md)。
 
 ## Contributors
 

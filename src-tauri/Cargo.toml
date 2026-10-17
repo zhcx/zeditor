@@ -1,6 +1,6 @@
 [package]
 name = "zeditor"
-version = "0.6.3"
+version = "0.6.4"
 description = "A modern Markdown editor with Notion-style UI"
 authors = ["you"]
 edition = "2021"
@@ -11,7 +11,9 @@ tauri-build = { version = "2", features = [] }
 [dependencies]
 # 不再强制启用 devtools：release 启动更轻量；debug 构建默认自带 devtools。
 # protocol-asset 是 tauri.conf.json 中 assetProtocol 允许本地媒体播放的前提。
-tauri = { version = "2", features = ["protocol-asset"] }
+# macos-private-api：关闭 WKWebView 的不透明白底，窗口底色才能跟随主题
+# （否则缩放/全屏时新区域会先露出白底）。仅 macOS 生效。
+tauri = { version = "2", features = ["protocol-asset", "macos-private-api"] }
 tauri-plugin-shell = "2"
 tauri-plugin-dialog = "2"
 tauri-plugin-fs = "2"

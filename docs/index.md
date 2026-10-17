@@ -4,7 +4,7 @@ layout: home
 hero:
   name: Zeditor
   text: 现代化的 Markdown 编辑器
-  tagline: 实时预览 · AI 辅助写作 · 文档转换 · 多格式导出 · 云备份
+  tagline: 所见即所得 · 实时预览 · AI 辅助写作 · 文档转换 · 多格式导出 · 云备份
   actions:
     - theme: brand
       text: 快速上手
@@ -18,10 +18,10 @@ hero:
 
 features:
   - icon: ✍️
-    title: 沉浸编辑体验
-    details: Monaco 编辑器 + 实时预览，智能 Tab 导航、富文本粘贴、斜杠命令、表格浮动工具栏与内联弹窗。
-    link: /guide/editing
-    linkText: 了解编辑功能
+    title: 所见即所得写作
+    details: 四种工作区模式：直接在排版结果上写作、源码对照实时预览、沉浸阅读与沉浸写作；智能 Tab 导航、斜杠命令、表格与内联弹窗一应俱全。
+    link: /guide/view-modes
+    linkText: 了解视图模式
   - icon: 🔍
     title: 统一搜索与快捷命令
     details: 用 Ctrl+P 一次输入即可搜索打开的文档、当前正文、工作区文件与内容；空输入列出快捷命令与近期文件，输入 > 可筛选全部命令。
@@ -52,4 +52,9 @@ features:
     details: WebDAV 与 S3 兼容存储自动备份，保留最近 20 个内容版本，本地保存永不受云端影响。
     link: /guide/cloud-backup
     linkText: 了解云备份
+  - icon: 🍎
+    title: 原生 macOS 体验
+    details: 系统红绿灯与叠层标题栏、原生菜单栏、⌘ 快捷键、⌘W 隐藏 / ⌘Q 退出、Finder 双击打开与 Dock 恢复窗口。
+    link: /reference/shortcuts
+    linkText: 查看快捷键
 ---

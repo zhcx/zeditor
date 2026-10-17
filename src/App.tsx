@@ -56,12 +56,46 @@ import './styles/icons.css';
 import './styles/typography.css';
 import './styles/wysiwyg.css';
 import './styles/onboarding.css';
+// macOS 原生外观层：以 html[data-platform='macos'] 作用域，其他平台不受影响。
+// 必须最后加载，才能在既有工作台样式之后覆盖标题栏与控件度量。
+import './styles/macos.css';
 import { contentFontStack, typographyCssVariables } from './utils/appearanceSettings';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
+import { isMacOS } from './utils/platform';
 
 interface DragDropPayload {
   paths: string[];
   position: { x: number; y: number };
+}
+
+const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/**
+ * 把窗口底色与原生外观同步到当前主题。
+ *
+ * WKWebView 在窗口重绘新区域（缩放、全屏切换）时会先露出自己的不透明白底，
+ * 只有把 NSWindow / WebView 的底色也设成主题底色，才看不到这条白带。
+ *
+ * 注意参数名：@tauri-apps/api 2.11 的 setBackgroundColor 发送的是 `color`，
+ * 而 Rust 命令签名是 `value`，直接调用 API 会因缺少 value 静默失败，因此这里
+ * 走 invoke，并同时带上两个键以兼容后续版本。
+ */
+async function syncNativeWindowChrome() {
+  if (!isMacOS() || !isTauriRuntime()) return;
+  const styles = getComputedStyle(document.documentElement);
+  const raw = styles.getPropertyValue('--bg-app').trim() || styles.getPropertyValue('--ui-bg-app').trim();
+  const hex = /^#?([\da-f]{3}|[\da-f]{6})$/i.exec(raw)?.[1];
+  if (!hex) return;
+  const expanded = hex.length === 3 ? hex.split('').map(channel => channel + channel).join('') : hex;
+  const rgb = [0, 2, 4].map(offset => Number.parseInt(expanded.slice(offset, offset + 2), 16));
+  const color = [...rgb, 255];
+  const dark = (document.documentElement.dataset.theme ?? '').endsWith('-dark');
+  try {
+    await invoke('plugin:window|set_background_color', { label: null, value: color, color });
+    await invoke('plugin:window|set_theme', { label: null, value: dark ? 'dark' : 'light' });
+  } catch {
+    // 非关键装饰：权限缺失时保持系统默认底色，不影响编辑。
+  }
 }
 
 function App() {
@@ -228,10 +262,22 @@ function App() {
     resolve?.(action);
   }, []);
 
-  const requestAppClose = useCallback(async (installerPath?: string) => {
-    if (!('__TAURI_INTERNALS__' in window) || closeGuardInProgress.current) return;
+  const requestAppClose = useCallback(async (installerPath?: string, closeMode: 'window' | 'quit' = 'window') => {
+    if (!isTauriRuntime() || closeGuardInProgress.current) return;
     closeGuardInProgress.current = true;
     closeCancelled.current = false;
+
+    const currentWindow = getCurrentWindow();
+    // 从 Dock 菜单或 ⌘Q 退出时窗口可能已隐藏：先抬到前台，
+    // 否则未保存确认框会在看不见的窗口里等待。
+    if (isMacOS() && closeMode === 'quit') {
+      try {
+        await currentWindow.show();
+        await currentWindow.setFocus();
+      } catch {
+        // 窗口已销毁时无需恢复。
+      }
+    }
 
     try {
       const result = await guardWindowClose(useAppStore.getState().tabs, {
@@ -271,8 +317,21 @@ function App() {
           }
           return;
         }
+        // macOS 两种关闭语义：关窗口只隐藏应用（留在 Dock），退出才销毁进程。
+        if (isMacOS() && closeMode === 'window') {
+          await currentWindow.hide();
+          return;
+        }
+        if (isMacOS()) {
+          try {
+            await invoke('exit_application');
+          } catch (error) {
+            console.error('Requesting the native application exit failed.', error);
+          }
+          return;
+        }
         try {
-          await getCurrentWindow().destroy();
+          await currentWindow.destroy();
         } catch (error) {
           // A capability/configuration regression must never trap the user in
           // the close prompt. Ask the native application event loop to exit as
@@ -498,6 +557,80 @@ function App() {
 
     return () => { unlisten.then(fn => fn()); };
   }, [requestAppClose]);
+
+  // macOS：窗口底色与原生外观跟随主题；缩放期间关闭毛玻璃并重新上色，
+  // 避免 WKWebView 重绘新区域前露出一条白底。
+  useEffect(() => {
+    if (!isMacOS() || !isTauriRuntime()) return undefined;
+    let resizeTimer: number | null = null;
+    const applyChrome = () => { void syncNativeWindowChrome(); };
+
+    applyChrome();
+    window.addEventListener('zeditor-theme-change', applyChrome);
+    const colorScheme = window.matchMedia('(prefers-color-scheme: dark)');
+    colorScheme.addEventListener('change', applyChrome);
+
+    const onResize = () => {
+      if (resizeTimer === null) {
+        document.documentElement.classList.add('window-resizing');
+        applyChrome();
+      } else {
+        window.clearTimeout(resizeTimer);
+      }
+      resizeTimer = window.setTimeout(() => {
+        resizeTimer = null;
+        document.documentElement.classList.remove('window-resizing');
+      }, 150);
+    };
+    window.addEventListener('resize', onResize);
+
+    return () => {
+      window.removeEventListener('zeditor-theme-change', applyChrome);
+      colorScheme.removeEventListener('change', applyChrome);
+      window.removeEventListener('resize', onResize);
+      if (resizeTimer !== null) window.clearTimeout(resizeTimer);
+      document.documentElement.classList.remove('window-resizing');
+    };
+  }, []);
+
+  // macOS 生命周期：Dock 退出请求走未保存守卫；点按 Dock 图标恢复隐藏的窗口。
+  useEffect(() => {
+    if (!isMacOS() || !isTauriRuntime()) return undefined;
+    const quit = listen('zeditor-quit-requested', () => {
+      void requestAppClose(undefined, 'quit');
+    });
+    const reopened = listen('zeditor-window-reopened', () => {
+      const current = getCurrentWindow();
+      void current.show().then(() => current.setFocus()).catch(() => undefined);
+    });
+    return () => {
+      void quit.then(fn => fn());
+      void reopened.then(fn => fn());
+    };
+  }, [requestAppClose]);
+
+  // macOS 系统惯例快捷键：⌘, 打开设置，⌃⌘F 切换全屏（与原生菜单同义）。
+  useEffect(() => {
+    if (!isMacOS()) return undefined;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.isComposing) return;
+      if (event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey && event.key === ',') {
+        event.preventDefault();
+        setSettingsOpen(true);
+        return;
+      }
+      if (event.ctrlKey && event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'f') {
+        event.preventDefault();
+        if (!isTauriRuntime()) return;
+        const current = getCurrentWindow();
+        void current.isFullscreen()
+          .then(fullscreen => current.setFullscreen(!fullscreen))
+          .catch(() => undefined);
+      }
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, [setSettingsOpen]);
 
   // 沉浸模式是临时态：Esc 回到用户选择的持久模式（默认源码对照）。
   useEffect(() => {

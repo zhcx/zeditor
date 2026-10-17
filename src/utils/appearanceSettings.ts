@@ -1,3 +1,5 @@
+import { isMacOS } from './platform.ts';
+
 export const DEFAULT_FONT_SIZE = 14;
 export const FONT_SIZE_MIN = 12;
 export const FONT_SIZE_MAX = 32;
@@ -35,8 +37,12 @@ export function typographyCssVariables(appearance: { ui_font_size?: unknown; let
  * 缓存，渲染用的是新字体而折行宽度仍按旧字体计算，导致行文字溢出编辑框。
  */
 export function contentFontStack(fontFamily?: string): string {
-  const family = fontFamily?.replace(/[;{}]/g, '').trim() || 'Microsoft YaHei';
-  return `${family}, "Microsoft YaHei", sans-serif`;
+  const family = fontFamily?.replace(/[;{}]/g, '').trim();
+  // 未指定字体时按平台取系统字体：macOS 回落到微软雅黑会明显「像 Windows 软件」。
+  const fallback = isMacOS()
+    ? '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif'
+    : '"Microsoft YaHei", sans-serif';
+  return family ? `${family}, ${fallback}` : fallback;
 }
 
 export function getRangeMarkerGeometry(

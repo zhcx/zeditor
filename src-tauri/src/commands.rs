@@ -2847,10 +2847,9 @@ mod workspace_search_tests {
 
 #[cfg(test)]
 mod link_check_tests {
-    use super::{
-        document_drive_prefix, is_drive_relative_path, is_unc_path, is_windows_root_relative,
-        Settings,
-    };
+    #[cfg(target_os = "windows")]
+    use super::document_drive_prefix;
+    use super::{is_drive_relative_path, is_unc_path, is_windows_root_relative, Settings};
 
     #[test]
     fn unc_and_drive_relative_paths_are_rejected() {
@@ -3043,12 +3042,11 @@ pub async fn finalize_update_install(installer_path: String) -> Result<(), Strin
         command
             .spawn()
             .map_err(|e| format!("启动安装程序失败: {}", e))?;
+        // 退出应用，安装程序才能替换文件。
+        std::process::exit(0);
     }
     #[cfg(not(target_os = "windows"))]
     {
-        return Err("自动安装仅支持 Windows".to_string());
+        Err("自动安装仅支持 Windows".to_string())
     }
-
-    // Exit the app so the installer can replace files
-    std::process::exit(0);
 }

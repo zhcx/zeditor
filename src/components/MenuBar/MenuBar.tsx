@@ -14,6 +14,9 @@ import { applyExportTemplate, loadExportTemplate } from '../Export/exportTemplat
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { resolveSaveBaseName } from '../../utils/saveName';
 import { formatShortcut } from '../../utils/platformShortcuts';
+import { isMacOS } from '../../utils/platform';
+import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
+import { collectMenuActions, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
 import { THEMES, resolveThemePreference } from '../../themes/apply';
 
@@ -35,6 +38,11 @@ interface MenuItem {
   children?: MenuItem[];
   /** 单选型菜单项的当前选中态，渲染为前置 ✓ 标记。 */
   checked?: boolean;
+  /**
+   * `skip`：只在窗口内菜单出现。撤销/剪贴板类在 macOS 上由系统「编辑」菜单
+   * 以原生预定义项承担，重复放进原生菜单会得到两套不一致的行为。
+   */
+  macNative?: 'skip';
 }
 
 interface MenuGroup {
@@ -109,6 +117,36 @@ async function toggleAppFullscreen() {
     return;
   }
   await document.documentElement.requestFullscreen();
+}
+
+/**
+ * 「导出」子菜单之外的旧导出项：窗口内菜单与原生菜单都不显示，
+ * 否则同一动作会出现两次（一次带子菜单、一次裸项）。
+ */
+function isLegacyExportItem(item: MenuItem): boolean {
+  return !item.children && !item.divider && (item.label === '导出为 HTML' || item.label === '导出为 PDF...');
+}
+
+/**
+ * 把窗口内菜单转换成原生菜单模型。
+ *
+ * id 取自层级下标：菜单结构在渲染之间保持稳定，重建时同一 id 始终指向同一条目，
+ * 原生菜单因此可以按 id 派发到最新动作；最近文件夹等动态列表变化会触发整体重建。
+ */
+function toAppMenuItems(items: MenuItem[], prefix: string): AppMenuItem[] {
+  return items.filter(item => !isLegacyExportItem(item)).map((item, index) => {
+    const id = `${prefix}.${index}`;
+    return {
+      id,
+      label: item.label,
+      action: item.action,
+      shortcut: item.shortcut,
+      divider: item.divider,
+      checked: item.checked,
+      macNative: item.macNative,
+      children: item.children ? toAppMenuItems(item.children, id) : undefined,
+    };
+  });
 }
 
 function HelpModal({ type, updateInfo, updateError, downloadProgress, downloadDone, onDownloadAndInstall, onClose }: HelpModalProps) {
@@ -838,12 +876,12 @@ export function MenuBar() {
     {
       label: t('功能', language),
       items: [
-        { label: t('撤销', language), action: () => document.execCommand('undo'), shortcut: 'Ctrl+Z' },
-        { label: t('重做', language), action: () => document.execCommand('redo'), shortcut: 'Ctrl+Y' },
+        { label: t('撤销', language), action: () => document.execCommand('undo'), shortcut: 'Ctrl+Z', macNative: 'skip' },
+        { label: t('重做', language), action: () => document.execCommand('redo'), shortcut: 'Ctrl+Y', macNative: 'skip' },
         { divider: true, label: '' },
-        { label: t('剪切', language), action: () => document.execCommand('cut'), shortcut: 'Ctrl+X' },
-        { label: t('复制', language), action: () => document.execCommand('copy'), shortcut: 'Ctrl+C' },
-        { label: t('粘贴', language), action: () => document.execCommand('paste'), shortcut: 'Ctrl+V' },
+        { label: t('剪切', language), action: () => document.execCommand('cut'), shortcut: 'Ctrl+X', macNative: 'skip' },
+        { label: t('复制', language), action: () => document.execCommand('copy'), shortcut: 'Ctrl+C', macNative: 'skip' },
+        { label: t('粘贴', language), action: () => document.execCommand('paste'), shortcut: 'Ctrl+V', macNative: 'skip' },
         { divider: true, label: '' },
         { label: t('插入图片…', language), action: () => requestInsert('image'), shortcut: 'Ctrl+Shift+I' },
         { label: t('插入表格', language), action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
@@ -867,13 +905,14 @@ export function MenuBar() {
           ],
         },
         { divider: true, label: '' },
-        { label: t('全选', language), action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A' },
+        { label: t('全选', language), action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A', macNative: 'skip' },
         { divider: true, label: '' },
         { label: t('源码对照', language), checked: mode === 'split', action: () => useAppStore.getState().setMode('split') },
         { label: t('所见即所得', language), checked: mode === 'wysiwyg', shortcut: 'Ctrl+Alt+M', action: () => useAppStore.getState().setMode('wysiwyg') },
         { label: t('沉浸阅读', language), checked: mode === 'immersive', action: () => useAppStore.getState().setMode('immersive') },
         { label: t('沉浸写作', language), checked: mode === 'zen', action: () => useAppStore.getState().setMode('zen') },
         { label: t('演示模式', language), action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); } },
+        { label: t('切换全屏', language), shortcut: 'F11', action: () => { void toggleAppFullscreen(); } },
         { divider: true, label: '' },
         {
           label: t('主题', language),
@@ -918,9 +957,84 @@ export function MenuBar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const shouldHideLegacyExportItem = (item: MenuItem) => {
-    return !item.children && !item.divider && (item.label === '导出为 HTML' || item.label === '导出为 PDF...');
-  };
+  // ── macOS 系统菜单栏 ─────────────────────────────────────────────────
+  // 窗口内的自绘菜单栏在 macOS 上隐藏，改由系统菜单栏（原生 NSMenu）承担。
+  // 结构变化（语言、勾选态、最近文件夹、设置）时重建；点击按 id 派发回当前
+  // 模型的动作闭包。构建失败时保留窗口内菜单，不写 data-native-menu 标记。
+  const macDesktop = isMacOS() && '__TAURI_INTERNALS__' in window;
+  const menusRef = useRef(menus);
+  const checkUpdatesRef = useRef(handleCheckUpdates);
+  const recentFolderKey = recentFolders.map(folder => folder.path).join('\u0000');
+
+  // 每次提交后刷新：原生菜单重建时读到的始终是最新一次渲染的菜单模型与动作。
+  useEffect(() => {
+    menusRef.current = menus;
+    checkUpdatesRef.current = handleCheckUpdates;
+  });
+
+  useEffect(() => {
+    if (!macDesktop) return undefined;
+    let cancelled = false;
+    const groups = menusRef.current;
+    const fileItems = toAppMenuItems(groups[1]?.items ?? [], 'file');
+    const featureItems = toAppMenuItems(groups[2]?.items ?? [], 'feature');
+    const appItems: AppMenuItem[] = [
+      { id: 'app.about', label: t('关于 Zeditor', language), action: () => setHelpModal('about') },
+      { id: 'app.checkUpdates', label: t('检查更新', language), action: () => { void checkUpdatesRef.current(); } },
+      { id: 'app.settings', label: t('设置…', language), shortcut: 'Ctrl+,', action: () => setSettingsOpen(true) },
+    ];
+    const helpItems: AppMenuItem[] = [
+      { id: 'help.shortcuts', label: t('快捷键说明', language), action: () => setHelpModal('shortcuts') },
+      { id: 'help.syntax', label: t('Markdown 语法', language), action: () => setHelpModal('syntax') },
+    ];
+    const labels: SystemMenuLabels = {
+      edit: t('编辑', language),
+      window: t('窗口', language),
+      help: t('帮助', language),
+      undo: t('撤销', language),
+      redo: t('重做', language),
+      cut: t('剪切', language),
+      copy: t('复制', language),
+      paste: t('粘贴', language),
+      selectAll: t('全选', language),
+      minimize: t('最小化', language),
+      zoom: t('缩放', language),
+      bringAllToFront: t('前置全部窗口', language),
+      closeWindow: t('关闭窗口', language),
+      services: t('服务', language),
+      hideApp: t('隐藏 Zeditor', language),
+      hideOthers: t('隐藏其他', language),
+      showAll: t('显示全部', language),
+      quitApp: t('退出 Zeditor', language),
+    };
+    const actions = collectMenuActions(appItems, fileItems, featureItems, helpItems);
+
+    void buildMacAppMenu({
+      appName: APP_NAME,
+      fileLabel: groups[1]?.label ?? t('文件', language),
+      featureLabel: groups[2]?.label ?? t('功能', language),
+      appMenuItems: appItems,
+      fileItems,
+      featureItems,
+      helpItems,
+      labels,
+      dispatch: (id) => actions.get(id)?.(),
+      // 勾选态通过重建同步，无需单独登记。
+      registerCheckItem: () => undefined,
+    })
+      .then(menu => menu.setAsAppMenu())
+      .then(() => {
+        if (!cancelled) document.documentElement.dataset.nativeMenu = 'active';
+      })
+      .catch(error => {
+        console.warn('Failed to install the macOS application menu; keeping the in-window menu.', error);
+        delete document.documentElement.dataset.nativeMenu;
+      });
+
+    return () => { cancelled = true; };
+  }, [macDesktop, language, mode, resolvedTheme, recentFolderKey, settings, setSettingsOpen]);
+
+  const shouldHideLegacyExportItem = isLegacyExportItem;
 
   return (
     <>

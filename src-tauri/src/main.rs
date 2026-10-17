@@ -3,7 +3,10 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use tauri::{Emitter, Manager, State};
 
@@ -20,8 +23,15 @@ mod pdf;
 mod text_encoding;
 pub mod webdav;
 
+/// 退出闸门：macOS 的 `ExitRequested`（⌘Q、Dock 菜单退出、系统终止）默认由
+/// 前端未保存守卫接管；只有前端确认后调用 `exit_application` 才放行，
+/// 否则 `app.exit` 会被自己拦住，形成永远退不出去的循环。
+#[derive(Default)]
+struct ExitState(AtomicBool);
+
 #[tauri::command]
-fn exit_application(app: tauri::AppHandle) {
+fn exit_application(app: tauri::AppHandle, exit_state: State<'_, ExitState>) {
+    exit_state.0.store(true, Ordering::SeqCst);
     app.exit(0);
 }
 
@@ -163,7 +173,7 @@ fn main() {
 
     let pending_open_files = PendingOpenFiles(Mutex::new(initial_open_files()));
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         // This must be the first plugin: later launches deliver their argv to
         // the existing process instead of opening a second editor window.
         .plugin(tauri_plugin_single_instance::init(|app, args, cwd| {
@@ -271,6 +281,7 @@ fn main() {
             pdf::converter::export_pdf_direct,
         ])
         .manage(pending_open_files)
+        .manage(ExitState::default())
         // Instant 为 Copy；move 闭包直接携带启动时刻以满足 'static 约束。
         .setup(move |_app| {
             let agent_storage = _app.path().app_data_dir()?.join("agent-runtime");
@@ -321,8 +332,63 @@ fn main() {
             }
             Ok(())
         })
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    app.run(|app_handle, event| match event {
+        // macOS 从 Finder 双击 .md 走 Apple Event，启动参数里没有路径。
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Opened { urls } => {
+            let paths: Vec<PathBuf> = urls
+                .iter()
+                .filter_map(|url| url.to_file_path().ok())
+                .collect();
+            let documents = openable_document_paths(&paths, Path::new(""));
+            if documents.is_empty() {
+                return;
+            }
+            app_handle
+                .state::<PendingOpenFiles>()
+                .enqueue_open_files(documents.clone());
+            let _ = app_handle.emit("open-files", documents);
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
+            }
+        }
+        // macOS 关闭窗口只隐藏应用；⌘Q / Dock 退出先交给前端未保存守卫。
+        tauri::RunEvent::ExitRequested { api, .. } => {
+            #[cfg(target_os = "macos")]
+            {
+                let allow_exit = app_handle.state::<ExitState>().0.load(Ordering::SeqCst);
+                if !allow_exit && app_handle.get_webview_window("main").is_some() {
+                    api.prevent_exit();
+                    let _ = app_handle.emit("zeditor-quit-requested", ());
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = api;
+            }
+        }
+        // 点按 Dock 图标（窗口已隐藏）时恢复窗口。
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            let hidden_window = app_handle
+                .get_webview_window("main")
+                .filter(|_| !has_visible_windows);
+            if let Some(window) = hidden_window {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = app_handle.emit("zeditor-window-reopened", ());
+            }
+        }
+        _ => {}
+    });
 }
 
 #[cfg(test)]
@@ -332,6 +398,9 @@ mod tests {
 
     #[test]
     fn resolves_supported_launch_arguments_against_the_launch_directory() {
+        // 用运行时路径拼出期望值，测试在 Windows 与 Unix 上都能通过。
+        let launch_dir = Path::new("documents");
+        let joined = |name: &str| launch_dir.join(name).to_string_lossy().to_string();
         let paths = openable_document_paths(
             [
                 "notes.md",
@@ -340,15 +409,15 @@ mod tests {
                 "image.png",
                 "--flag",
             ],
-            Path::new("C:\\documents"),
+            launch_dir,
         );
 
         assert_eq!(
             paths,
             vec![
-                "C:\\documents\\notes.md",
-                "C:\\documents\\chapter.MARKDOWN",
-                "C:\\documents\\draft.txt",
+                joined("notes.md"),
+                joined("chapter.MARKDOWN"),
+                joined("draft.txt"),
             ]
         );
     }

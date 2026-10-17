@@ -5,6 +5,7 @@ import { MenuBar } from '../MenuBar/MenuBar';
 import { useAppStore } from '../../stores/appStore';
 import { t } from '../../i18n';
 import { formatShortcut } from '../../utils/platformShortcuts';
+import { isMacOS } from '../../utils/platform';
 
 const APP_NAME = 'Zeditor';
 
@@ -19,8 +20,10 @@ interface TitleBarProps {
 
 export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '', onSearchQueryChange, searchInputRef }: TitleBarProps) {
   const [isMaximized, setIsMaximized] = useState(false);
+  const [isFullscreen, setIsFullscreen] = useState(false);
   const mountedRef = useRef(true);
   const isTauri = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+  const macos = isMacOS();
   const language = useAppStore(state => state.settings.appearance.language);
   const activeDocumentTitle = useAppStore(state => (
     state.tabs.find(tab => tab.id === state.activeTabId)?.title || t('未命名', state.settings.appearance.language)
@@ -32,12 +35,20 @@ export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '',
     mountedRef.current = true;
 
     // One-shot initial read — fire-and-forget, no effect nesting
-    getCurrentWindow()
+    const current = getCurrentWindow();
+    current
       .isMaximized()
       .then((maximized) => {
         if (mountedRef.current) {
           setIsMaximized(maximized);
         }
+      })
+      .catch(() => { /* not critical */ });
+    // 全屏时 macOS 会隐藏红绿灯，标题栏需要收起左侧安全区。
+    current
+      .isFullscreen()
+      .then((fullscreen) => {
+        if (mountedRef.current) setIsFullscreen(fullscreen);
       })
       .catch(() => { /* not critical */ });
 
@@ -48,9 +59,11 @@ export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '',
 
   const handleResize = useCallback(async () => {
     try {
-      const maximized = await getCurrentWindow().isMaximized();
+      const current = getCurrentWindow();
+      const [maximized, fullscreen] = await Promise.all([current.isMaximized(), current.isFullscreen()]);
       if (mountedRef.current) {
         setIsMaximized(maximized);
+        setIsFullscreen(fullscreen);
       }
     } catch { /* not critical */ }
   }, []);
@@ -83,7 +96,7 @@ export function TitleBar({ onRequestClose, searchOpen = false, searchQuery = '',
   }, [isTauri, onRequestClose]);
 
   return (
-    <div className="titlebar">
+    <div className={`titlebar${macos ? ' titlebar-macos' : ''}${macos && isFullscreen ? ' titlebar-macos-fullscreen' : ''}`}>
       <div className="titlebar-menu" data-tauri-drag-region="false">
         <MenuBar />
       </div>

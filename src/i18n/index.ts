@@ -194,6 +194,22 @@ const entries: Record<string, Translation> = {
   '全选': { 'zh-CN': '全选', 'zh-TW': '全選', en: 'Select All' },
   '文件': { 'zh-CN': '文件', 'zh-TW': '檔案', en: 'File' },
   '功能': { 'zh-CN': '功能', 'zh-TW': '功能', en: 'Actions' },
+  // macOS 系统菜单栏（原生 NSMenu）的标题与系统项文案。
+  '编辑': { 'zh-CN': '编辑', 'zh-TW': '編輯', en: 'Edit' },
+  '窗口': { 'zh-CN': '窗口', 'zh-TW': '視窗', en: 'Window' },
+  '帮助': { 'zh-CN': '帮助', 'zh-TW': '說明', en: 'Help' },
+  '服务': { 'zh-CN': '服务', 'zh-TW': '服務', en: 'Services' },
+  '显示全部': { 'zh-CN': '显示全部', 'zh-TW': '顯示全部', en: 'Show All' },
+  '隐藏': { 'zh-CN': '隐藏', 'zh-TW': '隱藏', en: 'Hide' },
+  '隐藏其他': { 'zh-CN': '隐藏其他', 'zh-TW': '隱藏其他', en: 'Hide Others' },
+  '退出': { 'zh-CN': '退出', 'zh-TW': '結束', en: 'Quit' },
+  '退出 Zeditor': { 'zh-CN': '退出 Zeditor', 'zh-TW': '結束 Zeditor', en: 'Quit Zeditor' },
+  '隐藏 Zeditor': { 'zh-CN': '隐藏 Zeditor', 'zh-TW': '隱藏 Zeditor', en: 'Hide Zeditor' },
+  '关闭窗口': { 'zh-CN': '关闭窗口', 'zh-TW': '關閉視窗', en: 'Close Window' },
+  '前置全部窗口': { 'zh-CN': '前置全部窗口', 'zh-TW': '前置所有視窗', en: 'Bring All to Front' },
+  '缩放': { 'zh-CN': '缩放', 'zh-TW': '縮放', en: 'Zoom' },
+  '设置…': { 'zh-CN': '设置…', 'zh-TW': '設定…', en: 'Settings…' },
+  '切换全屏': { 'zh-CN': '切换全屏', 'zh-TW': '切換全螢幕', en: 'Toggle Full Screen' },
   '新建': { 'zh-CN': '新建', 'zh-TW': '新增', en: 'New' },
   '打开': { 'zh-CN': '打开', 'zh-TW': '開啟', en: 'Open' },
   '另存为': { 'zh-CN': '另存为', 'zh-TW': '另存新檔', en: 'Save As' },
@@ -316,6 +332,7 @@ const englishEntries: Record<string, string> = {
   '当前文档没有标题': 'The current document has no headings', '与当前内容对比': 'Compare with current content', '恢复此版本': 'Restore this version', '删除此记录': 'Delete this entry', '历史版本详情': 'Version details', '当前内容差异': 'Differences from current content',
   '调整 AI 伴写风格': 'Change AI companion style', '风格:': 'Style:', '发现': 'Found', '处问题，点击查看': ' issues; click to review', '上传中...': 'Uploading…', '上传成功': 'Upload complete', '上传失败:': 'Upload failed:',
   '打开的文档': 'Open documents', '关闭标签页': 'Close tab', '新建标签页': 'New tab', '最小化': 'Minimize', '最大化': 'Maximize', '图片链接': 'Image URL', '替代文本': 'Alt text', '图片描述': 'Image description',
+  '编辑': 'Edit', '窗口': 'Window', '帮助': 'Help', '服务': 'Services', '显示全部': 'Show All', '隐藏': 'Hide', '隐藏其他': 'Hide Others', '退出': 'Quit', '退出 Zeditor': 'Quit Zeditor', '隐藏 Zeditor': 'Hide Zeditor', '关闭窗口': 'Close Window', '前置全部窗口': 'Bring All to Front', '缩放': 'Zoom', '设置…': 'Settings…', '切换全屏': 'Toggle Full Screen',
   '返回': 'Back', '在线视频': 'Online video', '视频链接': 'Video URL', '插入 Emoji': 'Insert emoji', 'Markdown 语法检查': 'Markdown syntax check', '应用专业格式': 'Apply professional formatting',
   '未保存的文件': 'Unsaved files', '未保存': 'Unsaved', '不保存的内容将无法恢复。': 'Changes you do not save cannot be recovered.', '不保存': "Don't save",
   '工作流': 'Workflows', 'GitHub Actions 工作流查看器与结构化编辑': 'GitHub Actions workflow viewer and structured editing', '在预览中渲染工作流图': 'Render workflow diagrams in preview', '保存时保留 YAML 格式': 'Preserve YAML formatting on save',
@@ -331,6 +348,12 @@ const englishEntries: Record<string, string> = {
 // Japanese / Korean UI translations keyed by the Simplified Chinese source text;
 // missing keys fall back to English, then to the raw source.
 const japaneseEntries: Record<string, string> = {
+  // macOS 系统菜单栏
+  "编辑": "編集", "窗口": "ウインドウ", "帮助": "ヘルプ", "服务": "サービス",
+  "显示全部": "すべてを表示", "隐藏": "隠す", "隐藏其他": "ほかを隠す", "退出": "終了",
+  "退出 Zeditor": "Zeditorを終了", "隐藏 Zeditor": "Zeditorを隠す",
+  "关闭窗口": "ウインドウを閉じる", "前置全部窗口": "すべてを手前に移動", "缩放": "ズーム",
+  "设置…": "設定…", "切换全屏": "フルスクリーンに切り替え",
   "语言": "言語",
   "界面显示语言": "表示言語",
   "根据系统语言自动选择，也可手动更改": "システム言語に従って自動選択され、手動でも変更できます",
@@ -686,6 +709,12 @@ const japaneseEntries: Record<string, string> = {
 };
 
 const koreanEntries: Record<string, string> = {
+  // macOS 시스템 메뉴 막대
+  "编辑": "편집", "窗口": "윈도우", "帮助": "도움말", "服务": "서비스",
+  "显示全部": "모두 보기", "隐藏": "가리기", "隐藏其他": "기타 가리기", "退出": "종료",
+  "退出 Zeditor": "Zeditor 종료", "隐藏 Zeditor": "Zeditor 가리기",
+  "关闭窗口": "윈도우 닫기", "前置全部窗口": "모두 앞으로 가져오기", "缩放": "확대/축소",
+  "设置…": "설정…", "切换全屏": "전체 화면 전환",
   "语言": "언어",
   "界面显示语言": "화면 표시 언어",
   "根据系统语言自动选择，也可手动更改": "시스템 언어에 따라 자동 선택되며 수동으로도 변경할 수 있습니다",
