@@ -23,6 +23,8 @@ import { insertImageFromPath } from '../../services/imageAssets';
 import { imageDialogFilters } from '../../utils/imageSyntax';
 import { insertTable as buildTableInsert } from '../../utils/markdownTable';
 import { stripInlineFormatting } from '../../utils/inlineFormatting';
+import { applyHeadingLevel, createHeadingEdit } from '../../utils/headingFormatting';
+import { prepareMarkdownPaste } from '../../utils/markdownPaste';
 import { fitToolbarButtons } from '../../utils/workbenchNavigation';
 
 type ToolbarIconName = 'link' | 'image' | 'video' | 'table' | 'folder' | 'chat' | 'proofread' | 'sparkle' | 'palette' | 'rewrite' | 'translate' | 'summary' | 'outline';
@@ -308,12 +310,16 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   const [overflowOpen, setOverflowOpen] = useState(false);
   const [overflowPosition, setOverflowPosition] = useState({ left: 0, top: 0, above: false });
   const wrapSelection = (before: string, after: string) => {
+    if (useAppStore.getState().mode === 'wysiwyg' && before === '==' && after === '==') {
+      before = '<mark>';
+      after = '</mark>';
+    }
     if (!editorView) {
       setContent(content + before + after);
       return;
     }
 
-    const selection = editorView.state.selection.main;
+    const selection = editorView.getSelection();
     const selectedText = editorView.state.sliceDoc(selection.from, selection.to);
 
     if (selectedText) {
@@ -346,7 +352,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       return;
     }
 
-    const selection = editorView.state.selection.main;
+    const selection = editorView.getSelection();
     const transaction = editorView.state.update({
       changes: {
         from: selection.from,
@@ -365,7 +371,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
       return;
     }
 
-    const selection = editorView.state.selection.main;
+    const selection = editorView.getSelection();
     const line = editorView.state.doc.lineAt(selection.from);
     const atLineStart = selection.from === line.from;
     const insertText = atLineStart ? prefix + suffix : '\n' + prefix + suffix;
@@ -384,6 +390,12 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     editorView.focus();
   };
 
+  const applyHeading = (level: number) => {
+    if (editorView) { applyHeadingLevel(editorView, level); return; }
+    const edit = createHeadingEdit(content, { from: content.length, to: content.length }, level);
+    if (edit) setContent(content.slice(0, edit.from) + edit.text + content.slice(edit.to));
+  };
+
   const insertImage = (url: string, alt?: string) => {
     const imageMarkdown = `![${alt || '图片'}](${url})`;
     insertAtCursor(imageMarkdown);
@@ -392,7 +404,13 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
   const insertTable = (rows: number, columns: number) => {
     // 与斜杠命令、菜单入口共用同一份表格模板，光标落在表头第一个单元格。
     const { text, cursor } = buildTableInsert(rows, columns);
-    insertAtCursor(`\n${text}\n`, cursor + 1);
+    if (editorView) {
+      const selection = editorView.getSelection();
+      const prepared = prepareMarkdownPaste(text, editorView.getValue(), selection.from, selection.to);
+      const prefix = prepared.indexOf(text);
+      editorView.replaceRange(selection.from, selection.to, prepared, { from: selection.from + prefix + cursor, to: selection.from + prefix + cursor });
+      editorView.focus();
+    } else insertAtCursor(`\n${text}\n`, cursor + 1);
     setShowTablePicker(false);
   };
 
@@ -406,7 +424,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
 
   const clearInlineFormatting = () => {
     if (!editorView) return;
-    const selection = editorView.state.selection.main;
+    const selection = editorView.getSelection();
     if (selection.empty) return;
 
     const selected = editorView.state.sliceDoc(selection.from, selection.to);
@@ -422,7 +440,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
 
   const outdentSelection = () => {
     if (!editorView) return;
-    const selection = editorView.state.selection.main;
+    const selection = editorView.getSelection();
     const document = editorView.state.doc;
     const start = document.lineAt(selection.from).from;
     const end = document.lineAt(selection.to).to;
@@ -454,14 +472,14 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
         },
         {
           label: '标题',
-          title: '插入标题（H1 - H6）',
+          title: '设置标题（H1 - H6）',
           menu: [
-            { label: '一级标题', action: () => insertBlock('# ') },
-            { label: '二级标题', action: () => insertBlock('## ') },
-            { label: '三级标题', action: () => insertBlock('### ') },
-            { label: '四级标题', action: () => insertBlock('#### ') },
-            { label: '五级标题', action: () => insertBlock('##### ') },
-            { label: '六级标题', action: () => insertBlock('###### ') },
+            { label: '一级标题', action: () => applyHeading(1) },
+            { label: '二级标题', action: () => applyHeading(2) },
+            { label: '三级标题', action: () => applyHeading(3) },
+            { label: '四级标题', action: () => applyHeading(4) },
+            { label: '五级标题', action: () => applyHeading(5) },
+            { label: '六级标题', action: () => applyHeading(6) },
           ],
         },
         {

@@ -15,7 +15,6 @@
     const theme = preference === 'system'
       ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'vscode-dark' : 'vscode-light')
       : resolved(preference);
-
     // 平台标识必须在首帧前落盘：macos.css 以 html[data-platform='macos'] 生效，
     // React 挂载后再判定会让标题栏先按 Windows 布局渲染一帧（红绿灯留白跳变）。
     const platform = (() => {
@@ -30,7 +29,7 @@
     // macOS 使用系统字体栈（SF Pro / 苹方），其余平台沿用微软雅黑，
     // 与 src/utils/appearanceSettings.ts 的 contentFontStack 保持一致。
     const fallbackFont = platform === 'macos'
-      ? '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Helvetica Neue", sans-serif'
+      ? '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif'
       : '"Microsoft YaHei", sans-serif';
     const toFontStack = (fontFamily) => {
       const family = typeof fontFamily === 'string'

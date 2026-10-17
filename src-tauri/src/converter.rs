@@ -865,12 +865,14 @@ fn markdown_from_converter_output(
     Ok(markdown)
 }
 
-fn hide_converter_window(_command: &mut Command) {
+fn hide_converter_window(command: &mut Command) {
     #[cfg(target_os = "windows")]
     {
         use std::os::windows::process::CommandExt;
-        _command.creation_flags(0x0800_0000);
+        command.creation_flags(0x0800_0000);
     }
+    #[cfg(not(target_os = "windows"))]
+    let _ = command;
 }
 
 #[tauri::command]

@@ -73,6 +73,11 @@ const INPUT_ENGINE_OPTIONS = [
   { value: 'textarea', label: '传统输入层', description: '旧版 WebView 兼容' },
 ];
 
+const WORKSPACE_MODE_OPTIONS = [
+  { value: 'split', label: '源码对照', description: '编辑器 + 实时预览' },
+  { value: 'wysiwyg', label: '所见即所得', description: '直接在渲染结果上编辑' },
+];
+
 const IMAGE_SERVICE_OPTIONS = [
   { value: 'local', label: '本地' },
   { value: 'cloudinary', label: 'Cloudinary' },
@@ -309,7 +314,7 @@ function McpIntegrationStatus() {
 }
 
 export function SettingsPanel() {
-  const { settings, settingsTab, saveSettings, setSettingsOpen } = useAppStore(useShallow(state => ({ settings: state.settings, settingsTab: state.settingsTab, saveSettings: state.saveSettings, setSettingsOpen: state.setSettingsOpen })));
+  const { settings, settingsTab, saveSettings, setSettingsOpen, mode, setMode } = useAppStore(useShallow(state => ({ settings: state.settings, settingsTab: state.settingsTab, saveSettings: state.saveSettings, setSettingsOpen: state.setSettingsOpen, mode: state.mode, setMode: state.setMode })));
   const [localSettings, setLocalSettings] = useState(settings);
   const [activeTab, setActiveTab] = useState<SettingsTab>(settingsTab);
   const [apiKeyVisible, setApiKeyVisible] = useState(false);
@@ -662,6 +667,26 @@ export function SettingsPanel() {
 
           {activeTab === 'editor' && (
             <div className="settings-section">
+              <div className="setting-item">
+                <label>
+                  编辑模式
+                  <small>源码对照 / 所见即所得，切换后立即生效，也可用 Ctrl+Alt+M 切换</small>
+                </label>
+                <SettingsSelect
+                  ariaLabel="编辑模式"
+                  value={mode === 'wysiwyg' ? 'wysiwyg' : 'split'}
+                  options={WORKSPACE_MODE_OPTIONS}
+                  onChange={(value) => {
+                    const next = value as 'split' | 'wysiwyg';
+                    // 立即切换（setMode 内部会把选择写回 settings.editor.mode）。
+                    setMode(next);
+                    setLocalSettings({
+                      ...localSettings,
+                      editor: { ...localSettings.editor, mode: next },
+                    });
+                  }}
+                />
+              </div>
               <div className="setting-item">
                 <label>自动保存间隔 (ms)</label>
                 <input

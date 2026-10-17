@@ -47,6 +47,8 @@ export interface EditorController {
   };
   dispatch: (spec: EditorDispatchSpec) => void;
   getValue: () => string;
+  /** 切换视图、标签或保存前同步提交编辑表面的挂起输入。 */
+  flushPendingEdits?: () => void;
   /** 重新按文件编码读取时替换内容并清空撤销历史。 */
   resetValue?: (content: string) => void;
   getSelection: () => EditorSelectionRange;

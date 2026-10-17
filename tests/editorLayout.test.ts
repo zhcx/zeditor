@@ -93,20 +93,15 @@ test('contentFontStack returns a concrete font stack instead of a CSS variable r
   // Monaco 的折行测量缓存以 fontFamily 字符串为键。传 'var(--font-content)'
   // 这类 CSS 变量时字符串不随字体变化，更换字体后不会触发重新测量，导致
   // 渲染字体与测量宽度不一致、行文字溢出编辑框；这里必须返回真实字体名。
-  assert.equal(contentFontStack('Maple Mono CN', 'windows'), 'Maple Mono CN, "Microsoft YaHei", sans-serif');
-  // 未指定字体时只返回回落栈，不再重复书写同一个字体名。
-  assert.equal(contentFontStack('', 'windows'), '"Microsoft YaHei", sans-serif');
-  assert.equal(contentFontStack(undefined, 'windows'), '"Microsoft YaHei", sans-serif');
-});
+  // 未指定字体时按平台回落到系统字体栈：macOS 用 SF Pro / 苹方，其余平台用微软雅黑。
+  const fallback = process.platform === 'darwin'
+    ? '-apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Hiragino Sans GB", "Helvetica Neue", sans-serif'
+    : '"Microsoft YaHei", sans-serif';
 
-test('font fallback follows the platform so macOS uses the system font stack', async () => {
-  const { contentFontStack, MACOS_FONT_FALLBACK } = await import('../src/utils/appearanceSettings.ts');
-
-  // macOS 上继续用微软雅黑兜底会让界面与系统脱节，必须回落到 SF Pro / 苹方。
-  assert.equal(contentFontStack('Maple Mono CN', 'macos'), `Maple Mono CN, ${MACOS_FONT_FALLBACK}`);
-  assert.equal(contentFontStack(undefined, 'macos'), MACOS_FONT_FALLBACK);
-  assert.match(MACOS_FONT_FALLBACK, /-apple-system/);
-  assert.match(MACOS_FONT_FALLBACK, /PingFang SC/);
+  assert.equal(contentFontStack('Maple Mono CN'), `Maple Mono CN, ${fallback}`);
+  assert.equal(contentFontStack(''), fallback);
+  assert.equal(contentFontStack(undefined), fallback);
+  assert.doesNotMatch(contentFontStack('Maple Mono CN'), /var\(--/);
 });
 
 test('editor feeds Monaco a concrete font stack so wrap measurement re-runs on font change', async () => {

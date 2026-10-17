@@ -1,12 +1,9 @@
 import { AppIcon } from '../Icons/AppIcon';
-import type { IconName } from '../Icons/iconGeometry';
 import { useShallow } from 'zustand/react/shallow';
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { createPortal } from 'react-dom';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import 'monaco-editor/esm/nls.messages.zh-cn.js';
 import * as monaco from 'monaco-editor/esm/vs/editor/editor.api.js';
 import 'monaco-editor/esm/vs/basic-languages/markdown/markdown.contribution';
-import MarkdownIt from 'markdown-it';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import { invoke } from '@tauri-apps/api/core';
 import { useAppStore, type Settings } from '../../stores/appStore';
@@ -22,8 +19,7 @@ import { extractGenieTarget, slashAiGenie } from '../../utils/aiGenies';
 import { MARKMAP_TEMPLATE, MARKMAP_TEMPLATE_SELECTION } from '../../utils/markmapSource';
 import { SlashCommandMenu, type SlashMenuAnchor } from './SlashCommandMenu';
 import { ImageOptionsModal, Toolbar } from '../Toolbar/Toolbar';
-import { normalizeLanguage, t } from '../../i18n';
-import { sanitizeRenderedHtml } from '../../utils/safeHtml';
+import { normalizeLanguage } from '../../i18n';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste';
 import { resolveSmartPair } from '../../utils/smartPairs';
@@ -40,6 +36,7 @@ import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { open as showOpenDialog } from '@tauri-apps/plugin-dialog';
 import { InlinePopup, type InlinePopupFields } from './InlinePopup';
 import { TableToolbar } from './TableToolbar';
+import { EditorContextMenu, type EditorContextMenuState } from './EditorContextMenu';
 import {
   alignmentAt,
   applyTableAction,
@@ -53,7 +50,6 @@ import {
   type TableNavigationKey,
 } from '../../utils/markdownTable';
 import { insertImageFromBytes } from '../../services/imageAssets';
-import { stripInlineFormatting } from '../../utils/inlineFormatting';
 
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -77,19 +73,6 @@ interface SlashMenuState {
   anchor: SlashMenuAnchor;
 }
 
-interface EditorContextMenuState {
-  x: number;
-  y: number;
-  submenuDirection: 'left' | 'right';
-  hasSelection: boolean;
-  canUndo: boolean;
-  canRedo: boolean;
-  /** 光标是否在 Markdown 表格内：表格子菜单据此启用。 */
-  inTable: boolean;
-}
-
-const contextMenuMarkdown = new MarkdownIt({ html: true, breaks: true, linkify: true, typographer: true });
-
 interface SelectionToolbarState {
   left: number;
   top: number;
@@ -98,9 +81,9 @@ interface SelectionToolbarState {
 }
 
 interface TableToolbarState {
-  left: number;
-  top: number;
-  placement: 'above' | 'below';
+  anchorLeft: number;
+  anchorTop: number;
+  anchorBottom: number;
   alignment: ColumnAlignment;
   columns: number;
 }
@@ -110,147 +93,6 @@ interface InlinePopupState {
   anchor: { left: number; top: number };
   /** 打开时是否聚焦弹窗第一个输入框（Ctrl+K 为 true，点击为 false）。 */
   autoFocus: boolean;
-}
-
-type ContextMenuIconName =
-  | 'sparkles'
-  | 'translate'
-  | 'copy'
-  | 'copyAs'
-  | 'paste'
-  | 'cut'
-  | 'text'
-  | 'format'
-  | 'heading'
-  | 'insert'
-  | 'selectAll'
-  | 'pdf'
-  | 'document'
-  | 'code'
-  | 'image'
-  | 'folder'
-  | 'undo'
-  | 'redo'
-  | 'table'
-  | 'select';
-
-interface ContextSubmenuProps {
-  label: string;
-  icon: ContextMenuIconName;
-  direction: 'left' | 'right';
-  open: boolean;
-  disabled?: boolean;
-  onToggle: () => void;
-  onHover: (open: boolean) => void;
-  children: React.ReactNode;
-}
-
-/**
- * 右键菜单里的二级菜单：悬停或点击展开。
- * 弹层挂在 body 上，主菜单带 `overflow-y: auto` 会裁剪内联子菜单（还会挤出横向滚动条），
- * 因此位置按触发行的矩形实时测量，并按窗口剩余空间决定左右与上下方向。
- */
-function ContextSubmenu({ label, icon, direction, open, disabled, onToggle, onHover, children }: ContextSubmenuProps) {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const menuRef = useRef<HTMLDivElement>(null);
-  const [position, setPosition] = useState<{ top: number; left: number } | null>(null);
-  // 弹层挂在 body 上，不再是触发行 DOM 的子节点：鼠标移入弹层时会先触发父级的
-  // mouseleave，因此延迟收起来给指针留出跨越间隙的时间。
-  const closeTimerRef = useRef<number | null>(null);
-  const cancelClose = () => {
-    if (closeTimerRef.current !== null) window.clearTimeout(closeTimerRef.current);
-    closeTimerRef.current = null;
-  };
-  const scheduleClose = () => {
-    cancelClose();
-    closeTimerRef.current = window.setTimeout(() => onHover(false), 160);
-  };
-  useEffect(() => cancelClose, []);
-
-  // useLayoutEffect 在浏览器绘制前完成测量，重新展开时不会闪出上一轮的位置。
-  useLayoutEffect(() => {
-    if (!open) return undefined;
-    let frame = 0;
-    const update = () => {
-      const trigger = triggerRef.current;
-      const menu = menuRef.current;
-      if (!trigger || !menu) return;
-      const rect = trigger.getBoundingClientRect();
-      const width = menu.offsetWidth || 178;
-      const height = menu.offsetHeight || 220;
-      const left = direction === 'left'
-        ? Math.max(8, rect.left - width + 2)
-        : Math.max(8, Math.min(rect.right - 2, window.innerWidth - width - 8));
-      const top = Math.max(8, Math.min(rect.top - 6, window.innerHeight - height - 8));
-      setPosition({ top, left });
-    };
-
-    update();
-    frame = window.requestAnimationFrame(update);
-    window.addEventListener('resize', update);
-    window.addEventListener('scroll', update, true);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener('resize', update);
-      window.removeEventListener('scroll', update, true);
-    };
-  }, [open, direction]);
-
-  return (
-    <div
-      className="editor-context-menu-group"
-      data-submenu-direction={direction}
-      onMouseEnter={() => {
-        cancelClose();
-        onHover(true);
-      }}
-      onMouseLeave={scheduleClose}
-    >
-      <button
-        ref={triggerRef}
-        type="button"
-        role="menuitem"
-        aria-haspopup="menu"
-        aria-expanded={open}
-        disabled={disabled}
-        onMouseDown={(event) => event.preventDefault()}
-        onClick={onToggle}
-      >
-        <span className="editor-context-menu-icon"><ContextMenuIcon name={icon} /></span>
-        <span className="editor-context-menu-label">{label}</span>
-        <span className="editor-context-menu-chevron">›</span>
-      </button>
-      {open && !disabled && createPortal(
-        <div
-          ref={menuRef}
-          className="editor-context-submenu"
-          role="menu"
-          aria-label={label}
-          style={{
-            top: position?.top ?? 0,
-            left: position?.left ?? 0,
-            visibility: position ? 'visible' : 'hidden',
-          }}
-          onMouseDown={(event) => {
-            // 阻止默认行为让编辑器保持焦点，动作执行时选区仍然有效。
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-          onMouseEnter={cancelClose}
-          onMouseLeave={scheduleClose}
-        >
-          {children}
-        </div>,
-        document.body,
-      )}
-    </div>
-  );
-}
-
-const ContextMenuIconNames = {"sparkles":"companion","translate":"languages","copy":"copy","copyAs":"copyAs","paste":"paste","cut":"cut","text":"font","format":"sliders","heading":"heading","insert":"plus","selectAll":"selectAll","pdf":"fileLabel","document":"fileText","code":"code","image":"image","folder":"folder","undo":"undo","redo":"redo","table":"table","select":"cursor"} as const satisfies Record<string, IconName>;
-
-function ContextMenuIcon({ name }: { name: ContextMenuIconName }) {
-  return <AppIcon name={ContextMenuIconNames[name]} label={name === 'pdf' ? 'PDF' : undefined} />;
 }
 
 const isTauriRuntime = () => '__TAURI_INTERNALS__' in window;
@@ -281,6 +123,7 @@ function toLine(model: monaco.editor.ITextModel, lineNumber: number): EditorLine
 }
 
 function createController(editor: monaco.editor.IStandaloneCodeEditor, model: monaco.editor.ITextModel, root: HTMLElement): EditorController {
+  const isCurrentModel = () => editor.getModel() === model;
   const getSelection = () => {
     const selection = editor.getSelection();
     if (!selection) return { from: 0, to: 0, empty: true };
@@ -290,12 +133,14 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
   };
 
   const setSelection = (from: number, to = from) => {
+    if (!isCurrentModel()) return;
     const start = offsetToPosition(model, from);
     const end = offsetToPosition(model, to);
     editor.setSelection(new monaco.Selection(start.lineNumber, start.column, end.lineNumber, end.column));
   };
 
   const applyDispatch = (spec: EditorDispatchSpec) => {
+    if (!isCurrentModel()) return;
     const change = spec?.changes;
     if (change && typeof change.from === 'number') {
       const text = change.insert ?? '';
@@ -316,7 +161,7 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
     getTopForLineNumber: (lineNumber: number) => editor.getTopForLineNumber(
       Math.max(1, Math.min(lineNumber, model.getLineCount())),
     ),
-    setScrollTop: (top: number) => editor.setScrollTop(top, monaco.editor.ScrollType.Immediate),
+    setScrollTop: (top: number) => { if (isCurrentModel()) editor.setScrollTop(top, monaco.editor.ScrollType.Immediate); },
     onScroll: (listener: () => void) => {
       const disposable = editor.onDidScrollChange((event) => {
         if (event.scrollTopChanged || event.scrollHeightChanged) listener();
@@ -324,10 +169,11 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
       return () => disposable.dispose();
     },
     getValue: () => model.getValue(),
-    resetValue: (content) => model.setValue(content),
+    resetValue: (content) => { if (isCurrentModel()) model.setValue(content); },
     getSelection,
     getText: (from, to) => model.getValueInRange(monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to))),
     replaceRange: (from, to, text, selection) => {
+      if (!isCurrentModel()) return;
       // 工具栏、任务切换和富文本粘贴各自形成完整的撤销步骤。
       editor.pushUndoStop();
       editor.executeEdits('zeditor', [{ range: monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to)), text, forceMoveMarkers: true }]);
@@ -347,10 +193,10 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
       const bottom = rect.top + visible.top + visible.height;
       return { left, bottom, x: left, y: bottom };
     },
-    focus: () => editor.focus(),
-    undo: () => editor.trigger('zeditor', 'undo', null),
-    redo: () => editor.trigger('zeditor', 'redo', null),
-    revealOffset: (offset) => editor.revealPositionInCenter(offsetToPosition(model, offset)),
+    focus: () => { if (isCurrentModel()) editor.focus(); },
+    undo: () => { if (isCurrentModel()) editor.trigger('zeditor', 'undo', null); },
+    redo: () => { if (isCurrentModel()) editor.trigger('zeditor', 'redo', null); },
+    revealOffset: (offset) => { if (isCurrentModel()) editor.revealPositionInCenter(offsetToPosition(model, offset)); },
     dispatch: applyDispatch,
   } as EditorController;
 
@@ -381,6 +227,7 @@ async function fileAsDataUrl(file: File) {
 }
 
 const documentModels = new DocumentSessions<monaco.editor.ITextModel>();
+const documentViewStates = new Map<string, monaco.editor.ICodeEditorViewState>();
 
 export function Editor({ className, style, onActiveLineChange, onActiveLineReveal }: EditorProps) {
   const editorRef = useRef<HTMLDivElement>(null);
@@ -407,8 +254,6 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   // AI 动作在编辑器实例闭包内执行（需要 controller），用 ref 桥接到渲染层。
   const slashAiRunRef = useRef<(command: SlashCommand, prompt?: string) => void>(() => {});
   const [contextMenu, setContextMenu] = useState<EditorContextMenuState | null>(null);
-  const [openSubmenu, setOpenSubmenu] = useState<string | null>(null);
-  const contextMenuRef = useRef<HTMLDivElement>(null);
   const [showContextImageModal, setShowContextImageModal] = useState(false);
   const [selectionToolbar, setSelectionToolbar] = useState<SelectionToolbarState | null>(null);
   const [tableToolbar, setTableToolbar] = useState<TableToolbarState | null>(null);
@@ -417,11 +262,13 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const inlinePopupRef = useRef<InlinePopupState | null>(null);
   const inlinePopupClosedAtRef = useRef(0);
   // 表格动作需要访问 Monaco 控制器，用 ref 把闭包里的实现暴露给渲染层与菜单事件。
+  const activateTabRef = useRef<(id: string | null) => void>(() => {});
   const tableActionRef = useRef<(action: TableAction) => void>(() => {});
   // 斜杠命令的实际插入同样在编辑器实例里执行：表格命令复用统一的 3 × 3 模板。
   const slashCommandRunRef = useRef<(command: SlashCommand) => void>(() => {});
-  const { content, currentFile, activeTabId, tabs, updateTabContent, settings, setEditorView } = useAppStore(useShallow(state => ({ content: state.content, currentFile: state.currentFile, activeTabId: state.activeTabId, tabs: state.tabs, updateTabContent: state.updateTabContent, settings: state.settings, setEditorView: state.setEditorView })));
-  const { proofreadResults, rewriteSelection, translateText, setTranslationVisible, setStatus } = useAIStore(useShallow(state => ({ proofreadResults: state.proofreadResults, rewriteSelection: state.rewriteSelection, translateText: state.translateText, setTranslationVisible: state.setTranslationVisible, setStatus: state.setStatus })));
+  const { content, activeTabId, tabs, updateTabContent, settings, setEditorView } = useAppStore(useShallow(state => ({ content: state.content, activeTabId: state.activeTabId, tabs: state.tabs, updateTabContent: state.updateTabContent, settings: state.settings, setEditorView: state.setEditorView })));
+  const proofreadResults = useAIStore(state => state.proofreadResults);
+  const proofreadSnapshot = useAIStore(state => state.proofreadSnapshot);
   const slashCommands = useMemo(() => filterSlashCommands(slashMenu?.query || ''), [slashMenu?.query]);
   const language = normalizeLanguage(settings.appearance.language);
 
@@ -551,103 +398,6 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     return () => window.removeEventListener('zeditor-editor-find', handleFindRequest);
   }, []);
 
-  const runContextMenuAction = useCallback(async (action: 'undo' | 'redo' | 'cut' | 'copy' | 'copyHtml' | 'copyPlain' | 'paste' | 'selectAll') => {
-    const editor = monacoRef.current;
-    const model = modelRef.current;
-    const controller = controllerRef.current;
-    setContextMenu(null);
-    if (!editor || !model || !controller) return;
-
-    if (action === 'undo' || action === 'redo') {
-      editor.trigger('zeditor-context-menu', action, null);
-    } else if (action === 'selectAll') {
-      editor.setSelection(model.getFullModelRange());
-    } else if (action === 'paste') {
-      try {
-        const text = await navigator.clipboard.readText();
-        const selection = controller.getSelection();
-        controller.replaceRange(selection.from, selection.to, text, {
-          from: selection.from + text.length,
-          to: selection.from + text.length,
-        });
-      } catch {
-      editor.trigger('zeditor-context-menu', 'editor.action.clipboardPasteAction', null);
-      }
-    } else {
-      const selection = controller.getSelection();
-      const selectedText = controller.getText(selection.from, selection.to);
-      if (!selectedText) return;
-      const clipboardText = action === 'copyPlain'
-        ? selectedText
-            .replace(/!\[([^\]]*)\]\([^)]+\)/g, '$1')
-            .replace(/\[([^\]]+)\]\([^)]+\)/g, '$1')
-            .replace(/^#{1,6}\s+/gm, '')
-            .replace(/(?:\*\*|__|~~|`)/g, '')
-        : action === 'copyHtml'
-          ? sanitizeRenderedHtml(contextMenuMarkdown.render(selectedText))
-        : selectedText;
-      try {
-        if (action === 'copyHtml' && typeof ClipboardItem !== 'undefined' && navigator.clipboard.write) {
-          await navigator.clipboard.write([new ClipboardItem({
-            'text/html': new Blob([clipboardText], { type: 'text/html' }),
-            'text/plain': new Blob([clipboardText], { type: 'text/plain' }),
-          })]);
-        } else {
-          await navigator.clipboard.writeText(clipboardText);
-        }
-        if (action === 'cut') controller.replaceRange(selection.from, selection.to, '');
-      } catch {
-        if (action === 'copyHtml') {
-          try {
-            await navigator.clipboard.writeText(clipboardText);
-          } catch {
-            // Clipboard permissions can be denied by the host WebView.
-          }
-        } else {
-      editor.trigger('zeditor-context-menu', `editor.action.clipboard${action === 'cut' ? 'Cut' : 'Copy'}Action`, null);
-        }
-      }
-    }
-    editor.focus();
-  }, []);
-
-  const polishContextSelection = useCallback(async () => {
-    const controller = controllerRef.current;
-    setContextMenu(null);
-    if (!controller) return;
-    const selection = controller.getSelection();
-    const selectedText = controller.getText(selection.from, selection.to);
-    if (!selectedText) return;
-    setStatus('loading', '正在润色选中文本...');
-    const snapshot = {activeTabId: useAppStore.getState().activeTabId, content: controller.getValue()};
-    const polished = await rewriteSelection(selectedText);
-    if (!sameDocument(snapshot, useAppStore.getState())) {
-      setStatus('error', '文档已变化，请重新发起润色');
-      return;
-    }
-    if (polished) controller.replaceRange(selection.from, selection.to, polished, { from: selection.from, to: selection.from + polished.length });
-    controller.focus();
-  }, [rewriteSelection, setStatus]);
-
-  const translateContextSelection = useCallback(async () => {
-    const controller = controllerRef.current;
-    setContextMenu(null);
-    if (!controller) return;
-    const selection = controller.getSelection();
-    const selectedText = controller.getText(selection.from, selection.to);
-    if (!selectedText) return;
-    const coords = controller.coordsAtPos(selection.from);
-    const result = await translateText(selectedText);
-    const separatorIndex = result.indexOf('|||');
-    if (separatorIndex < 0) return;
-    const original = result.slice(0, separatorIndex);
-    const translated = result.slice(separatorIndex + 3);
-    if (translated && translated !== selectedText) {
-      setTranslationVisible(true, coords ? { x: coords.left, y: coords.bottom } : undefined, original, translated);
-    }
-    controller.focus();
-  }, [setTranslationVisible, translateText]);
-
   const insertContextImage = useCallback((url: string, alt = '图片') => {
     const controller = controllerRef.current;
     if (!controller) return;
@@ -657,89 +407,6 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     controller.focus();
     setShowContextImageModal(false);
   }, []);
-
-  // 右键菜单里的格式化 / 插入动作：与浮动工具栏同源，但直接作用于当前选区。
-  const runContextWrap = useCallback((before: string, after: string) => {
-    setContextMenu(null);
-    const controller = controllerRef.current;
-    if (!controller) return;
-    const selection = controller.getSelection();
-    const selected = controller.getText(selection.from, selection.to);
-    const text = selected || '文本';
-    const cursor = selection.from + before.length;
-    controller.replaceRange(selection.from, selection.to, `${before}${text}${after}`, {
-      from: cursor,
-      to: cursor + text.length,
-    });
-    controller.focus();
-  }, []);
-
-  const runContextInsert = useCallback((text: string, cursorOffset?: number) => {
-    setContextMenu(null);
-    const controller = controllerRef.current;
-    if (!controller) return;
-    const selection = controller.getSelection();
-    const cursor = selection.from + (cursorOffset ?? text.length);
-    controller.replaceRange(selection.from, selection.to, text, { from: cursor, to: cursor });
-    controller.focus();
-  }, []);
-
-  const applyContextHeading = useCallback((level: number) => {
-    setContextMenu(null);
-    const controller = controllerRef.current;
-    if (!controller) return;
-    const selection = controller.getSelection();
-    const line = controller.lineAt(selection.from);
-    const content = line.text.replace(/^\s*#{1,6}\s+/, '');
-    const prefix = `${'#'.repeat(level)} `;
-    controller.replaceRange(line.from, line.to, `${prefix}${content}`, {
-      from: line.from + prefix.length,
-      to: line.from + prefix.length + content.length,
-    });
-    controller.focus();
-  }, []);
-
-  const clearContextInlineFormatting = useCallback(() => {
-    setContextMenu(null);
-    const controller = controllerRef.current;
-    if (!controller) return;
-    const selection = controller.getSelection();
-    const selected = controller.getText(selection.from, selection.to);
-    const plain = stripInlineFormatting(selected);
-    if (plain === selected) return;
-    controller.replaceRange(selection.from, selection.to, plain, {
-      from: selection.from,
-      to: selection.from + plain.length,
-    });
-    controller.focus();
-  }, []);
-
-  const runContextTableAction = useCallback((action: TableAction) => {
-    setContextMenu(null);
-    tableActionRef.current(action);
-  }, []);
-
-  const requestContextTable = useCallback(() => {
-    setContextMenu(null);
-    window.dispatchEvent(new CustomEvent('zeditor-insert-table'));
-  }, []);
-
-  const submenuHandlers = (id: string) => ({
-    open: openSubmenu === id,
-    onToggle: () => setOpenSubmenu((current) => (current === id ? null : id)),
-    onHover: (open: boolean) => setOpenSubmenu((current) => (open ? id : current === id ? null : current)),
-  });
-
-  const requestExport = useCallback((format: 'pdf' | 'word' | 'html') => {
-    setContextMenu(null);
-    window.dispatchEvent(new CustomEvent('zeditor-export-request', { detail: { format } }));
-  }, []);
-
-  const revealCurrentFile = useCallback(async () => {
-    setContextMenu(null);
-    if (!currentFile || currentFile.startsWith('web://')) return;
-    await invoke('reveal_in_file_manager', { path: currentFile });
-  }, [currentFile]);
 
   const closeSlashMenu = useCallback(() => {
     slashMenuRef.current = null;
@@ -783,12 +450,15 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
 
   useEffect(() => {
     const root = editorRef.current;
-    if (!root || monacoRef.current || !activeTabId) return;
+    const initialTabId = useAppStore.getState().activeTabId;
+    if (!root || monacoRef.current || !initialTabId) return;
 
     const isDark = (document.documentElement.dataset.theme || '').endsWith('-dark');
-    const tab = useAppStore.getState().tabs.find(t => t.id === activeTabId);
+    const tab = useAppStore.getState().tabs.find(t => t.id === initialTabId);
     if (!tab) return;
-    const model = documentModels.get(activeTabId, () => monaco.editor.createModel(tab.content, 'markdown'));
+    let currentTabId = initialTabId;
+    let switchingModel = false;
+    let model = documentModels.get(initialTabId, () => monaco.editor.createModel(tab.content, 'markdown'));
     if (model.getValue() !== tab.content) model.setValue(tab.content);
     // 使用内置 vs / vs-dark：文字与行号颜色历经充分验证，保证任何主题下
     // 可读。编辑区背景、当前行、光标由 main.css 的 .monaco-host 规则按
@@ -835,7 +505,9 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       contextmenu: false,
       unicodeHighlight: EDITOR_UNICODE_HIGHLIGHT_OPTIONS,
     });
-    const controller = createController(editor, model, root);
+    let controller = createController(editor, model, root);
+    const initialView = documentViewStates.get(initialTabId);
+    if (initialView) editor.restoreViewState(initialView);
     monacoRef.current = editor;
     modelRef.current = model;
     controllerRef.current = controller;
@@ -849,6 +521,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       useAppStore.getState().markEditorBootReady();
     });
     onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
+
+    const captureDocument = () => {
+      const snapshot = { activeTabId: currentTabId, content: model.getValue() };
+      const activeController = controller;
+      return () => controllerRef.current === activeController && sameDocument(snapshot, useAppStore.getState());
+    };
 
     const applyTableEdit = (edit: TableEdit | null) => {
       if (!edit) {
@@ -900,8 +578,10 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       // 空文档没有可转换的上下文：/ask、/write 退化为单轮问答，回答直接插入光标处。
       if ((command.ai === 'ask' || command.ai === 'write') && !docText.trim()) {
         const insertAt = selection.empty ? selection.to : selection.from;
+        const isCurrent = captureDocument();
         void (async () => {
           const answer = await useAIStore.getState().chatForEditor(prompt || '', '');
+          if (!isCurrent()) return;
           if (!answer) {
             useAIStore.getState().setStatus('error', 'AI 未返回结果：请确认已在「设置 → AI 助手」中启用并配置 AI');
             return;
@@ -963,18 +643,17 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       }
       const value = model.getValue();
       const table = parseTableAt(value, selection.to);
-      const coords = table ? controller.coordsAtPos(table.from) : null;
-      if (!table || !coords) {
+      const start = table ? controller.coordsAtPos(table.from) : null;
+      if (!table || !start) {
         setTableToolbar(null);
         return;
       }
-      const toolbarWidth = 560;
-      const left = Math.max(8, Math.min(coords.left, window.innerWidth - toolbarWidth - 8));
-      const above = coords.y >= 64;
+      // 锚点是表格首行到末行：工具栏贴在表格外侧，按固定高度预留会盖住表头。
+      const end = controller.coordsAtPos(table.to);
       setTableToolbar({
-        left,
-        top: above ? coords.y - 46 : coords.y + 8,
-        placement: above ? 'above' : 'below',
+        anchorLeft: start.left,
+        anchorTop: start.y,
+        anchorBottom: end ? end.bottom : start.bottom,
         alignment: alignmentAt(value, selection.to) ?? 'none',
         columns: table.columns,
       });
@@ -1038,6 +717,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     };
     /** Ctrl+K：光标在链接内时聚焦 URL 字段；否则把选区包成链接（剪贴板是 URL 时自动填入）再弹窗。 */
     const openLinkPopup = async () => {
+      const isCurrent = captureDocument();
       const selection = controller.getSelection();
       const existing = findInlineTargetAt(model.getValue(), selection.to);
       if (existing?.kind === 'link') {
@@ -1049,6 +729,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         const text = await navigator.clipboard.readText();
         if (/^https?:\/\/\S+$/i.test(text.trim())) clipboardUrl = text.trim();
       } catch { /* 剪贴板不可用时退回占位符 */ }
+      if (!isCurrent()) return;
       const labelText = selection.empty ? '链接' : controller.getText(selection.from, selection.to);
       const markdown = formatLinkMarkdown(labelText, clipboardUrl || 'url');
       controller.replaceRange(selection.from, selection.to, markdown, { from: selection.from + 1, to: selection.from + 1 + labelText.length });
@@ -1060,7 +741,6 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     const handleContextMenu = (event: MouseEvent) => {
       event.preventDefault();
       event.stopPropagation();
-      setOpenSubmenu(null);
       // 右键位置可能不在当前选区内：先把光标挪到点击处，
       // 格式化动作与「表格」菜单才能作用在用户真正指向的位置。
       const target = editor.getTargetAtClientPoint(event.clientX, event.clientY);
@@ -1168,7 +848,6 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         placement: placeAbove ? 'above' : 'below',
       });
     };
-    const editorNode = editor.getDomNode();
     const handleSelectionPointerDown = () => {
       selectionPointerActive = true;
       setSelectionToolbar(null);
@@ -1178,7 +857,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       selectionPointerActive = false;
       window.requestAnimationFrame(refreshSelectionToolbar);
     };
-    editorNode?.addEventListener('pointerdown', handleSelectionPointerDown, true);
+    root.addEventListener('pointerdown', handleSelectionPointerDown, true);
     window.addEventListener('pointerup', handleSelectionPointerEnd, true);
     window.addEventListener('pointercancel', handleSelectionPointerEnd, true);
     const selectionToolbarResizeObserver = new ResizeObserver(refreshSelectionToolbar);
@@ -1207,13 +886,15 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     };
 
     const contentDisposable = editor.onDidChangeModelContent(() => {
-      updateTabContent(activeTabId, model.getValue());
+      if (switchingModel) return;
+      updateTabContent(currentTabId, model.getValue());
       scheduleCompanion();
       refreshSlashMenu();
       refreshTableToolbar();
       refreshInlinePopup();
     });
     const cursorDisposable = editor.onDidChangeCursorSelection(() => {
+      if (switchingModel) return;
       onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
       scheduleCompanion();
       refreshSlashMenu();
@@ -1508,13 +1189,49 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     const pasteRoot = root.parentElement ?? root;
     pasteRoot.addEventListener('paste', handlePaste, true);
 
+    // A model owns text and undo history; the editor instance and registrations
+    // survive tab switches. Monaco replaces its view DOM when attaching a model.
+    activateTabRef.current = (id) => {
+      if (!id || id === currentTabId) return;
+      const nextTab = useAppStore.getState().tabs.find(item => item.id === id);
+      if (!nextTab) return;
+      const view = editor.saveViewState();
+      if (view) documentViewStates.set(currentTabId, view);
+      clearCompanionTimer();
+      closeInlinePopup();
+      setContextMenu(null);
+      setSelectionToolbar(null);
+      setTableToolbar(null);
+      slashMenuRef.current = null;
+      setSlashMenu(null);
+      switchingModel = true;
+      try {
+        decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, []);
+        currentTabId = id;
+        model = documentModels.get(id, () => monaco.editor.createModel(nextTab.content, 'markdown'));
+        if (model.getValue() !== nextTab.content) model.setValue(nextTab.content);
+        modelRef.current = model;
+        editor.setModel(model);
+        controller = createController(editor, model, root);
+        controllerRef.current = controller;
+        const nextView = documentViewStates.get(id);
+        if (nextView) editor.restoreViewState(nextView);
+        else { editor.setPosition({ lineNumber: 1, column: 1 }); editor.setScrollTop(0); }
+        setEditorView(controller);
+        onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
+      } finally { switchingModel = false; }
+    };
+
     return () => {
+      const view = editor.saveViewState();
+      if (view) documentViewStates.set(currentTabId, view);
+      activateTabRef.current = () => {};
       clearCompanionTimer();
       pasteRoot.removeEventListener('paste', handlePaste, true);
       root.removeEventListener('contextmenu', handleContextMenu, true);
       window.removeEventListener('mousedown', closeContextMenu);
       window.removeEventListener('blur', closeContextMenu);
-      editorNode?.removeEventListener('pointerdown', handleSelectionPointerDown, true);
+      root.removeEventListener('pointerdown', handleSelectionPointerDown, true);
       window.removeEventListener('pointerup', handleSelectionPointerEnd, true);
       window.removeEventListener('pointercancel', handleSelectionPointerEnd, true);
       window.removeEventListener('zeditor-theme-change', handleTheme);
@@ -1544,9 +1261,15 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       slashMenuRef.current = null;
       setEditorView(null);
     };
-  }, [activeTabId, onActiveLineChange, onActiveLineReveal, updateTabContent, setEditorView, closeInlinePopup, openInlinePopupAt]);
+  }, [onActiveLineChange, onActiveLineReveal, updateTabContent, setEditorView, closeInlinePopup, openInlinePopupAt]);
 
-  useEffect(() => { documentModels.retain(tabs.map(t => t.id)); }, [tabs]);
+  useEffect(() => { activateTabRef.current(activeTabId); }, [activeTabId]);
+
+  useEffect(() => {
+    const ids = tabs.map(tab => tab.id);
+    documentModels.retain(ids);
+    for (const id of documentViewStates.keys()) if (!ids.includes(id)) documentViewStates.delete(id);
+  }, [tabs]);
 
   useEffect(() => {
     const model = modelRef.current;
@@ -1603,24 +1326,15 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     const editor = monacoRef.current;
     const model = modelRef.current;
     if (!editor || !model) return;
-    const decorations: monaco.editor.IModelDeltaDecoration[] = proofreadResults
+    const matchesSnapshot = !proofreadSnapshot || sameDocument(proofreadSnapshot, useAppStore.getState());
+    const decorations: monaco.editor.IModelDeltaDecoration[] = (matchesSnapshot ? proofreadResults : [])
       .filter((result: ProofreadResult) => result.from >= 0 && result.to > result.from && result.to <= model.getValueLength())
       .map((result: ProofreadResult) => ({
         range: monaco.Range.fromPositions(offsetToPosition(model, result.from), offsetToPosition(model, result.to)),
         options: { inlineClassName: 'monaco-proofread-error', hoverMessage: { value: result.explanation || result.suggestion } },
       }));
     decorationIdsRef.current = editor.deltaDecorations(decorationIdsRef.current, decorations);
-  }, [proofreadResults]);
-
-  // 菜单变高后可能超出窗口底部：渲染完成后按真实高度上移，CSS 另行兜底滚动。
-  useEffect(() => {
-    const element = contextMenuRef.current;
-    if (!element || !contextMenu) return;
-    const maxTop = window.innerHeight - element.offsetHeight - 8;
-    if (contextMenu.y > maxTop) {
-      setContextMenu((menu) => (menu ? { ...menu, y: Math.max(8, maxTop) } : menu));
-    }
-  }, [contextMenu]);
+  }, [proofreadResults, proofreadSnapshot, activeTabId, content]);
 
   return (
     <div className={`editor-container monaco-editor-container ${className || ''}`} style={style}>
@@ -1653,9 +1367,9 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       )}
       {tableToolbar && (
         <TableToolbar
-          left={tableToolbar.left}
-          top={tableToolbar.top}
-          placement={tableToolbar.placement}
+          anchorLeft={tableToolbar.anchorLeft}
+          anchorTop={tableToolbar.anchorTop}
+          anchorBottom={tableToolbar.anchorBottom}
           alignment={tableToolbar.alignment}
           columns={tableToolbar.columns}
           onAction={(action) => tableActionRef.current(action)}
@@ -1724,121 +1438,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         />
       )}
       {contextMenu && (
-        <div
-          ref={contextMenuRef}
-          className="editor-context-menu"
-          role="menu"
-          aria-label={t('编辑器', language)}
-          style={{ left: contextMenu.x, top: contextMenu.y }}
-          onMouseDown={(event) => {
-            // preventDefault 阻止焦点从编辑器移走，选中文字不会因为打开菜单而丢失高亮。
-            event.preventDefault();
-            event.stopPropagation();
-          }}
-        >
-          <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void polishContextSelection()}>
-            <span className="editor-context-menu-icon tone-accent"><ContextMenuIcon name="sparkles" /></span><span className="editor-context-menu-label">AI 润色</span>
-          </button>
-          <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void translateContextSelection()}>
-            <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="translate" /></span><span className="editor-context-menu-label">AI 翻译</span>
-          </button>
-          <div className="editor-context-menu-divider" role="separator" />
-          <button type="button" role="menuitem" disabled={!contextMenu.canUndo} onClick={() => void runContextMenuAction('undo')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="undo" /></span><span className="editor-context-menu-label">{t('撤销', language)}</span><kbd>{formatShortcut('Ctrl+Z')}</kbd>
-          </button>
-          <button type="button" role="menuitem" disabled={!contextMenu.canRedo} onClick={() => void runContextMenuAction('redo')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="redo" /></span><span className="editor-context-menu-label">{t('重做', language)}</span><kbd>{formatShortcut('Ctrl+Y')}</kbd>
-          </button>
-          <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('cut')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="cut" /></span><span className="editor-context-menu-label">{t('剪切', language)}</span><kbd>{formatShortcut('Ctrl+X')}</kbd>
-          </button>
-          <button type="button" role="menuitem" disabled={!contextMenu.hasSelection} onClick={() => void runContextMenuAction('copy')}>
-            <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="copy" /></span><span className="editor-context-menu-label">{t('复制', language)}</span><kbd>{formatShortcut('Ctrl+C')}</kbd>
-          </button>
-          <ContextSubmenu label="复制为" icon="copyAs" direction={contextMenu.submenuDirection} disabled={!contextMenu.hasSelection} {...submenuHandlers('copyAs')}>
-            <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyHtml')}><span>HTML</span></button>
-            <button type="button" role="menuitem" onClick={() => void runContextMenuAction('copyPlain')}><span>纯文本</span></button>
-          </ContextSubmenu>
-          <button type="button" role="menuitem" onClick={() => void runContextMenuAction('paste')}>
-            <span className="editor-context-menu-icon tone-green"><ContextMenuIcon name="paste" /></span><span className="editor-context-menu-label">{t('粘贴', language)}</span><kbd>{formatShortcut('Ctrl+V')}</kbd>
-          </button>
-          <button type="button" role="menuitem" onClick={() => void runContextMenuAction('paste')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="text" /></span><span className="editor-context-menu-label">粘贴为纯文本</span><kbd>{formatShortcut('Ctrl+Shift+V')}</kbd>
-          </button>
-          <button type="button" role="menuitem" onClick={() => void runContextMenuAction('selectAll')}>
-            <span className="editor-context-menu-icon"><ContextMenuIcon name="selectAll" /></span><span className="editor-context-menu-label">{t('全选', language)}</span><kbd>{formatShortcut('Ctrl+A')}</kbd>
-          </button>
-
-          <div className="editor-context-menu-divider" role="separator" />
-
-          {/* 格式与标题：与浮动工具栏同源的动作，右键就能就地处理选中文字 */}
-          <ContextSubmenu label="格式" icon="format" direction={contextMenu.submenuDirection} disabled={!contextMenu.hasSelection} {...submenuHandlers('format')}>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('**', '**')}><span>加粗</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('*', '*')}><span>斜体</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('~~', '~~')}><span>删除线</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('==', '==')}><span>高亮</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('<u>', '</u>')}><span>下划线</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('<sup>', '</sup>')}><span>上标</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('<sub>', '</sub>')}><span>下标</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('`', '`')}><span>行内代码</span></button>
-            <div className="editor-context-menu-divider" role="separator" />
-            <button type="button" role="menuitem" onClick={clearContextInlineFormatting}><span>清除行内格式</span></button>
-          </ContextSubmenu>
-          <ContextSubmenu label="标题" icon="heading" direction={contextMenu.submenuDirection} {...submenuHandlers('heading')}>
-            {[1, 2, 3, 4, 5, 6].map((level) => (
-              <button key={level} type="button" role="menuitem" onClick={() => applyContextHeading(level)}>
-                <span>{level} 级标题</span>
-              </button>
-            ))}
-          </ContextSubmenu>
-
-          <div className="editor-context-menu-divider" role="separator" />
-
-          {/* 插入与表格：按当前场景提供常用内容块与表格结构操作 */}
-          <ContextSubmenu label="插入" icon="insert" direction={contextMenu.submenuDirection} {...submenuHandlers('insert')}>
-            <button type="button" role="menuitem" onClick={() => runContextWrap('[', '](url)')}><span>链接</span></button>
-            <button type="button" role="menuitem" onClick={() => { setContextMenu(null); setShowContextImageModal(true); }}><span>插入图片</span></button>
-            <button type="button" role="menuitem" onClick={requestContextTable}><span>插入表格</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextInsert('\n```\ncode\n```\n', 5)}><span>代码块</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextInsert('> ')}><span>引用</span></button>
-            <button type="button" role="menuitem" onClick={() => runContextInsert('\n---\n')}><span>分割线</span></button>
-          </ContextSubmenu>
-          {/* 表格：插入随时可用；行列与对齐操作要求光标位于表格内 */}
-          <ContextSubmenu label="表格" icon="table" direction={contextMenu.submenuDirection} {...submenuHandlers('table')}>
-            <button type="button" role="menuitem" onClick={requestContextTable}><span>插入 3 × 3 表格</span></button>
-            <div className="editor-context-menu-divider" role="separator" />
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('row-above')}><span>上方插入行</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('row-below')}><span>下方插入行</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('row-delete')}><span>删除当前行</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('column-left')}><span>左侧插入列</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('column-right')}><span>右侧插入列</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('column-delete')}><span>删除当前列</span></button>
-            <div className="editor-context-menu-divider" role="separator" />
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('align-left')}><span>当前列左对齐</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('align-center')}><span>当前列居中</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('align-right')}><span>当前列右对齐</span></button>
-            <div className="editor-context-menu-divider" role="separator" />
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('format')}><span>整理表格格式</span></button>
-            <button type="button" role="menuitem" disabled={!contextMenu.inTable} onClick={() => runContextTableAction('table-delete')}><span>删除整张表格</span></button>
-            {!contextMenu.inTable && <div className="editor-context-menu-hint">把光标放进表格即可使用行列与对齐操作</div>}
-          </ContextSubmenu>
-
-          <div className="editor-context-menu-divider" role="separator" />
-
-          <button type="button" role="menuitem" onClick={() => requestExport('pdf')}>
-            <span className="editor-context-menu-icon tone-red"><ContextMenuIcon name="pdf" /></span><span className="editor-context-menu-label">导出 PDF</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => requestExport('word')}>
-            <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="document" /></span><span className="editor-context-menu-label">导出 Word</span>
-          </button>
-          <button type="button" role="menuitem" onClick={() => requestExport('html')}>
-            <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="code" /></span><span className="editor-context-menu-label">导出 HTML</span>
-          </button>
-          <div className="editor-context-menu-divider" role="separator" />
-          <button type="button" role="menuitem" disabled={!currentFile || currentFile.startsWith('web://')} onClick={() => void revealCurrentFile()}>
-            <span className="editor-context-menu-icon tone-blue"><ContextMenuIcon name="folder" /></span><span className="editor-context-menu-label">在文件夹中显示</span>
-          </button>
-        </div>
+        <EditorContextMenu
+          state={contextMenu}
+          onClose={() => setContextMenu(null)}
+          onInsertImage={() => setShowContextImageModal(true)}
+          onPasteFallback={() => monacoRef.current?.trigger('zeditor-context-menu', 'editor.action.clipboardPasteAction', null)}
+        />
       )}
       {showContextImageModal && <ImageOptionsModal onClose={() => setShowContextImageModal(false)} onInsert={insertContextImage} />}
     </div>

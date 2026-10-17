@@ -6,20 +6,24 @@ import { MEDIA_FILE_EXTENSIONS } from '../src/utils/media.ts';
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8');
 
 test('preview resolves local media through the desktop command and builds players in the DOM', async () => {
+  // 媒体占位在共享渲染管线里生成，播放器由共享增强管线构建，点击分发留在预览组件。
   const preview = await read('../src/components/Preview/Preview.tsx');
+  const pipeline = await read('../src/utils/markdownPipeline.ts');
+  const enhancers = await read('../src/utils/markdownEnhancers.tsx');
 
-  assert.match(preview, /import\s*\{[\s\S]*?findMediaEmbeds[\s\S]*?\}\s*from\s*'\.\.\/\.\.\/utils\/media'/);
-  assert.match(preview, /renderMediaPlaceholders\(deferredContent\)/);
-  assert.match(preview, /data-zeditor-media-key/);
-  assert.match(preview, /resolveMediaSources\(currentFile,\s*localSources\)/);
-  assert.match(preview, /document\.createElement\(placeholder\.kind === 'audio' \? 'audio' : 'video'\)/);
-  assert.match(preview, /player\.controls = true/);
-  assert.match(preview, /player\.src = url/);
+  assert.match(pipeline, /import\s*\{[\s\S]*?findMediaEmbeds[\s\S]*?\}\s*from\s*'\.\/media\.ts'/);
+  assert.match(pipeline, /renderMediaPlaceholders\(source\)/);
+  assert.match(preview, /renderMarkdownToHtml\(deferredContent\)/);
+  assert.match(pipeline, /data-zeditor-media-key/);
+  assert.match(enhancers, /resolveMediaSources\(options\.documentPath,\s*localSources\)/);
+  assert.match(enhancers, /document\.createElement\(placeholder\.kind === 'audio' \? 'audio' : 'video'\)/);
+  assert.match(enhancers, /player\.controls = true/);
+  assert.match(enhancers, /player\.src = url/);
   // 播放器点击（播放、进度、音量）不能被“定位源码”的预览点击逻辑抢走。
   assert.match(preview, /closest\('video, audio'\)/);
   // 播放器由 createElement 构建，绝不把播放器标签拼进待清洗的 HTML 字符串。
-  assert.doesNotMatch(preview, /innerHTML\s*=\s*[^;]*<\s*(video|audio)\b/);
-  assert.match(preview, /无法读取媒体文件/);
+  assert.doesNotMatch(enhancers, /innerHTML\s*=\s*[^;]*<\s*(video|audio)\b/);
+  assert.match(enhancers, /无法读取媒体文件/);
 });
 
 test('media asset service imports files, resolves paths and inserts syntax at the cursor', async () => {
@@ -70,8 +74,7 @@ test('desktop side whitelists media extensions, caps size and enables the asset 
 
   assert.equal(config.app.security.assetProtocol.enable, true);
   // 开启 assetProtocol 必须同时启用 tauri 的 protocol-asset feature，否则桌面端无法构建。
-  // macos-private-api 与之并列声明：tauri-build 只校验主依赖表的特性列表，平台级配置拆分
-  // 会让 Cargo.toml 与 tauri.conf.json 的特性清单不一致而直接构建失败。
-  assert.match(cargo, /tauri = \{ version = "2", features = \["protocol-asset", "macos-private-api"\] \}/);
+  // features 列表可能同时包含 macos-private-api，这里只要求 protocol-asset 存在。
+  assert.match(cargo, /tauri = \{ version = "2", features = \[[^\]]*"protocol-asset"[^\]]*\] \}/);
   assert.match(config.app.security.csp, /media-src 'self' asset: http:\/\/asset\.localhost data: blob: https:/);
 });

@@ -36,8 +36,8 @@ export function StatusBar() {
   const {
     wordCount, mode, currentFile, isSaving, uploadStatus, uploadProgress, uploadMessage,
     conversionStatus, conversionMessage, settings, saveSettings, content, editorView,
-    setSettingsOpen, setSettingsTab,
-  } = useAppStore(useShallow(state => ({ wordCount: state.wordCount, mode: state.mode, currentFile: state.currentFile, isSaving: state.isSaving, uploadStatus: state.uploadStatus, uploadProgress: state.uploadProgress, uploadMessage: state.uploadMessage, conversionStatus: state.conversionStatus, conversionMessage: state.conversionMessage, settings: state.settings, saveSettings: state.saveSettings, content: state.content, editorView: state.editorView, setSettingsOpen: state.setSettingsOpen, setSettingsTab: state.setSettingsTab })));
+    setSettingsOpen, setSettingsTab, setMode,
+  } = useAppStore(useShallow(state => ({ wordCount: state.wordCount, mode: state.mode, currentFile: state.currentFile, isSaving: state.isSaving, uploadStatus: state.uploadStatus, uploadProgress: state.uploadProgress, uploadMessage: state.uploadMessage, conversionStatus: state.conversionStatus, conversionMessage: state.conversionMessage, settings: state.settings, saveSettings: state.saveSettings, content: state.content, editorView: state.editorView, setSettingsOpen: state.setSettingsOpen, setSettingsTab: state.setSettingsTab, setMode: state.setMode })));
   const {
     status: aiStatus,
     statusMessage: aiStatusMessage,
@@ -56,7 +56,8 @@ export function StatusBar() {
   const [companionMenuOpen, setCompanionMenuOpen] = useState(false);
   const aiMenuRef = useRef<HTMLDivElement>(null);
   const companionMenuRef = useRef<HTMLDivElement>(null);
-  const selection = editorView?.getSelection();
+  // 渲染只读选区；getSelection 会提交所见即所得的挂起输入，不能在渲染期调用。
+  const selection = editorView?.state.selection.main;
   const hasSelection = Boolean(selection && !selection.empty);
   const companionEnabled = settings.ai.enabled && settings.ai.auto_suggest;
   const companionStyleLabel = WRITING_STYLES.find(({ value }) => value === settings.ai.writing_style)?.label || '正式';
@@ -220,7 +221,14 @@ export function StatusBar() {
   return (
     <div className="statusbar">
       <div className="statusbar-left">
-        <span className="status-item status-mode-label">{mode === 'split' ? '分屏模式' : mode === 'zen' ? '沉浸写作' : '沉浸阅读'}</span>
+        <button
+          type="button"
+          className="status-item status-mode-label status-mode-button"
+          title="切换源码对照 / 所见即所得（Ctrl+Alt+M）"
+          onClick={() => setMode(mode === 'wysiwyg' ? 'split' : 'wysiwyg')}
+        >
+          {mode === 'split' ? '源码对照' : mode === 'wysiwyg' ? '所见即所得' : mode === 'zen' ? '沉浸写作' : '沉浸阅读'}
+        </button>
         <span className="status-divider" aria-hidden="true" />
         <span className="status-item status-save-state" data-state={isSaving ? 'saving' : modified ? 'modified' : 'ready'} aria-live="polite"><span className="status-save-dot" aria-hidden="true" />{isSaving ? '保存中...' : modified ? '未保存修改' : currentFile ? '已保存' : '已就绪'}</span>
         <span className="status-divider" aria-hidden="true" />

@@ -106,12 +106,43 @@ export function findSlashCommandTrigger(
   return { from, to: cursorOffset, query: match[2] };
 }
 
+/**
+ * 命中优先级：精确 shortcut > shortcut 前缀 > 标题前缀 > 其余（关键词等）。
+ * 没有这个排序时，`/code` 会被声明更早的 `/inlinecode` 抢先，键盘回车会插入错误的命令。
+ */
+function slashMatchRank(command: SlashCommand, normalized: string): number {
+  const shortcut = command.shortcut.slice(1).toLocaleLowerCase();
+  if (shortcut === normalized) return 0;
+  if (shortcut.startsWith(normalized)) return 1;
+  if (command.title.toLocaleLowerCase().startsWith(normalized)) return 2;
+  return 3;
+}
+
 export function filterSlashCommands(query: string) {
   const normalized = query.trim().toLocaleLowerCase();
   if (!normalized) return SLASH_COMMANDS;
 
-  return SLASH_COMMANDS.filter((command) => {
+  const matches = SLASH_COMMANDS.filter((command) => {
     const searchable = `${command.title} ${command.description} ${command.shortcut.slice(1)} ${command.keywords}`.toLocaleLowerCase();
     return searchable.includes(normalized);
   });
+
+  // 同级保持声明顺序（sort 稳定），行为可预期。
+  return matches
+    .map((command, index) => ({ command, index, rank: slashMatchRank(command, normalized) }))
+    .sort((left, right) => left.rank - right.rank || left.index - right.index)
+    .map((entry) => entry.command);
+}
+
+/**
+ * 用最新源码重算斜杠触发范围。
+ *
+ * 菜单刷新走 `requestAnimationFrame`，快速键入最后一个查询字符后立刻敲回车时，
+ * 组件的 `slash` 状态可能落后一帧；键盘确认前用最新文本重算，才能保证执行的是
+ * 当前显示语义下的那一项（返回 null 表示光标已不在斜杠 token 内）。
+ */
+export function resolveSlashSelection(source: string, cursorOffset: number): SlashCommandTrigger | null {
+  const safe = Math.max(0, Math.min(cursorOffset, source.length));
+  const lineStart = safe === 0 ? 0 : source.lastIndexOf('\n', safe - 1) + 1;
+  return findSlashCommandTrigger(source.slice(lineStart), lineStart, safe);
 }

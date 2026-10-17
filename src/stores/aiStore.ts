@@ -294,6 +294,7 @@ interface AIState {
 
   // 校对结果
   proofreadResults: ProofreadResult[];
+  proofreadSnapshot: DocumentSnapshot | null;
   errorCount: number;
   proofreadPanelVisible: boolean;
 
@@ -368,6 +369,7 @@ export const useAIStore = create<AIState>((set, get) => ({
   pendingEdit: null,
   lastAppliedRound: null,
   proofreadResults: [],
+  proofreadSnapshot: null,
   errorCount: 0,
   proofreadPanelVisible: false,
   companionVisible: false,
@@ -446,6 +448,8 @@ export const useAIStore = create<AIState>((set, get) => ({
   },
 
   checkProofread: async (content, baseOffset = 0) => {
+    const { activeTabId, content: documentContent } = useAppStore.getState();
+    const proofreadSnapshot = { activeTabId, content: documentContent };
     // 防止并发校对：如果正在校对中，忽略新的请求
     if (get().status === 'proofreading') {
       console.warn('[proofread] 校对进行中，忽略重复请求');
@@ -499,6 +503,7 @@ export const useAIStore = create<AIState>((set, get) => ({
         status: 'success',
         statusMessage: results.length > 0 ? `发现 ${results.length} 处问题` : '校对完成，未发现问题',
         proofreadResults: results,
+        proofreadSnapshot,
         errorCount: results.length,
         proofreadPanelVisible: results.length > 0,
       });
@@ -557,6 +562,7 @@ export const useAIStore = create<AIState>((set, get) => ({
             status: 'success',
             statusMessage: results.length > 0 ? `发现 ${results.length} 处问题` : '校对完成，未发现问题',
             proofreadResults: results,
+            proofreadSnapshot,
             errorCount: results.length,
             proofreadPanelVisible: results.length > 0,
           });
@@ -598,7 +604,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       console.warn('[link-check] 检查进行中，忽略重复请求');
       return;
     }
-    const { content, currentFile } = useAppStore.getState();
+    const { content, currentFile, activeTabId } = useAppStore.getState();
     const trimmedContent = content.trim();
     if (!trimmedContent) {
       set({ status: 'idle', statusMessage: '' });
@@ -615,6 +621,7 @@ export const useAIStore = create<AIState>((set, get) => ({
       status: 'success',
       statusMessage: results.length > 0 ? `发现 ${results.length} 处问题` : '链接检查完成，未发现问题',
       proofreadResults: results,
+      proofreadSnapshot: { activeTabId, content },
       errorCount: results.length,
       proofreadPanelVisible: results.length > 0,
     });
@@ -1443,6 +1450,7 @@ ${beforeText.slice(-2000)}`,
       status: 'idle',
       statusMessage: '',
       proofreadResults: [],
+      proofreadSnapshot: null,
       errorCount: 0,
       companionSuggestions: [],
       proofreadPanelVisible: false,

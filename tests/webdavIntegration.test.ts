@@ -69,10 +69,10 @@ test('successful local save enqueues WebDAV without awaiting cloud completion', 
 
 test('startup initializes WebDAV after settings load', () => {
   const app = readFileSync(new URL('../src/App.tsx', import.meta.url), 'utf8');
-  assert.match(
-    app,
-    /useWebDavStore\.getState\(\)\.initialize\(useAppStore\.getState\(\)\.settings\.webdav\)/,
-  );
+  // 设置载入后取一份快照，用它初始化云端同步并按持久化的编辑模式切换视图。
+  assert.match(app, /const store = useAppStore\.getState\(\);/);
+  assert.match(app, /useWebDavStore\.getState\(\)\.initialize\(store\.settings\.webdav\)/);
+  assert.match(app, /useS3Store\.getState\(\)\.initialize\(store\.settings\.s3\)/);
 });
 
 test('s3 store contract uses s3 commands and filters provider events', () => {

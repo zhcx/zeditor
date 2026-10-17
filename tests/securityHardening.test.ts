@@ -5,17 +5,19 @@ import { test } from 'node:test'
 const read = (path: string) => readFileSync(path, 'utf8')
 
 test('all rendered Markdown HTML is sanitized before reaching a browser or PDF sink', () => {
-  const preview = read('src/components/Preview/Preview.tsx')
+  // 预览的渲染与增强已抽成共享管线（预览与所见即所得共用），净化点随之移动。
+  const pipeline = read('src/utils/markdownPipeline.ts')
+  const enhancers = read('src/utils/markdownEnhancers.tsx')
   const menu = read('src/components/MenuBar/MenuBar.tsx')
   const imageExport = read('src/components/Export/ImageExportDialog.tsx')
   const pdfExport = read('src/components/Export/PdfExportDialog.tsx')
   const chatbot = read('src/components/Chatbot/AIChatbotPanel.tsx')
 
-  for (const source of [preview, menu, imageExport, pdfExport, chatbot]) {
+  for (const source of [pipeline, enhancers, menu, imageExport, pdfExport, chatbot]) {
     assert.match(source, /sanitizeRenderedHtml/)
   }
-  assert.match(preview, /securityLevel:\s*['"]strict['"]/)
-  assert.match(preview, /sanitizeRenderedHtml\([^)]*svg/)
+  assert.match(enhancers, /securityLevel:\s*['"]strict['"]/)
+  assert.match(enhancers, /sanitizeRenderedHtml\([^)]*svg/)
 })
 
 test('export templates escape document metadata and cannot break out of style blocks', async () => {

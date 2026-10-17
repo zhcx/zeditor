@@ -41,20 +41,22 @@ test('主题配色：同一分支共用一种颜色，明暗主题各一套', ()
 });
 
 test('预览接线：```markmap 围栏替换为 MarkmapViewer', async () => {
-  const preview = await read('../src/components/Preview/Preview.tsx');
+  // 围栏识别与高亮保留在共享渲染管线，二次渲染与挂载在共享增强管线。
+  const pipeline = await read('../src/utils/markdownPipeline.ts');
+  const enhancers = await read('../src/utils/markdownEnhancers.tsx');
 
   // 特殊围栏先保留 language-markmap class，否则二次渲染找不到目标。
-  assert.match(preview, /lang === 'markmap'/);
-  assert.match(preview, /class="language-markmap"/);
-  assert.match(preview, /MARKMAP_FENCE_SELECTOR/);
+  assert.match(pipeline, /lang === 'markmap'/);
+  assert.match(pipeline, /class="language-markmap"/);
+  assert.match(enhancers, /MARKMAP_FENCE_SELECTOR/);
 
   // 懒加载 + 只在靠近视口时挂载，并在重渲染前卸载 React 根。
-  assert.match(preview, /import\('\.\.\/MarkmapViewer\/MarkmapViewer'\)/);
-  assert.match(preview, /querySelectorAll<HTMLElement>\(MARKMAP_FENCE_SELECTOR\)/);
-  assert.match(preview, /mount\.className = 'markmap-embed-mount'/);
-  assert.match(preview, /markmapObserver\?\.unobserve\(entry\.target\)/);
-  assert.match(preview, /markmapObserver\?\.disconnect\(\)/);
-  assert.match(preview, /markmapRoots\.forEach\(\(root\) => root\.unmount\(\)\)/);
+  assert.match(enhancers, /import\('\.\.\/components\/MarkmapViewer\/MarkmapViewer'\)/);
+  assert.match(enhancers, /querySelectorAll<HTMLElement>\(MARKMAP_FENCE_SELECTOR\)/);
+  assert.match(enhancers, /mount\.className = 'markmap-embed-mount'/);
+  assert.match(enhancers, /markmapObserver\?\.unobserve\(entry\.target\)/);
+  assert.match(enhancers, /markmapObserver\?\.disconnect\(\)/);
+  assert.match(enhancers, /markmapRoots\.forEach\(\(markmapRoot\) => markmapRoot\.unmount\(\)\)/);
 });
 
 test('查看器：懒加载 markmap 库、清洗节点内容、支持交互与导出', async () => {

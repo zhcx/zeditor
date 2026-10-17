@@ -3,7 +3,10 @@
 
 use std::{
     path::{Path, PathBuf},
-    sync::{Arc, Mutex},
+    sync::{
+        atomic::{AtomicBool, Ordering},
+        Arc, Mutex,
+    },
 };
 use tauri::{Emitter, Manager, State};
 
@@ -20,8 +23,15 @@ mod pdf;
 mod text_encoding;
 pub mod webdav;
 
+/// 退出闸门：macOS 的 `ExitRequested`（⌘Q、Dock 菜单退出、系统终止）默认由
+/// 前端未保存守卫接管；只有前端确认后调用 `exit_application` 才放行，
+/// 否则 `app.exit` 会被自己拦住，形成永远退不出去的循环。
+#[derive(Default)]
+struct ExitState(AtomicBool);
+
 #[tauri::command]
-fn exit_application(app: tauri::AppHandle) {
+fn exit_application(app: tauri::AppHandle, exit_state: State<'_, ExitState>) {
+    exit_state.0.store(true, Ordering::SeqCst);
     app.exit(0);
 }
 
@@ -93,7 +103,7 @@ fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
 
 // 启动耗时写入 %TEMP%\zeditor_crash.log（与 panic 日志同一通道）。
 // GUI 子系统下 stderr 不可见，落盘是唯一的诊断出口；每次启动仅写一行。
-pub(crate) fn log_startup(message: &str) {
+fn log_startup(message: &str) {
     use std::io::Write;
     let line = format!(
         "[startup] {} {}\n",
@@ -271,8 +281,7 @@ fn main() {
             pdf::converter::export_pdf_direct,
         ])
         .manage(pending_open_files)
-        // 运行期事件转发：macOS 的原生退出（⌘Q / Dock 菜单 / 注销）与关闭窗口
-        // 走同一条未保存修改守卫，见 handle_run_event。
+        .manage(ExitState::default())
         // Instant 为 Copy；move 闭包直接携带启动时刻以满足 'static 约束。
         .setup(move |_app| {
             let agent_storage = _app.path().app_data_dir()?.join("agent-runtime");
@@ -326,86 +335,72 @@ fn main() {
         .build(tauri::generate_context!())
         .expect("error while building tauri application");
 
-    app.run(handle_run_event);
-}
-
-/// 运行期事件（macOS 专属分支）：
-///
-/// - `Opened`：从 Finder 双击 .md / 拖到 Dock 图标打开文件，走的是 LaunchServices
-///   Apple Event，既不出现在 argv（`initial_open_files` 收不到），也不会触发
-///   单实例回调（首次启动时还没有实例）。必须在这里补上，否则 macOS 上双击
-///   Markdown 文件不会打开任何文档。
-/// - `ExitRequested`：⌘Q / Dock 菜单 / 系统注销的原生退出路径不经过窗口的
-///   CloseRequested，会绕过前端的未保存修改守卫直接丢数据。因此拦截用户发起的
-///   退出（`code` 为 `None`），改为通知前端走同一套关闭流程：前端确认后销毁
-///   窗口，最后一个窗口消失时 Tauri 再次发出 ExitRequested，此时窗口已不存在，
-///   不再拦截，应用正常退出。
-/// - `Reopen`：点按 Dock 图标重新激活应用。macOS 上关闭窗口只是隐藏窗口，
-///   应用继续常驻 Dock，这里把隐藏的窗口原样显示回来。
-fn handle_run_event(app_handle: &tauri::AppHandle, event: tauri::RunEvent) {
-    #[cfg(target_os = "macos")]
-    {
-        match &event {
-            tauri::RunEvent::Opened { urls } => {
-                // 只接收支持的文档类型，避免把任意 Finder「打开方式」都塞进编辑器。
-                let paths = openable_document_paths(
-                    urls.iter()
-                        .filter_map(|url| url.to_file_path().ok())
-                        .collect::<Vec<PathBuf>>(),
-                    Path::new("/"),
-                );
-                if !paths.is_empty() {
-                    app_handle
-                        .state::<PendingOpenFiles>()
-                        .enqueue_open_files(paths.clone());
-                    let _ = app_handle.emit("open-files", paths);
-                    if let Some(window) = app_handle.get_webview_window("main") {
-                        let _ = window.unminimize();
-                        let _ = window.show();
-                        let _ = window.set_focus();
-                    }
-                }
+    app.run(|app_handle, event| match event {
+        // macOS 从 Finder 双击 .md 走 Apple Event，启动参数里没有路径。
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Opened { urls } => {
+            let paths: Vec<PathBuf> = urls
+                .iter()
+                .filter_map(|url| url.to_file_path().ok())
+                .collect();
+            let documents = openable_document_paths(&paths, Path::new(""));
+            if documents.is_empty() {
+                return;
             }
-            tauri::RunEvent::ExitRequested { api, code, .. } if code.is_none() => {
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    api.prevent_exit();
-                    let _ = window.emit("zeditor-quit-requested", ());
-                }
+            app_handle
+                .state::<PendingOpenFiles>()
+                .enqueue_open_files(documents.clone());
+            let _ = app_handle.emit("open-files", documents);
+            if let Some(window) = app_handle.get_webview_window("main") {
+                let _ = window.unminimize();
+                let _ = window.show();
+                let _ = window.set_focus();
             }
-            // 关闭窗口只是隐藏窗口（应用常驻 Dock，见 requestAppClose），
-            // 点按 Dock 图标重新激活时把窗口原样显示回来。
-            tauri::RunEvent::Reopen {
-                has_visible_windows,
-                ..
-            } => {
-                if *has_visible_windows {
-                    return;
-                }
-                if let Some(window) = app_handle.get_webview_window("main") {
-                    let _ = window.unminimize();
-                    let _ = window.show();
-                    let _ = window.set_focus();
-                    // 隐藏期间窗口尺寸可能被外部改变，通知前端重新测量布局。
-                    let _ = window.emit("zeditor-window-reopened", ());
-                }
-            }
-            _ => {}
         }
-    }
-    #[cfg(not(target_os = "macos"))]
-    let _ = (app_handle, event);
+        // macOS 关闭窗口只隐藏应用；⌘Q / Dock 退出先交给前端未保存守卫。
+        tauri::RunEvent::ExitRequested { api, .. } => {
+            #[cfg(target_os = "macos")]
+            {
+                let allow_exit = app_handle.state::<ExitState>().0.load(Ordering::SeqCst);
+                if !allow_exit && app_handle.get_webview_window("main").is_some() {
+                    api.prevent_exit();
+                    let _ = app_handle.emit("zeditor-quit-requested", ());
+                }
+            }
+            #[cfg(not(target_os = "macos"))]
+            {
+                let _ = api;
+            }
+        }
+        // 点按 Dock 图标（窗口已隐藏）时恢复窗口。
+        #[cfg(target_os = "macos")]
+        tauri::RunEvent::Reopen {
+            has_visible_windows,
+            ..
+        } => {
+            let hidden_window = app_handle
+                .get_webview_window("main")
+                .filter(|_| !has_visible_windows);
+            if let Some(window) = hidden_window {
+                let _ = window.show();
+                let _ = window.set_focus();
+                let _ = app_handle.emit("zeditor-window-reopened", ());
+            }
+        }
+        _ => {}
+    });
 }
 
 #[cfg(test)]
 mod tests {
-    // 验证 Windows 专属的反斜杠路径解析；macOS/Linux 上 Path 以 `/` 拼接，
-    // 断言里的 `C:\…` 形态不成立，因此该测试仅在 Windows 下运行。
-    #[cfg(windows)]
+    use super::openable_document_paths;
+    use std::path::Path;
+
     #[test]
     fn resolves_supported_launch_arguments_against_the_launch_directory() {
-        use super::openable_document_paths;
-        use std::path::Path;
-
+        // 用运行时路径拼出期望值，测试在 Windows 与 Unix 上都能通过。
+        let launch_dir = Path::new("documents");
+        let joined = |name: &str| launch_dir.join(name).to_string_lossy().to_string();
         let paths = openable_document_paths(
             [
                 "notes.md",
@@ -414,15 +409,15 @@ mod tests {
                 "image.png",
                 "--flag",
             ],
-            Path::new("C:\\documents"),
+            launch_dir,
         );
 
         assert_eq!(
             paths,
             vec![
-                "C:\\documents\\notes.md",
-                "C:\\documents\\chapter.MARKDOWN",
-                "C:\\documents\\draft.txt",
+                joined("notes.md"),
+                joined("chapter.MARKDOWN"),
+                joined("draft.txt"),
             ]
         );
     }

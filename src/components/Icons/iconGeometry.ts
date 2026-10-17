@@ -6,6 +6,8 @@ const p = (d: string): IconShape => ({ tag: 'path', attrs: { d } });
 const r = (x: number, y: number, width: number, height: number, rx = 1.5): IconShape => ({ tag: 'rect', attrs: { x, y, width, height, rx } });
 const c = (cx: number, cy: number, radius: number): IconShape => ({ tag: 'circle', attrs: { cx, cy, r: radius } });
 const e = (cx: number, cy: number, rx: number, ry: number): IconShape => ({ tag: 'ellipse', attrs: { cx, cy, rx, ry } });
+/** 实心圆点：VS Code 风格的块按钮点阵用（画布默认 fill:none/stroke，这里逐点覆盖）。 */
+const dot = (cx: number, cy: number, radius = 2.4): IconShape => ({ tag: 'circle', attrs: { cx, cy, r: radius, fill: 'currentColor', stroke: 'none' } });
 const sheet = p('M6 3h8l4 4v14H6zM14 3v4h4');
 const folder = p('M3 6h6l2 2h10v12H3z');
 
@@ -104,6 +106,8 @@ export const ICON_GEOMETRY = {
   plus: [p('M12 4v16M4 12h16')],
   minus: [p('M4 12h16')],
   more: [c(5, 12, 1), c(12, 12, 1), c(19, 12, 1)],
+  // 块手柄：两列三点实心圆点（参考 VS Code 的块按钮），几何中心在 24×24 网格中心。
+  grip: [dot(8.6, 6.5), dot(15.4, 6.5), dot(8.6, 12), dot(15.4, 12), dot(8.6, 17.5), dot(15.4, 17.5)],
   check: [p('m4 12 5 5L20 6')],
   checkCircle: [c(12, 12, 9), p('m7 12 3 3 7-7')],
   warning: [p('M12 3 2 21h20zM12 9v5M12 17v.5')],

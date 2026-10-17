@@ -1,0 +1,53 @@
+/* One geometry for every workbench splitter, including immersive mode. */
+.app .panel-divider.panel-divider {
+  position: relative;
+  align-self: stretch;
+  flex: 0 0 4px;
+  width: 4px;
+  min-width: 4px;
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+
+.app .panel-divider.panel-divider::before {
+  content: '';
+  position: absolute;
+  inset: 0 -4px;
+  z-index: 5;
+  cursor: col-resize;
+}
+
+.app .panel-divider.panel-divider::after {
+  content: '';
+  position: absolute;
+  inset: 0 auto 0 50%;
+  width: 1px;
+  border-radius: 0;
+  transform: translateX(-50%);
+  background: var(--border-color);
+  transition: none;
+}
+
+.app .panel-divider.panel-divider:is(:hover, :focus-visible, .is-resizing)::after {
+  width: 2px;
+  background: var(--accent-color);
+}
+
+.app .sidebar.sidebar,
+.app .chatbot-side-panel.chatbot-side-panel,
+.app .proofread-side-panel.proofread-side-panel {
+  min-width: 0;
+  max-width: none;
+  margin: 0;
+}
+
+.app .immersive-outline:not(.is-collapsed) {
+  flex: 0 0 auto;
+  border-right: 0;
+  transition: none;
+}

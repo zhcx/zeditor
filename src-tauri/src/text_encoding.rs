@@ -63,9 +63,9 @@ pub fn decode_text(bytes: &[u8], encoding: Option<&str>) -> Result<TextDocument,
                 .iter()
                 .map(|pair| {
                     if little {
-                        u16::from_le_bytes([pair[0], pair[1]])
+                        u16::from_le_bytes(*pair)
                     } else {
-                        u16::from_be_bytes([pair[0], pair[1]])
+                        u16::from_be_bytes(*pair)
                     }
                 })
                 .collect();

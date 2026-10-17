@@ -8,8 +8,8 @@
    - decorations: true + titleBarStyle: Overlay → 系统红绿灯按钮浮在 WebView
      之上，窗口保留原生圆角、阴影与缩放手势，因此这里隐藏自绘的窗口按钮，
      并在标题栏左侧留出红绿灯的固定安全区；
-   - trafficLightPosition: { x: 20, y: 20 } → 系统标题栏容器高度 = 按钮高度(14) + 20
-     = 34px，与 --ui-titlebar-height 完全一致，红绿灯因此在标题栏里垂直居中。
+   - trafficLightPosition: { x: 20, y: 18 } → 实测按钮顶边约在 y-7.5pt，
+     y=18 时红绿灯顶边约 10pt，在 34px 标题栏里垂直居中。
    ====================================================================== */
 
 /* ── 平台令牌 ─────────────────────────────────────────────────────── */
@@ -20,10 +20,11 @@ html[data-platform='macos'] {
   --font-sans: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', sans-serif;
   --font-content: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', sans-serif;
 
-  /* macOS 标题栏固定 34px：原生红绿灯按钮不随界面字号缩放，
-     固定高度才能让它们始终垂直居中（配合 trafficLightPosition.y = 20）。 */
+  /* 标题栏固定 34px：红绿灯不随界面字号缩放，固定高度才能让它们始终
+     与标题栏内容垂直居中（配合 trafficLightPosition.y = 10）。 */
   --ui-titlebar-height: 34px;
-  --macos-traffic-light-inset: 78px;
+  /* 红绿灯安全区：三个按钮 + 间距合计约 60px，另留 18px 呼吸空间。 */
+  --macos-traffic-light-inset: 84px;
 
   /* 系统强调色（AppKit systemBlue）：菜单高亮、焦点环按平台规范使用系统蓝，
      与应用自身的品牌强调色解耦，避免覆盖主题注入的 --accent-color。 */
@@ -57,14 +58,14 @@ html[data-platform='macos'] body {
 /* ── 标题栏（Overlay + 原生红绿灯） ─────────────────────────────── */
 
 html[data-platform='macos'] .titlebar {
-  /* 红绿灯安全区：系统按钮位于 x=19，三个按钮合计约 60px。 */
+  /* 红绿灯安全区：系统按钮位于 x=20，三个按钮合计约 60px。 */
   padding-left: var(--macos-traffic-light-inset);
   padding-right: 6px;
   border-bottom: 1px solid var(--ui-border-subtle);
   background: var(--ui-bg-titlebar);
 }
 
-/* 进入系统全屏时红绿灯会被隐藏，安全区随之收起，避免左侧出现空洞。 */
+/* 进入系统全屏时红绿灯被隐藏，安全区随之收起，避免左侧出现空洞。 */
 html[data-platform='macos'] .titlebar.titlebar-macos-fullscreen {
   padding-left: 10px;
 }
@@ -88,7 +89,7 @@ html[data-platform='macos'] .titlebar .menubar {
 }
 
 html[data-platform='macos'] .titlebar .menu-trigger {
-  height: 26px;
+  height: 24px;
   min-width: 0;
   padding: 0 8px;
   border-radius: 5px !important;
@@ -111,7 +112,7 @@ html[data-platform='macos'] .titlebar .app-menu-trigger {
 
 /* 标题栏中的文档入口：按 macOS 搜索框（Finder / Safari 地址栏）度量。 */
 html[data-platform='macos'] .titlebar .titlebar-command-center {
-  height: 26px;
+  height: 24px;
   border: 1px solid var(--ui-border-subtle);
   border-radius: 6px;
   background: color-mix(in srgb, var(--ui-bg-input) 55%, transparent);
@@ -144,6 +145,7 @@ html[data-platform='macos'] :is(
   .submenu-dropdown,
   .more-dropdown,
   .context-menu,
+  .editor-context-menu,
   .toolbar-menu,
   .status-style-menu,
   .reasoning-menu,
@@ -156,8 +158,8 @@ html[data-platform='macos'] :is(
   box-shadow: var(--ui-shadow-menu);
 }
 
-html[data-platform='macos'] :is(.menu-dropdown, .submenu-dropdown, .more-dropdown, .context-menu) button,
-html[data-platform='macos'] :is(.menu-option, .context-menu-item, .toolbar-menu-item) {
+html[data-platform='macos'] :is(.menu-dropdown, .submenu-dropdown, .more-dropdown, .context-menu, .editor-context-menu) button,
+html[data-platform='macos'] :is(.menu-option, .context-menu-item, .toolbar-menu-item, .editor-context-menu-item) {
   min-height: 24px;
   padding: 0 8px;
   border-radius: 5px !important;
@@ -166,19 +168,19 @@ html[data-platform='macos'] :is(.menu-option, .context-menu-item, .toolbar-menu-
 }
 
 /* 系统菜单以强调色填充整行高亮，而不是 VSCode 的浅灰底。 */
-html[data-platform='macos'] :is(.menu-dropdown, .submenu-dropdown, .more-dropdown, .context-menu) button:hover:not(:disabled),
-html[data-platform='macos'] :is(.menu-option, .context-menu-item):hover:not(.disabled),
-html[data-platform='macos'] :is(.menu-option, .context-menu-item).is-checked {
+html[data-platform='macos'] :is(.menu-dropdown, .submenu-dropdown, .more-dropdown, .context-menu, .editor-context-menu) button:hover:not(:disabled),
+html[data-platform='macos'] :is(.menu-option, .context-menu-item, .editor-context-menu-item):hover:not(.disabled),
+html[data-platform='macos'] :is(.menu-option, .context-menu-item, .editor-context-menu-item).is-checked {
   background: var(--macos-accent);
   color: #fff;
 }
 
-html[data-platform='macos'] :is(.menu-option, .context-menu-item):hover .shortcut,
-html[data-platform='macos'] :is(.menu-option, .context-menu-item).is-checked .shortcut {
+html[data-platform='macos'] :is(.menu-option, .context-menu-item, .editor-context-menu-item):hover .shortcut,
+html[data-platform='macos'] :is(.menu-option, .context-menu-item, .editor-context-menu-item).is-checked .shortcut {
   color: color-mix(in srgb, #fff 78%, transparent);
 }
 
-html[data-platform='macos'] .menu-divider {
+html[data-platform='macos'] :is(.menu-divider, .context-menu-divider, .editor-context-menu-divider) {
   height: 1px;
   margin: 4px 6px;
   background: var(--ui-border-subtle);
@@ -264,4 +266,12 @@ html[data-platform='macos'] .statusbar {
 html[data-platform='macos'] .modal-overlay,
 html[data-platform='macos'] .settings-overlay {
   backdrop-filter: blur(2px);
+}
+
+/* 缩放期间关闭毛玻璃与过渡：WKWebView 重绘新区域前会短暂露出底色，
+   减少合成层可以明显缩短这段空窗。 */
+html[data-platform='macos'].window-resizing .titlebar,
+html[data-platform='macos'].window-resizing .app-workbench {
+  transition: none !important;
+  backdrop-filter: none !important;
 }

@@ -2,7 +2,9 @@
   "$schema": "https://schema.tauri.app/config/2",
   "bundle": {
     "macOS": {
-      "infoPlist": "Info.plist"
+      "infoPlist": "Info.plist",
+      "minimumSystemVersion": "12.0",
+      "signingIdentity": "-"
     }
   },
   "app": {
@@ -21,7 +23,7 @@
         "hiddenTitle": true,
         "trafficLightPosition": {
           "x": 20,
-          "y": 20
+          "y": 18
         },
         "acceptFirstMouse": true,
         "center": true,

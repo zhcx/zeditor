@@ -3,6 +3,7 @@ import { useAppStore } from '../../stores/appStore';
 import { parseMarkdownHeadings } from '../../utils/markdownOutline';
 
 interface ImmersiveOutlineProps {
+  width?: number;
   mode: 'immersive' | 'zen';
   collapsed: boolean;
   previewScrollElement?: HTMLDivElement | null;
@@ -10,6 +11,7 @@ interface ImmersiveOutlineProps {
 }
 
 export function ImmersiveOutline({
+  width,
   mode,
   collapsed,
   previewScrollElement,
@@ -43,6 +45,7 @@ export function ImmersiveOutline({
   return (
     <aside
       className={`immersive-outline ${collapsed ? 'is-collapsed' : ''}`}
+      style={collapsed ? undefined : { width }}
       aria-label="文档大纲"
     >
       {collapsed ? (

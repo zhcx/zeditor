@@ -267,6 +267,9 @@ pub struct EditorSettings {
     pub check_local_links: bool,
     #[serde(default = "default_true")]
     pub inline_popups: bool,
+    /// 用户选择的编辑方式："split" 或 "wysiwyg"；缺省表示尚未选择（首次启动会引导选择）。
+    #[serde(default)]
+    pub mode: Option<String>,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -387,6 +390,7 @@ impl Default for Settings {
                 pin_toolbar: false,
                 check_local_links: default_check_local_links(),
                 inline_popups: true,
+                mode: None,
             },
             image_hosting: ImageHostingSettings {
                 active_service: "local".into(),
@@ -2843,11 +2847,9 @@ mod workspace_search_tests {
 
 #[cfg(test)]
 mod link_check_tests {
-    use super::{is_drive_relative_path, is_unc_path, is_windows_root_relative, Settings};
-    // 只被下方 `#[cfg(target_os = "windows")]` 断言使用：条件导入可同时避免
-    // macOS/Linux 上的 unused import 与 Windows 上的 cannot find function。
     #[cfg(target_os = "windows")]
     use super::document_drive_prefix;
+    use super::{is_drive_relative_path, is_unc_path, is_windows_root_relative, Settings};
 
     #[test]
     fn unc_and_drive_relative_paths_are_rejected() {
@@ -3040,13 +3042,11 @@ pub async fn finalize_update_install(installer_path: String) -> Result<(), Strin
         command
             .spawn()
             .map_err(|e| format!("启动安装程序失败: {}", e))?;
+        // 退出应用，安装程序才能替换文件。
+        std::process::exit(0);
     }
     #[cfg(not(target_os = "windows"))]
     {
         Err("自动安装仅支持 Windows".to_string())
     }
-
-    // Windows 上启动安装程序后退出，让安装器替换文件
-    #[cfg(target_os = "windows")]
-    std::process::exit(0);
 }

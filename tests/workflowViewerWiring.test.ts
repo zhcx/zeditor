@@ -16,12 +16,15 @@ test('工作流查看器接线：预览集成独立文件与代码围栏两条�
   assert.match(preview, /editor\.replaceRange\(0, editor\.getValue\(\)\.length, nextSource\)/);
 
   // Markdown 代码围栏：先正则预判，再动态加载解析器，避免给普通 YAML 加料。
+  // 渲染增强已抽成共享管线（预览与所见即所得共用），围栏路径的接线在 markdownEnhancers 里。
+  const enhancers = await read('../src/utils/markdownEnhancers.tsx');
   assert.match(shape, /export function hasWorkflowShape/);
-  assert.match(preview, /hasWorkflowShape\(block\.textContent/);
-  assert.match(preview, /await import\(['"]\.\.\/\.\.\/utils\/githubWorkflow['"]\)/);
-  assert.match(preview, /looksLikeWorkflowYaml\(source\)/);
-  // 预览里挂载的 React 根必须在重渲染前卸载，否则会泄漏。
-  assert.match(preview, /workflowRoots\.forEach\(\(root\) => root\.unmount\(\)\)/);
+  assert.match(enhancers, /hasWorkflowShape\(block\.textContent/);
+  assert.match(enhancers, /await import\(['"]\.\/githubWorkflow\.ts['"]\)/);
+  assert.match(enhancers, /looksLikeWorkflowYaml\(source\)/);
+  // 渲染结果里挂载的 React 根必须在重渲染前卸载，否则会泄漏。
+  assert.match(enhancers, /workflowRoots\.forEach\(\(workflowRoot\) => workflowRoot\.unmount\(\)\)/);
+  assert.match(enhancers, /markmapRoots\.forEach\(\(markmapRoot\) => markmapRoot\.unmount\(\)\)/);
 });
 
 test('查看器不发起网络请求、不执行工作流（与参考实现的安全边界一致）', async () => {

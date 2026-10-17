@@ -1,6 +1,6 @@
 import { AppIcon } from '../Icons/AppIcon';
 import { useShallow } from 'zustand/react/shallow';
-import { useState, useRef, useEffect, useLayoutEffect, useCallback, lazy, Suspense } from 'react';
+import { useState, useRef, useEffect, useCallback, lazy, Suspense } from 'react';
 import { useAppStore } from '../../stores/appStore';
 import { t, LANGUAGE_OPTIONS } from '../../i18n';
 import { open as openDialog, save, message } from '@tauri-apps/plugin-dialog';
@@ -14,6 +14,9 @@ import { applyExportTemplate, loadExportTemplate } from '../Export/exportTemplat
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { resolveSaveBaseName } from '../../utils/saveName';
 import { formatShortcut } from '../../utils/platformShortcuts';
+import { isMacOS } from '../../utils/platform';
+import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
+import { collectMenuActions, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
 import { THEMES, resolveThemePreference } from '../../themes/apply';
 
@@ -26,15 +29,27 @@ import {
   CONVERTIBLE_DOCUMENT_EXTENSIONS,
   OPENABLE_FILE_EXTENSIONS,
 } from '../../utils/documentFormats';
-import {
-  collectCheckedStates,
-  collectMenuActions,
-  type AppMenuGroup,
-  type AppMenuItem,
-} from '../../utils/menuModel';
-import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
-import type { CheckMenuItem } from '@tauri-apps/api/menu';
-import { isMacOS } from '../../utils/platform';
+
+interface MenuItem {
+  label: string;
+  action?: () => void;
+  shortcut?: string;
+  divider?: boolean;
+  children?: MenuItem[];
+  /** 单选型菜单项的当前选中态，渲染为前置 ✓ 标记。 */
+  checked?: boolean;
+  /**
+   * `skip`：只在窗口内菜单出现。撤销/剪贴板类在 macOS 上由系统「编辑」菜单
+   * 以原生预定义项承担，重复放进原生菜单会得到两套不一致的行为。
+   */
+  macNative?: 'skip';
+}
+
+interface MenuGroup {
+  label: string;
+  variant?: 'app';
+  items: MenuItem[];
+}
 
 interface UpdateInfo {
   has_update: boolean;
@@ -102,6 +117,36 @@ async function toggleAppFullscreen() {
     return;
   }
   await document.documentElement.requestFullscreen();
+}
+
+/**
+ * 「导出」子菜单之外的旧导出项：窗口内菜单与原生菜单都不显示，
+ * 否则同一动作会出现两次（一次带子菜单、一次裸项）。
+ */
+function isLegacyExportItem(item: MenuItem): boolean {
+  return !item.children && !item.divider && (item.label === '导出为 HTML' || item.label === '导出为 PDF...');
+}
+
+/**
+ * 把窗口内菜单转换成原生菜单模型。
+ *
+ * id 取自层级下标：菜单结构在渲染之间保持稳定，重建时同一 id 始终指向同一条目，
+ * 原生菜单因此可以按 id 派发到最新动作；最近文件夹等动态列表变化会触发整体重建。
+ */
+function toAppMenuItems(items: MenuItem[], prefix: string): AppMenuItem[] {
+  return items.filter(item => !isLegacyExportItem(item)).map((item, index) => {
+    const id = `${prefix}.${index}`;
+    return {
+      id,
+      label: item.label,
+      action: item.action,
+      shortcut: item.shortcut,
+      divider: item.divider,
+      checked: item.checked,
+      macNative: item.macNative,
+      children: item.children ? toAppMenuItems(item.children, id) : undefined,
+    };
+  });
 }
 
 function HelpModal({ type, updateInfo, updateError, downloadProgress, downloadDone, onDownloadAndInstall, onClose }: HelpModalProps) {
@@ -617,14 +662,7 @@ export function MenuBar() {
   useEffect(() => {
     const onKeyDown = (event: KeyboardEvent) => {
       if (event.isComposing) return;
-      // F11 在 macOS 上被 Mission Control 占用（笔记本还需 Fn），因此 macOS
-      // 额外支持系统惯例的 ⌃⌘F；两者都指向演示/全屏切换。
       if (event.key === 'F11') {
-        event.preventDefault();
-        void toggleAppFullscreen();
-        return;
-      }
-      if (event.ctrlKey && event.metaKey && event.key.toLowerCase() === 'f') {
         event.preventDefault();
         void toggleAppFullscreen();
         return;
@@ -649,10 +687,6 @@ export function MenuBar() {
       } else if (key === 's') {
         event.preventDefault();
         void handlers.saveFile();
-      } else if (key === ',') {
-        // macOS「偏好设置」惯例：⌘,
-        event.preventDefault();
-        useAppStore.getState().setSettingsOpen(true);
       }
     };
     window.addEventListener('keydown', onKeyDown);
@@ -784,16 +818,14 @@ export function MenuBar() {
 
   // 文件菜单「最近的文件夹」：与 VMark 的「最近的工作区」对齐，最多 10 条，
   // 按最后打开时间排序；数据源是 Rust 端 recent_folders.json。
-  const recentFolderMenuItems: AppMenuItem[] = recentFolders.length > 0
+  const recentFolderMenuItems: MenuItem[] = recentFolders.length > 0
     ? [
-        ...recentFolders.map((folder, index) => ({
-          id: `file.recent.${index}`,
+        ...recentFolders.map((folder) => ({
           label: folder.title || folder.path.split(/[\\/]/).filter(Boolean).pop() || folder.path,
           action: () => openRecentFolder(folder.path),
         })),
-        { id: 'file.recent.divider', divider: true, label: '' },
+        { divider: true, label: '' },
         {
-          id: 'file.recent.clear',
           label: t('清除最近文件夹', language),
           action: () => {
             setActiveMenu(null);
@@ -804,91 +836,87 @@ export function MenuBar() {
           },
         },
       ]
-    : [{ id: 'file.recent.empty', label: t('（暂无最近文件夹）', language), action: () => undefined }];
+    : [{ label: t('（暂无最近文件夹）', language), action: () => undefined }];
 
-  const menus: AppMenuGroup[] = [
+  const menus: MenuGroup[] = [
     {
       label: APP_NAME,
       variant: 'app',
       items: [
-        { id: 'app.shortcuts', label: t('快捷键说明', language), action: () => setHelpModal('shortcuts') },
-        { id: 'app.syntax', label: t('Markdown 语法', language), action: () => setHelpModal('syntax') },
-        { id: 'app.divider.startup', divider: true, label: '' },
-        { id: 'app.checkUpdates', label: t('检查更新', language), action: handleCheckUpdates },
-        { id: 'app.divider.about', divider: true, label: '' },
-        { id: 'app.about', label: t('关于 Zeditor', language), action: () => setHelpModal('about') },
+        { label: t('快捷键说明', language), action: () => setHelpModal('shortcuts') },
+        { label: t('Markdown 语法', language), action: () => setHelpModal('syntax') },
+        { divider: true, label: '' },
+        { label: t('检查更新', language), action: handleCheckUpdates },
+        { divider: true, label: '' },
+        { label: t('关于 Zeditor', language), action: () => setHelpModal('about') },
       ],
     },
     {
       label: t('文件', language),
       items: [
-        { id: 'file.new', label: t('新建', language), action: handleNewFile, shortcut: 'Ctrl+N' },
-        { id: 'file.open', label: t('打开', language), action: handleOpenFile, shortcut: 'Ctrl+O' },
-        { id: 'file.convert', label: t('导入并转换文档…', language), action: handleConvertDocument },
-        ...('__TAURI_INTERNALS__' in window ? [{ id: 'file.recent', label: t('最近的文件夹', language), children: recentFolderMenuItems } satisfies AppMenuItem] : []),
-        { id: 'file.save', label: t('保存', language), action: handleSaveFile, shortcut: 'Ctrl+S' },
-        { id: 'file.saveAs', label: t('另存为', language), action: handleSaveAs, shortcut: 'Ctrl+Shift+S' },
-        { id: 'file.divider.export', divider: true, label: '' },
+        { label: t('新建', language), action: handleNewFile, shortcut: 'Ctrl+N' },
+        { label: t('打开', language), action: handleOpenFile, shortcut: 'Ctrl+O' },
+        { label: t('导入并转换文档…', language), action: handleConvertDocument },
+        ...('__TAURI_INTERNALS__' in window ? [{ label: t('最近的文件夹', language), children: recentFolderMenuItems } satisfies MenuItem] : []),
+        { label: t('保存', language), action: handleSaveFile, shortcut: 'Ctrl+S' },
+        { label: t('另存为', language), action: handleSaveAs, shortcut: 'Ctrl+Shift+S' },
+        { divider: true, label: '' },
         {
-          id: 'file.export',
           label: t('导出', language),
           children: [
-            { id: 'file.export.html', label: t('导出为 HTML', language), action: () => handleExport('html') },
-            { id: 'file.export.pdf', label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); setMenuOpen(false); } },
-            { id: 'file.export.word', label: t('导出为 Word', language), action: () => handleExport('word') },
+            { label: t('导出为 HTML', language), action: () => handleExport('html') },
+            { label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); setMenuOpen(false); } },
+            { label: t('导出为 Word', language), action: () => handleExport('word') },
           ],
         },
-        // 旧版扁平入口，仅窗口内菜单隐藏（见 shouldHideLegacyExportItem）；原生菜单同样跳过。
-        { id: 'file.export.legacyHtml', label: t('导出为 HTML', language), action: () => handleExport('html'), macNative: 'skip' },
-        { id: 'file.export.legacyPdf', label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); }, macNative: 'skip' },
+        { label: t('导出为 HTML', language), action: () => handleExport('html') },
+        { label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); } },
       ],
     },
     {
       label: t('功能', language),
       items: [
-        // 撤销/剪贴板类在 macOS 上由系统「编辑」菜单承担，窗口内菜单保留原样。
-        { id: 'feature.undo', label: t('撤销', language), action: () => document.execCommand('undo'), shortcut: 'Ctrl+Z', macNative: 'skip' },
-        { id: 'feature.redo', label: t('重做', language), action: () => document.execCommand('redo'), shortcut: 'Ctrl+Y', macNative: 'skip' },
-        { id: 'feature.divider.clipboard', divider: true, label: '' },
-        { id: 'feature.cut', label: t('剪切', language), action: () => document.execCommand('cut'), shortcut: 'Ctrl+X', macNative: 'skip' },
-        { id: 'feature.copy', label: t('复制', language), action: () => document.execCommand('copy'), shortcut: 'Ctrl+C', macNative: 'skip' },
-        { id: 'feature.paste', label: t('粘贴', language), action: () => document.execCommand('paste'), shortcut: 'Ctrl+V', macNative: 'skip' },
-        { id: 'feature.divider.insert', divider: true, label: '' },
-        { id: 'feature.insertImage', label: t('插入图片…', language), action: () => requestInsert('image'), shortcut: 'Ctrl+Shift+I' },
-        { id: 'feature.insertTable', label: t('插入表格', language), action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
-        { id: 'feature.insertMarkmap', label: t('插入思维导图', language), action: () => requestInsert('markmap') },
-        { id: 'feature.aiPalette', label: t('AI 指令面板', language), action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }, shortcut: 'Ctrl+J' },
-        { id: 'feature.checkLinks', label: t('检查链接', language), action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-check-links')); }, shortcut: 'Ctrl+Alt+V' },
+        { label: t('撤销', language), action: () => document.execCommand('undo'), shortcut: 'Ctrl+Z', macNative: 'skip' },
+        { label: t('重做', language), action: () => document.execCommand('redo'), shortcut: 'Ctrl+Y', macNative: 'skip' },
+        { divider: true, label: '' },
+        { label: t('剪切', language), action: () => document.execCommand('cut'), shortcut: 'Ctrl+X', macNative: 'skip' },
+        { label: t('复制', language), action: () => document.execCommand('copy'), shortcut: 'Ctrl+C', macNative: 'skip' },
+        { label: t('粘贴', language), action: () => document.execCommand('paste'), shortcut: 'Ctrl+V', macNative: 'skip' },
+        { divider: true, label: '' },
+        { label: t('插入图片…', language), action: () => requestInsert('image'), shortcut: 'Ctrl+Shift+I' },
+        { label: t('插入表格', language), action: () => requestInsert('table'), shortcut: 'Ctrl+Shift+T' },
+        { label: t('插入思维导图', language), action: () => requestInsert('markmap') },
+        { label: t('AI 指令面板', language), action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-ai-palette')); }, shortcut: 'Ctrl+J' },
+        { label: t('检查链接', language), action: () => { setActiveMenu(null); window.dispatchEvent(new CustomEvent('zeditor-check-links')); }, shortcut: 'Ctrl+Alt+V' },
         {
-          id: 'feature.table',
           label: t('表格操作', language),
           children: [
-            { id: 'feature.table.rowAbove', label: t('上方插入行', language), action: () => requestTableAction('row-above') },
-            { id: 'feature.table.rowBelow', label: t('下方插入行', language), action: () => requestTableAction('row-below') },
-            { id: 'feature.table.rowDelete', label: t('删除当前行', language), action: () => requestTableAction('row-delete') },
-            { id: 'feature.table.columnLeft', label: t('左侧插入列', language), action: () => requestTableAction('column-left') },
-            { id: 'feature.table.columnRight', label: t('右侧插入列', language), action: () => requestTableAction('column-right') },
-            { id: 'feature.table.columnDelete', label: t('删除当前列', language), action: () => requestTableAction('column-delete') },
-            { id: 'feature.table.alignLeft', label: t('当前列左对齐', language), action: () => requestTableAction('align-left') },
-            { id: 'feature.table.alignCenter', label: t('当前列居中', language), action: () => requestTableAction('align-center') },
-            { id: 'feature.table.alignRight', label: t('当前列右对齐', language), action: () => requestTableAction('align-right') },
-            { id: 'feature.table.format', label: t('整理表格格式', language), action: () => requestTableAction('format') },
-            { id: 'feature.table.delete', label: t('删除整张表格', language), action: () => requestTableAction('table-delete') },
+            { label: t('上方插入行', language), action: () => requestTableAction('row-above') },
+            { label: t('下方插入行', language), action: () => requestTableAction('row-below') },
+            { label: t('删除当前行', language), action: () => requestTableAction('row-delete') },
+            { label: t('左侧插入列', language), action: () => requestTableAction('column-left') },
+            { label: t('右侧插入列', language), action: () => requestTableAction('column-right') },
+            { label: t('删除当前列', language), action: () => requestTableAction('column-delete') },
+            { label: t('当前列左对齐', language), action: () => requestTableAction('align-left') },
+            { label: t('当前列居中', language), action: () => requestTableAction('align-center') },
+            { label: t('当前列右对齐', language), action: () => requestTableAction('align-right') },
+            { label: t('整理表格格式', language), action: () => requestTableAction('format') },
+            { label: t('删除整张表格', language), action: () => requestTableAction('table-delete') },
           ],
         },
-        { id: 'feature.divider.selectAll', divider: true, label: '' },
-        { id: 'feature.selectAll', label: t('全选', language), action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A', macNative: 'skip' },
-        { id: 'feature.divider.mode', divider: true, label: '' },
-        { id: 'feature.mode.split', label: t('分屏模式', language), checked: mode === 'split', action: () => useAppStore.getState().setMode('split') },
-        { id: 'feature.mode.immersive', label: t('沉浸阅读', language), checked: mode === 'immersive', action: () => useAppStore.getState().setMode('immersive') },
-        { id: 'feature.mode.zen', label: t('沉浸写作', language), checked: mode === 'zen', action: () => useAppStore.getState().setMode('zen') },
-        { id: 'feature.presentation', label: t('演示模式', language), action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); }, shortcut: 'F11' },
-        { id: 'feature.divider.appearance', divider: true, label: '' },
+        { divider: true, label: '' },
+        { label: t('全选', language), action: () => document.execCommand('selectAll'), shortcut: 'Ctrl+A', macNative: 'skip' },
+        { divider: true, label: '' },
+        { label: t('源码对照', language), checked: mode === 'split', action: () => useAppStore.getState().setMode('split') },
+        { label: t('所见即所得', language), checked: mode === 'wysiwyg', shortcut: 'Ctrl+Alt+M', action: () => useAppStore.getState().setMode('wysiwyg') },
+        { label: t('沉浸阅读', language), checked: mode === 'immersive', action: () => useAppStore.getState().setMode('immersive') },
+        { label: t('沉浸写作', language), checked: mode === 'zen', action: () => useAppStore.getState().setMode('zen') },
+        { label: t('演示模式', language), action: () => { window.dispatchEvent(new CustomEvent('zeditor-presentation-request')); } },
+        { label: t('切换全屏', language), shortcut: 'F11', action: () => { void toggleAppFullscreen(); } },
+        { divider: true, label: '' },
         {
-          id: 'feature.theme',
           label: t('主题', language),
           children: THEMES.map((theme) => ({
-            id: `feature.theme.${theme.id}`,
             label: `${theme.label}（${theme.labelEn}）`,
             checked: resolvedTheme === theme.id,
             action: () => {
@@ -897,10 +925,8 @@ export function MenuBar() {
           })),
         },
         {
-          id: 'feature.language',
           label: t('语言', language),
           children: LANGUAGE_OPTIONS.map((option) => ({
-            id: `feature.language.${option.value}`,
             label: option.nativeLabel,
             checked: language === option.value,
             action: () => {
@@ -908,135 +934,16 @@ export function MenuBar() {
             },
           })),
         },
-        { id: 'feature.divider.settings', divider: true, label: '' },
-        { id: 'feature.settings', label: t('设置', language), action: () => setSettingsOpen(true), shortcut: 'Ctrl+,' },
+        { divider: true, label: '' },
+        { label: t('设置', language), action: () => setSettingsOpen(true) },
       ],
     },
   ];
 
   const fileMenu = menus[1];
   const exportMenu = fileMenu.items.find((item) => item.children)?.children;
-  exportMenu?.push({ id: 'file.export.wechat', label: '导出公众号排版 HTML...', action: () => { setWeChatExportOpen(true); setActiveMenu(null); setMenuOpen(false); } });
-  exportMenu?.push({ id: 'file.export.image', label: '导出为图片...', action: () => { setImageExportOpen(true); setActiveMenu(null); setMenuOpen(false); } });
-
-  // ── macOS 系统菜单栏 ─────────────────────────────────────────────────
-  // 窗口内的自绘菜单栏在 macOS 上隐藏，改由系统菜单栏（原生 NSMenu）承担。
-  // 原生菜单只在「文案或结构」变化时重建；点击按 id 派发到最新一次渲染的
-  // 动作映射，勾选态（模式/主题/语言）单独同步，因此不需要逐帧重建。
-  const systemMenuLabels: SystemMenuLabels = {
-    edit: t('编辑', language),
-    window: t('窗口', language),
-    help: t('帮助', language),
-    undo: t('撤销', language),
-    redo: t('重做', language),
-    cut: t('剪切', language),
-    copy: t('复制', language),
-    paste: t('粘贴', language),
-    selectAll: t('全选', language),
-    minimize: t('最小化', language),
-    zoom: t('缩放', language),
-    bringAllToFront: t('前置全部窗口', language),
-    services: t('服务', language),
-    hideApp: t('隐藏 Zeditor', language),
-    hideOthers: t('隐藏其他', language),
-    showAll: t('显示全部', language),
-    quitApp: t('退出 Zeditor', language),
-    closeWindow: t('关闭窗口', language),
-  };
-
-  // 「帮助」菜单里的是原生菜单独有条目（窗口内菜单没有这一层）。
-  const helpMenuItems: AppMenuItem[] = [
-    { id: 'help.syntax', label: t('Markdown 语法', language), action: () => setHelpModal('syntax') },
-    { id: 'help.shortcuts', label: t('快捷键说明', language), action: () => setHelpModal('shortcuts') },
-  ];
-
-  const nativeActionsRef = useRef<Map<string, () => void>>(new Map());
-  const nativeCheckItemsRef = useRef<Map<string, CheckMenuItem>>(new Map());
-  const nativeModelRef = useRef({ groups: menus, help: helpMenuItems, labels: systemMenuLabels });
-  const [nativeMenuReady, setNativeMenuReady] = useState(false);
-  const [nativeMenuFailed, setNativeMenuFailed] = useState(false);
-
-  /** 勾选项以菜单模型为准：系统会先切换勾选态，这里再按当前状态纠正。 */
-  const syncNativeChecks = useCallback(() => {
-    const { groups } = nativeModelRef.current;
-    const states = collectCheckedStates(...groups.map((group) => group.items));
-    for (const [id, checked] of Object.entries(states)) {
-      void nativeCheckItemsRef.current.get(id)?.setChecked(checked);
-    }
-  }, []);
-
-  // 首帧前就隐藏窗口内菜单栏：原生菜单要等一次 IPC 往返才装好，
-  // 否则会先画出窗口内菜单再消失，出现「菜单闪一下」。构建失败时下面的
-  // 失败标记会撤销它，窗口内菜单自动回退显示。
-  useLayoutEffect(() => {
-    if (!(isMacOS() && '__TAURI_INTERNALS__' in window)) return undefined;
-    document.documentElement.dataset.nativeMenu = 'active';
-    return () => { delete document.documentElement.dataset.nativeMenu; };
-  }, []);
-
-  // 每次渲染后刷新：原生菜单取到的一定是最新闭包（设置、导出、更新检查等）。
-  useEffect(() => {
-    nativeModelRef.current = { groups: menus, help: helpMenuItems, labels: systemMenuLabels };
-    nativeActionsRef.current = collectMenuActions(
-      ...menus.map((group) => group.items),
-      helpMenuItems,
-    );
-  });
-
-  // 语言与「最近的文件夹」会改变原生菜单的文案与结构，这两项变化时重建。
-  const nativeMenuStructureKey = `${language}\u0000${recentFolders.map((folder) => folder.path).join('|')}`;
-
-  useEffect(() => {
-    if (!(isMacOS() && '__TAURI_INTERNALS__' in window)) return undefined;
-    let disposed = false;
-
-    const install = async () => {
-      try {
-        const { groups, help, labels } = nativeModelRef.current;
-        const menu = await buildMacAppMenu({
-          appName: APP_NAME,
-          fileLabel: groups[1].label,
-          featureLabel: groups[2].label,
-          appMenuItems: groups[0].items,
-          fileItems: groups[1].items,
-          featureItems: groups[2].items,
-          helpItems: help,
-          labels,
-          dispatch: (id) => {
-            nativeActionsRef.current.get(id)?.();
-            // 单选型条目的勾选态由模型决定：动作执行后统一纠正一次，
-            // 覆盖「点击已选中项」这种模型状态不变、勾选却被系统翻转的情况。
-            queueMicrotask(syncNativeChecks);
-          },
-          registerCheckItem: (id, item) => { nativeCheckItemsRef.current.set(id, item); },
-        });
-        if (disposed) return;
-        await menu.setAsAppMenu();
-        if (disposed) return;
-        setNativeMenuReady(true);
-        setNativeMenuFailed(false);
-      } catch {
-        // 原生菜单不可用时去掉隐藏标记，窗口内菜单栏自动回退显示，
-        // 用户不会因此失去入口。
-        setNativeMenuReady(false);
-        setNativeMenuFailed(true);
-      }
-    };
-
-    nativeCheckItemsRef.current.clear();
-    void install();
-    return () => { disposed = true; };
-  }, [nativeMenuStructureKey, syncNativeChecks]);
-
-  useEffect(() => {
-    if (nativeMenuFailed) delete document.documentElement.dataset.nativeMenu;
-  }, [nativeMenuFailed]);
-
-  const nativeCheckedKey = JSON.stringify(collectCheckedStates(...menus.map((group) => group.items)));
-  useEffect(() => {
-    // 模型引用已在每次渲染后刷新（见上），这里只需按最新状态纠正勾选项。
-    if (nativeMenuReady) syncNativeChecks();
-  }, [nativeCheckedKey, nativeMenuReady, syncNativeChecks]);
+  exportMenu?.push({ label: '导出公众号排版 HTML...', action: () => { setWeChatExportOpen(true); setActiveMenu(null); setMenuOpen(false); } });
+  exportMenu?.push({ label: '导出为图片...', action: () => { setImageExportOpen(true); setActiveMenu(null); setMenuOpen(false); } });
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1050,9 +957,84 @@ export function MenuBar() {
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, []);
 
-  const shouldHideLegacyExportItem = (item: AppMenuItem) => {
-    return !item.children && !item.divider && (item.label === '导出为 HTML' || item.label === '导出为 PDF...');
-  };
+  // ── macOS 系统菜单栏 ─────────────────────────────────────────────────
+  // 窗口内的自绘菜单栏在 macOS 上隐藏，改由系统菜单栏（原生 NSMenu）承担。
+  // 结构变化（语言、勾选态、最近文件夹、设置）时重建；点击按 id 派发回当前
+  // 模型的动作闭包。构建失败时保留窗口内菜单，不写 data-native-menu 标记。
+  const macDesktop = isMacOS() && '__TAURI_INTERNALS__' in window;
+  const menusRef = useRef(menus);
+  const checkUpdatesRef = useRef(handleCheckUpdates);
+  const recentFolderKey = recentFolders.map(folder => folder.path).join('\u0000');
+
+  // 每次提交后刷新：原生菜单重建时读到的始终是最新一次渲染的菜单模型与动作。
+  useEffect(() => {
+    menusRef.current = menus;
+    checkUpdatesRef.current = handleCheckUpdates;
+  });
+
+  useEffect(() => {
+    if (!macDesktop) return undefined;
+    let cancelled = false;
+    const groups = menusRef.current;
+    const fileItems = toAppMenuItems(groups[1]?.items ?? [], 'file');
+    const featureItems = toAppMenuItems(groups[2]?.items ?? [], 'feature');
+    const appItems: AppMenuItem[] = [
+      { id: 'app.about', label: t('关于 Zeditor', language), action: () => setHelpModal('about') },
+      { id: 'app.checkUpdates', label: t('检查更新', language), action: () => { void checkUpdatesRef.current(); } },
+      { id: 'app.settings', label: t('设置…', language), shortcut: 'Ctrl+,', action: () => setSettingsOpen(true) },
+    ];
+    const helpItems: AppMenuItem[] = [
+      { id: 'help.shortcuts', label: t('快捷键说明', language), action: () => setHelpModal('shortcuts') },
+      { id: 'help.syntax', label: t('Markdown 语法', language), action: () => setHelpModal('syntax') },
+    ];
+    const labels: SystemMenuLabels = {
+      edit: t('编辑', language),
+      window: t('窗口', language),
+      help: t('帮助', language),
+      undo: t('撤销', language),
+      redo: t('重做', language),
+      cut: t('剪切', language),
+      copy: t('复制', language),
+      paste: t('粘贴', language),
+      selectAll: t('全选', language),
+      minimize: t('最小化', language),
+      zoom: t('缩放', language),
+      bringAllToFront: t('前置全部窗口', language),
+      closeWindow: t('关闭窗口', language),
+      services: t('服务', language),
+      hideApp: t('隐藏 Zeditor', language),
+      hideOthers: t('隐藏其他', language),
+      showAll: t('显示全部', language),
+      quitApp: t('退出 Zeditor', language),
+    };
+    const actions = collectMenuActions(appItems, fileItems, featureItems, helpItems);
+
+    void buildMacAppMenu({
+      appName: APP_NAME,
+      fileLabel: groups[1]?.label ?? t('文件', language),
+      featureLabel: groups[2]?.label ?? t('功能', language),
+      appMenuItems: appItems,
+      fileItems,
+      featureItems,
+      helpItems,
+      labels,
+      dispatch: (id) => actions.get(id)?.(),
+      // 勾选态通过重建同步，无需单独登记。
+      registerCheckItem: () => undefined,
+    })
+      .then(menu => menu.setAsAppMenu())
+      .then(() => {
+        if (!cancelled) document.documentElement.dataset.nativeMenu = 'active';
+      })
+      .catch(error => {
+        console.warn('Failed to install the macOS application menu; keeping the in-window menu.', error);
+        delete document.documentElement.dataset.nativeMenu;
+      });
+
+    return () => { cancelled = true; };
+  }, [macDesktop, language, mode, resolvedTheme, recentFolderKey, settings, setSettingsOpen]);
+
+  const shouldHideLegacyExportItem = isLegacyExportItem;
 
   return (
     <>
@@ -1075,13 +1057,13 @@ export function MenuBar() {
 
           // 所有菜单项点击后统一收起菜单：历史实现里各 action 自行关闭，
           // 模式切换等项遗漏了关闭步骤，导致点击后菜单悬浮不消失。
-          const runMenuItem = (item: AppMenuItem) => {
+          const runMenuItem = (item: MenuItem) => {
             item.action?.();
             setActiveMenu(null);
             setMenuOpen(false);
           };
 
-          const renderOptionLabel = (item: AppMenuItem) => (
+          const renderOptionLabel = (item: MenuItem) => (
             <span className="menu-option-label">
               <span className="menu-check" aria-hidden="true">{item.checked ? <AppIcon name="check" size={14} /> : ''}</span>
               <span>{item.label}</span>
