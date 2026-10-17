@@ -1,6 +1,6 @@
 # Zeditor 使用教程
 
-> 本教程已同步到 **Zeditor v0.6.4**，覆盖新增的「所见即所得」编辑模式、macOS 原生菜单与系统快捷键，以及编辑器、表格与性能方面的改进。
+> 本教程已同步到 **Zeditor v0.6.4**，覆盖新增的「所见即所得」编辑模式、macOS 原生菜单与系统快捷键，以及编辑器、表格、空文档引导与性能方面的改进。
 > Zeditor 是一款基于 Tauri 2.0 + React + Monaco Editor 构建的现代化 Markdown 编辑器，支持实时预览、AI 辅助写作、文档转换、多种导出与云备份。
 
 ---
@@ -34,18 +34,20 @@
 
 ### 1.1 下载安装包
 
-从 [GitHub Releases](https://github.com/zhcx/zeditor/releases) 页面下载对应平台的安装包：
+从 [GitHub Releases](https://github.com/zhcx/zeditor/releases) 页面下载对应平台的安装包；所有资产由 GitHub Actions 依据对应版本标签的源码构建：
 
-| 操作系统 | 推荐安装包 | 适用场景 |
-| --- | --- | --- |
-| Windows x86_64（Win10 1809+） | NSIS `.exe` | 大多数用户，按向导安装 |
-| Windows x86_64 | MSI | 企业部署、静默安装 |
-| macOS Apple Silicon（macOS 12+） | DMG | M1/M2/M3/M4 芯片 |
-| macOS Intel（macOS 12+） | DMG | Intel 芯片 Mac |
-| Ubuntu / Debian | DEB | Ubuntu 20.04+、Debian 11+、Mint 等 |
-| Fedora / RHEL / openSUSE | RPM | RPM 系发行版 |
-| 通用 Linux | AppImage | 免安装，`chmod +x` 后直接运行 |
+| 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
+| --- | --- | --- | --- | --- |
+| Windows | x86_64 | Windows 10 1809+ | NSIS `.exe` | 大多数用户，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | MSI | 企业部署、静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | DMG（另附 `.app.tar.gz` 更新包） | M1 / M2 / M3 / M4 芯片 |
+| macOS Intel | x86_64 | macOS 12+ | DMG（另附 `.app.tar.gz` 更新包） | Intel 芯片 Mac |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | DEB | Ubuntu、Debian、Mint 等 Debian 系 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | RPM | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 WebKitGTK 4.1 | AppImage | 免安装，`chmod +x` 后直接运行 |
 
+> v0.6.4 的安装包于 2026-10-17 重新构建（旧资产已清空），此前下载过的用户请重新下载覆盖安装。
+>
 > Windows 安装包可能触发 SmartScreen 警告（尚未代码签名），点击「更多信息 → 仍要运行」即可。
 >
 > macOS 安装包未做代码签名与公证：首次打开请右键点击 `Zeditor.app` 选择「打开」，或到「系统设置 → 隐私与安全性」中允许。双击 `.md` / `.markdown` 文件可直接用 Zeditor 打开。
@@ -323,7 +325,8 @@ npm run tauri build  # 构建发布版
 | 沉浸写作 | 隐藏预览与侧栏，只显示编辑器 + 可折叠大纲 | 专注写作 |
 
 - 首次安装（设置中还没有编辑方式）会弹出「选择你的编辑方式」，选择结果会记住；之后随时可在上面几处入口切换。
-- **所见即所得**：段落、标题、引用、嵌套列表、表格单元格、代码块都可以直接点进去改；行首输入 `# ` / `- ` / `1. ` / `> ` / ```` ``` ```` 即时转块，`Ctrl+1`–`Ctrl+6` 设标题级别、`Ctrl+0` 还原段落，`Tab` / `Shift+Tab` 调整列表层级；块左侧菜单可移动、复制、插入、删除或编辑源码。
+- **所见即所得**：段落、标题、引用、嵌套列表、表格单元格、代码块都可以直接点进去改；行首输入 `# ` / `- ` / `1. ` / `> ` / ```` ``` ```` 即时转块，`Ctrl+1`–`Ctrl+6` 设标题级别、`Ctrl+0` 还原段落，`Tab` / `Shift+Tab` 调整列表层级；块左侧菜单可移动、复制、插入、删除或编辑源码。新建或清空文档时显示「从一个想法开始」引导（`/` 插入内容、`Ctrl P` 切换文档）。
+- **空文档引导**：源码编辑、阅读预览与所见即所得三处提示共用同一条水平基准线；源码对照下左右两侧的空状态首行齐平，切换模式时提示位置不再上下跳动。
 - 沉浸条上有「对话」按钮，可在沉浸模式下开关 AI 侧栏；沉浸模式下大纲栏可折叠成「纲」字竖条。
 - **退出沉浸模式：按 Esc**，或在菜单/活动栏选回「源码对照」/「所见即所得」。
 
