@@ -91,6 +91,9 @@
   --card-padding-sm: 12px;
   --card-padding: 16px;
   --panel-padding: 20px;
+  /* 空白文档提示的顶端基准线：源码编辑、阅读预览、所见即所得共用同一个值，
+     并排或切换模式时提示落在同一条水平线上。 */
+  --empty-guide-top: clamp(110px, 20vh, 190px);
 
   /* Typography */
   --font-sans: "Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
@@ -5118,31 +5121,36 @@ textarea {
 }
 
 .preview-card.is-empty {
-  display: grid;
-  place-items: center;
   overflow: hidden;
 }
 
 .preview-card.is-empty .preview-document { display: none; }
 
+/* 与编辑区共用 --empty-guide-top：两块并排时提示首行齐平。 */
 .preview-empty-state {
+  position: absolute;
+  inset-inline: 24px;
+  top: var(--empty-guide-top);
   display: flex;
   flex-direction: column;
   align-items: center;
-  max-width: 280px;
-  gap: 9px;
+  gap: 0;
   color: var(--text-muted);
   text-align: center;
   line-height: 1.6;
+  pointer-events: none;
 }
 
 .preview-empty-state strong {
   color: var(--text-secondary);
-  font-size: 14px;
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 500;
 }
 
-.preview-empty-state > span:last-child { font-size: 12px; }
+.preview-empty-state > span:last-child {
+  margin-top: 9px;
+  font-size: 12px;
+}
 
 .preview-empty-mark {
   display: inline-flex;
@@ -5150,7 +5158,8 @@ textarea {
   justify-content: center;
   width: 38px;
   height: 38px;
-  margin-bottom: 3px;
+  /* 38 + 5 = 43，与编辑区 27px 图标 + 16px 间距同高，标题也对齐。 */
+  margin-bottom: 5px;
   border: 1px solid var(--border-soft);
   border-radius: 13px;
   background: var(--surface-muted);

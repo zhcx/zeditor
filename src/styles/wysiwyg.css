@@ -5,6 +5,9 @@
 }
 
 .wysiwyg-surface {
+  /* 空文档提示（.editor-empty-guide）以编辑表面为定位基准，
+     与源码编辑同一条 --empty-guide-top 基准线。 */
+  position: relative;
   flex: 1;
   min-height: 0;
   overflow: auto;
@@ -28,11 +31,6 @@
 }
 
 .wysiwyg-block.is-editable { min-height: 1.8em; }
-.wysiwyg-block.is-editable:empty::before {
-  content: attr(data-placeholder);
-  color: var(--text-muted);
-  pointer-events: none;
-}
 
 .wysiwyg-block:focus { outline: none; }
 .wysiwyg-block.is-editable:focus-within { border-radius: 4px; }

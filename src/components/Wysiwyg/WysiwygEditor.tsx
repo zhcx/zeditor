@@ -25,6 +25,8 @@ import { BlockSourceEditor } from './BlockSourceEditor';
 import { imageSpecMarkdown, inlineTargetMarkdown } from './inlineEditing';
 import { WysiwygChrome } from './WysiwygChrome';
 import { ProofreadHighlights } from './ProofreadHighlights';
+import { AppIcon } from '../Icons/AppIcon';
+import { formatShortcut } from '../../utils/platformShortcuts';
 
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
 const renderBlockHtml = createBlockHtmlRenderer(source => sanitizeRenderedHtml(renderMarkdownSource(source)));
@@ -44,7 +46,6 @@ interface WysiwygBlockViewProps {
   editable: boolean;
   skipRender: boolean;
   renderRevision: number;
-  emptyDocument: boolean;
   documentPath: string | null;
   workflowViewerEnabled: boolean;
   scrollRoot: HTMLElement | null;
@@ -111,7 +112,7 @@ function observeHandleMeasure(target: Element, measure: () => void) {
 }
 
 const WysiwygBlockView = memo(function WysiwygBlockView({
-  index, kind, source, startLine, editable, skipRender, renderRevision, emptyDocument, documentPath, workflowViewerEnabled,
+  index, kind, source, startLine, editable, skipRender, renderRevision, documentPath, workflowViewerEnabled,
   scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
   onCommitCode, onInlineClick, onApplyBlockSource, onEndSourceEditing, onDeleteBlock, onInsertAfter, onMove, onDuplicate, onRetype, count,
 }: WysiwygBlockViewProps) {
@@ -262,7 +263,6 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         data-block-index={index}
         data-block-kind={kind}
         data-source-line={startLine}
-        data-placeholder={emptyDocument && index === 0 ? '开始写作，输入 / 插入内容' : undefined}
         contentEditable={editable}
         suppressContentEditableWarning
         spellCheck={false}
@@ -680,7 +680,6 @@ export function WysiwygEditor() {
             editable={block.editable}
             skipRender={snapshot.skipRenderIndex === index}
             renderRevision={snapshot.blockRenderRevisions.get(index) ?? 0}
-            emptyDocument={emptyDocument}
             count={blockDocument.blocks.length}
             documentPath={currentFile}
             workflowViewerEnabled={settings.workflow?.render_in_preview !== false}
@@ -703,6 +702,14 @@ export function WysiwygEditor() {
           />
         ))}
       </article>
+      {emptyDocument && (
+        <div className="editor-empty-guide" aria-hidden="true">
+          <AppIcon name="pen" size={20} />
+          <strong>从一个想法开始</strong>
+          <p>写下文字，让思路自然展开。</p>
+          <div><span><kbd>/</kbd> 插入内容</span><span><kbd>{formatShortcut('Ctrl P')}</kbd> 切换文档</span></div>
+        </div>
+      )}
       <WysiwygChrome session={session} surface={scrollRoot} version={snapshot.version} pinned={Boolean(settings.editor.pin_toolbar)} />
       <ProofreadHighlights session={session} version={snapshot.version} renderedBlocks={renderBudget} />
       {contextMenu && (
