@@ -20,7 +20,7 @@ export function WysiwygChrome({ session, surface, version, pinned }: Props) {
   const [slash, setSlash] = useState<SlashState | null>(null);
   const [selectedIndex, setSelectedIndex] = useState(0);
   const [selectionBar, setSelectionBar] = useState<{ left: number; top: number; width: number; placement: 'above' | 'below' } | null>(null);
-  const [tableBar, setTableBar] = useState<{ left: number; top: number; placement: 'above' | 'below'; alignment: 'left' | 'center' | 'right' | 'none'; columns: number } | null>(null);
+  const [tableBar, setTableBar] = useState<{ anchorLeft: number; anchorTop: number; anchorBottom: number; alignment: 'left' | 'center' | 'right' | 'none'; columns: number } | null>(null);
   const [prompt, setPrompt] = useState<{ command: SlashCommand; anchor: SlashMenuAnchor } | null>(null);
   const [promptValue, setPromptValue] = useState('');
   const [imageOpen, setImageOpen] = useState(false);
@@ -55,8 +55,9 @@ export function WysiwygChrome({ session, surface, version, pinned }: Props) {
     const source = session.getVisibleSource();
     const table = element?.closest('td,th') ? parseTableAt(source, current.from) : null;
     if (table) {
-      const cellRect = element!.closest('td,th')!.getBoundingClientRect();
-      setTableBar({ left: Math.max(8, Math.min(cellRect.left, window.innerWidth - 620)), top: Math.max(12, cellRect.top - 46), placement: 'above', alignment: alignmentAt(source, current.from) ?? 'none', columns: table.columns });
+      // 锚点用整张表格而不是单元格：工具栏要贴在表格外侧，按单元格定位会把表头盖住。
+      const tableRect = (element!.closest('table') ?? element!.closest('td,th')!).getBoundingClientRect();
+      setTableBar({ anchorLeft: tableRect.left, anchorTop: tableRect.top, anchorBottom: tableRect.bottom, alignment: alignmentAt(source, current.from) ?? 'none', columns: table.columns });
     } else setTableBar(null);
     const line = lineAtOffset(source, current.from);
     const trigger = range.collapsed && !table ? findSlashCommandTrigger(line.text, line.from, current.from) : null;

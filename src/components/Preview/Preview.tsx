@@ -17,6 +17,7 @@ import { open } from '@tauri-apps/plugin-shell';
 import { toggleTaskLine } from '../../utils/taskList';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
+import './code-language.css';
 
 // 工作流查看器（含 YAML 解析器）只在真的遇到工作流时加载，不进入首帧关键路径。
 const WorkflowViewer = lazy(() => import('../WorkflowViewer/WorkflowViewer').then(m => ({ default: m.WorkflowViewer })));
@@ -95,6 +96,17 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
 
     // 渲染与增强都在共享管线里：与所见即所得模式共用同一套规则。
     container.innerHTML = renderMarkdownToHtml(deferredContent);
+    container.querySelectorAll('pre > code').forEach(code => {
+      const pre = code.parentElement;
+      if (!pre) return;
+      const language = Array.from(code.classList).find(name => name.startsWith('language-'))?.slice(9) || '纯文本';
+      const label = container.ownerDocument.createElement('span');
+      label.className = 'preview-code-language';
+      label.textContent = language;
+      label.title = `代码语言：${language}`;
+      pre.classList.add('preview-code-block');
+      pre.prepend(label);
+    });
     onContentRendered?.();
 
     return enhanceRenderedMarkdown(container, {

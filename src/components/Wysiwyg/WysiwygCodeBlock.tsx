@@ -21,6 +21,7 @@ export interface WysiwygCodeBlockProps {
 export function WysiwygCodeBlock({ index, code, language, onCommit, editing, onEditingChange, selection }: WysiwygCodeBlockProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [copied, setCopied] = useState(false);
+  const [languagesReady, setLanguagesReady] = useState(false);
 
   useEffect(() => {
     if (editing && !selection?.preserveFocus) textareaRef.current?.focus();
@@ -34,10 +35,10 @@ export function WysiwygCodeBlock({ index, code, language, onCommit, editing, onE
   return (
     <div className={`wysiwyg-code-layer ${editing ? 'is-editing' : ''}`} contentEditable={false}>
       <div className="wysiwyg-code-toolbar">
-        <select value={language} aria-label="代码语言" onChange={event => onCommit(index, code, event.target.value)}>
+        <select value={language} aria-label="代码语言" onFocus={() => setLanguagesReady(true)} onPointerDown={() => setLanguagesReady(true)} onChange={event => onCommit(index, code, event.target.value)}>
           <option value="">纯文本</option>
-          {language && !HIGHLIGHT_LANGUAGE_NAMES.includes(language) && <option value={language}>{language}</option>}
-          {HIGHLIGHT_LANGUAGE_NAMES.map(name => <option key={name} value={name}>{name}</option>)}
+          {language && (!languagesReady || !HIGHLIGHT_LANGUAGE_NAMES.includes(language)) && <option value={language}>{language}</option>}
+          {languagesReady && HIGHLIGHT_LANGUAGE_NAMES.map(name => <option key={name} value={name}>{name}</option>)}
         </select>
         <span />
         <button type="button" onClick={() => { void navigator.clipboard.writeText(code).then(() => setCopied(true)); }}>{copied ? '已复制' : '复制代码'}</button>

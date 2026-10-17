@@ -4,7 +4,7 @@ import { useAppStore } from '../../stores/appStore';
 import type { WysiwygSession } from './wysiwygSession';
 
 /** CSS 高亮不向 contenteditable 插入包装节点，不影响选区、输入法和源码写回。 */
-export function ProofreadHighlights({ session, version }: { session: WysiwygSession; version: number }) {
+export function ProofreadHighlights({ session, version, renderedBlocks }: { session: WysiwygSession; version: number; renderedBlocks?: number }) {
   const results = useAIStore(state => state.proofreadResults);
   const snapshot = useAIStore(state => state.proofreadSnapshot);
   const tabId = useAppStore(state => state.activeTabId);
@@ -27,6 +27,6 @@ export function ProofreadHighlights({ session, version }: { session: WysiwygSess
     const highlight = new Highlight(...ranges);
     if (ranges.length > 0) CSS.highlights.set(name, highlight);
     return () => { if (CSS.highlights.get(name) === highlight) CSS.highlights.delete(name); };
-  }, [results, snapshot, tabId, session, version]);
+  }, [results, snapshot, tabId, session, version, renderedBlocks]);
   return null;
 }

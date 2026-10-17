@@ -29,5 +29,6 @@ svg.app-icon.folder-icon::before, svg.app-icon.folder-icon::after { content: non
 .chat-select-check > svg, .settings-select-check > svg, .font-picker-check > svg { width: 14px; height: 14px; }
 .table-toolbar-button { display: inline-flex; align-items: center; justify-content: center; gap: 4px; }
 .table-toolbar { max-width: calc(100vw - 24px); flex-wrap: wrap; }
-.table-toolbar-hint { flex-basis: 100%; }
+/* 提示跟在按钮行尾：宽度够就不换行（工具栏保持单行，不遮挡表格）。 */
+.table-toolbar-hint { margin-left: auto; }
 .editor-context-menu-chevron > svg { width: 14px; height: 14px; }

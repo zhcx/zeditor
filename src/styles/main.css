@@ -418,14 +418,14 @@ html.panel-resizing .chatbot-side-panel {
   contain: layout paint;
 }
 
-/* Keep the active divider clearly visible for the whole drag, even when the
-   pointer leaves the 4px hover zone while the panel is being resized. */
-html.panel-resizing .divider.resizable::after,
-html.panel-resizing .sidebar-divider.resizable::after,
-html.panel-resizing .proofread-divider::after,
-html.panel-resizing .chatbot-divider::after {
-  width: 2px;
-  background: var(--accent-color);
+/* 拖动分隔条时文档区宽度每帧都在变：把重排限制在文档区内部，
+   避免整页（大纲、状态栏、滚动条）跟着反复布局。这里不用 paint，
+   否则会裁剪浮动工具栏与菜单。 */
+html.panel-resizing .document-pane,
+html.panel-resizing .editor-pane,
+html.panel-resizing .preview-pane {
+  contain: layout;
+  will-change: flex, width;
 }
 
 .main-content {
@@ -1025,18 +1025,6 @@ html.panel-resizing .chatbot-divider::after {
   overflow: hidden;
 }
 
-.sidebar-divider { width: 1px; background: var(--border-color); }
-
-.sidebar-divider.resizable {
-  width: 6px;
-  cursor: col-resize;
-  background: var(--border-color);
-  transition: background 0.2s;
-  margin: 0 2px;
-}
-
-.sidebar-divider.resizable:hover { background: var(--accent-color); }
-
 .sidebar-header {
   display: flex;
   align-items: center;
@@ -1364,51 +1352,6 @@ html.panel-resizing .chatbot-divider::after {
   border-radius: 999px;
 }
 
-/* ── Resizable Dividers ────────────────────────────────────────── */
-
-.divider.resizable,
-.sidebar-divider.resizable,
-.proofread-divider,
-.chatbot-divider {
-  background: transparent;
-  position: relative;
-}
-
-/* Widen the invisible grab target so dividers are easy to catch without
-   making the visible separator line thicker. The overlay sits above the
-   neighbouring panes while dragging, matching typical splitter behaviour. */
-.divider.resizable::before,
-.sidebar-divider.resizable::before,
-.proofread-divider::before,
-.chatbot-divider::before {
-  content: "";
-  position: absolute;
-  inset: 0 -4px;
-  z-index: 1;
-  cursor: col-resize;
-}
-
-.divider.resizable::after,
-.sidebar-divider.resizable::after,
-.proofread-divider::after,
-.chatbot-divider::after {
-  content: "";
-  position: absolute;
-  inset: 0 auto 0 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background: var(--border-color);
-  transition: width 0.15s, background 0.15s;
-}
-
-.divider.resizable:hover::after,
-.sidebar-divider.resizable:hover::after,
-.proofread-divider:hover::after,
-.chatbot-divider:hover::after {
-  width: 2px;
-  background: var(--accent-color);
-}
-
 /* ── Editor ────────────────────────────────────────────────────── */
 
 .editor-pane,
@@ -1470,7 +1413,8 @@ html.panel-resizing .chatbot-divider::after {
 
 .preview-container {
   width: 100%;
-  max-width: 880px;
+  /* 跟随窗口：全屏时不再被 880px 限在中间，左右留白由 padding 控制。 */
+  max-width: 100%;
   margin: 0 auto;
   padding: 42px 48px 60px;
   color: var(--text-color);
@@ -2304,16 +2248,6 @@ html.panel-resizing .chatbot-divider::after {
   overflow: hidden;
 }
 
-.proofread-divider {
-  width: 4px;
-  cursor: col-resize;
-  background: var(--border-color);
-  transition: background var(--transition);
-}
-
-.proofread-divider:hover,
-.proofread-divider.resizable:active { background: var(--accent-color); }
-
 .proofread-side-header {
   display: flex;
   align-items: center;
@@ -2539,16 +2473,6 @@ html.panel-resizing .chatbot-divider::after {
   flex-direction: column;
   overflow: hidden;
 }
-
-.chatbot-divider {
-  width: 4px;
-  cursor: col-resize;
-  background: var(--border-color);
-  transition: background var(--transition);
-}
-
-.chatbot-divider:hover,
-.chatbot-divider.resizable:active { background: var(--accent-color); }
 
 .chatbot-panel {
   display: flex;
@@ -3966,13 +3890,6 @@ textarea {
 
 .file-tree-children { border-left-color: var(--border-soft); }
 
-.sidebar-divider.resizable::after,
-.divider.resizable::after,
-.proofread-divider::after,
-.chatbot-divider::after {
-  background: var(--border-soft);
-}
-
 /* Editor and preview share a single document-card model. */
 .editor-container {
   padding: 20px 14px 20px 20px;
@@ -3994,7 +3911,8 @@ textarea {
 .editor-content .cm-scroller { padding-block: 22px; }
 
 .editor-content .cm-content {
-  max-width: 820px;
+  /* 跟随窗口：源码区不再被 820px 限在中间。 */
+  max-width: 100%;
   margin-inline: auto;
   padding-inline: clamp(22px, 4vw, 48px);
   color: var(--text-color);
@@ -4163,8 +4081,9 @@ textarea {
 }
 
 .zen-editor-pane .editor-document-card {
-  width: min(920px, calc(100% - 48px));
-  max-width: 920px;
+  /* 跟随窗口：沉浸写作的卡片同样自适应（全屏时不再留两侧大片空白）。 */
+  width: 100%;
+  max-width: 100%;
   margin: 0 auto;
   border: 0;
   box-shadow: none;
@@ -4900,21 +4819,6 @@ textarea {
   box-shadow: var(--shadow-soft);
 }
 
-.sidebar-divider.resizable {
-  flex: 0 0 8px;
-  width: 8px;
-  margin: 10px 2px 0;
-  background: transparent;
-}
-
-.sidebar-divider.resizable::after {
-  top: 14px;
-  bottom: 14px;
-  background: transparent;
-}
-
-.sidebar-divider.resizable:hover::after { background: var(--border-strong); }
-
 .sidebar-header {
   min-height: 54px;
   padding: 12px 12px 10px 14px;
@@ -5093,7 +4997,8 @@ textarea {
 .editor-content .cm-scroller { padding-block: 28px 44px; }
 
 .editor-content .cm-content {
-  max-width: 1120px;
+  /* 跟随窗口（与上一处同义，保留两段规则各自的 padding）。 */
+  max-width: 100%;
   padding-left: 8px;
   padding-right: clamp(12px, 1.6vw, 24px);
 }
@@ -5124,27 +5029,6 @@ textarea {
 }
 
 .editor-content .cm-activeLineGutter { background: transparent !important; }
-
-.divider.resizable {
-  flex: 0 0 4px;
-  width: 4px;
-  margin: 16px 0;
-  cursor: col-resize;
-}
-
-.divider.resizable::after {
-  top: 12%;
-  bottom: 12%;
-  width: 1px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--border-strong) 55%, transparent);
-}
-
-.divider.resizable:hover::after,
-.divider.resizable:active::after {
-  width: 2px;
-  background: color-mix(in srgb, var(--accent-color) 45%, var(--border-strong));
-}
 
 .preview-with-panel {
   display: flex;
@@ -5184,7 +5068,8 @@ textarea {
 
 .preview-document {
   width: 100%;
-  max-width: 1120px;
+  /* 跟随窗口：预览排版不再被 1120px 限在中间。 */
+  max-width: 100%;
   min-height: 100%;
   margin: 0 auto;
   padding: 24px clamp(20px, 2.6vw, 36px) 44px;
@@ -5196,7 +5081,7 @@ textarea {
 
 .preview-pane .preview-document {
   width: 100%;
-  max-width: 1120px;
+  max-width: 100%;
 }
 
 .preview-card.is-empty {
@@ -5267,25 +5152,11 @@ textarea {
 }
 
 .immersive-preview .preview-card {
-  width: min(100%, 940px);
+  width: 100%;
   margin: 0 auto;
 }
 
-.immersive-preview .preview-document { width: min(100%, 820px); }
-
-/* The proofread panel remains functional but joins the document-surface rhythm. */
-.proofread-divider {
-  flex: 0 0 8px;
-  width: 8px;
-  margin: 14px 0;
-  background: transparent;
-}
-
-.proofread-divider::after {
-  top: 12%;
-  bottom: 12%;
-  background: var(--border-soft);
-}
+.immersive-preview .preview-document { width: 100%; }
 
 .proofread-side-panel {
   margin-left: 2px;
@@ -5371,7 +5242,6 @@ textarea {
   .app-tabs-row .tab { min-width: 110px; }
   .workspace-shell { margin-top: 7px; }
   .main-content { padding: 8px; }
-  .sidebar-divider.resizable { flex-basis: 5px; width: 5px; }
   .editor-content .cm-scroller { padding-block: 20px 32px; }
 }
 
@@ -5681,35 +5551,6 @@ html.theme-switching *::after {
   border-radius: 12px;
   background: var(--bg-panel);
   box-shadow: var(--shadow-soft);
-}
-
-.chatbot-divider {
-  flex: 0 0 8px;
-  width: 8px;
-  margin: 10px 2px 0;
-  background: transparent;
-  position: relative;
-  cursor: col-resize;
-}
-
-[data-theme="dark"] .chatbot-divider {
-  background: transparent;
-}
-
-.chatbot-divider::after {
-  content: "";
-  position: absolute;
-  inset: 14px auto 14px 50%;
-  width: 1px;
-  transform: translateX(-50%);
-  background: var(--border-soft);
-  transition: width 0.15s, background 0.15s;
-}
-
-.chatbot-divider:hover::after,
-.chatbot-divider:active::after {
-  width: 2px;
-  background: color-mix(in srgb, var(--accent-color) 40%, transparent);
 }
 
 .chatbot-header {
@@ -6923,7 +6764,9 @@ textarea:focus-visible {
   margin: 0;
   padding: 6px 0 8px;
   border: 0;
-  border-right: 1px solid var(--border-soft);
+  /* 与资源管理器 / 编辑器之间的分隔线同色（拖拽条用 --border-color），
+     避免两条竖线一深一浅。 */
+  border-right: 1px solid var(--border-color);
   border-radius: 0;
   background: var(--bg-panel);
   box-shadow: none;
@@ -7669,10 +7512,6 @@ textarea:focus-visible {
 }
 
 .main-content.split { gap: 0; }
-
-.main-content.split > .divider.resizable {
-  margin: 0;
-}
 
 .document-pane {
   display: flex;
@@ -8555,38 +8394,6 @@ textarea:focus-visible {
   border-radius: 50%;
   background: var(--accent-color);
   box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent-color) 15%, transparent);
-}
-
-/* VS Code-style pane boundaries: a generous hit target for resizing, with a
-   single visible line that runs uninterrupted through the whole workbench. */
-.main-content.split > .divider.resizable,
-.preview-with-panel > .proofread-divider,
-.app-body > .chatbot-divider {
-  align-self: stretch;
-  flex: 0 0 7px;
-  width: 7px;
-  margin: 0;
-  background: transparent;
-}
-
-.main-content.split > .divider.resizable::after,
-.preview-with-panel > .proofread-divider::after,
-.app-body > .chatbot-divider::after {
-  top: 0;
-  bottom: 0;
-  width: 1px;
-  border-radius: 0;
-  background: var(--border-strong);
-}
-
-.main-content.split > .divider.resizable:hover::after,
-.main-content.split > .divider.resizable:active::after,
-.preview-with-panel > .proofread-divider:hover::after,
-.preview-with-panel > .proofread-divider:active::after,
-.app-body > .chatbot-divider:hover::after,
-.app-body > .chatbot-divider:active::after {
-  width: 2px;
-  background: var(--accent-color);
 }
 
 .app-body > .chatbot-side-panel {

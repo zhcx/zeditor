@@ -79,7 +79,9 @@ export function ActivityBar({ activeView, sidebarVisible, chatbotVisible, settin
             aria-haspopup="menu"
             aria-expanded={modeMenuOpen}
           >
-            <ActivityIcon name={wysiwyg ? 'format' : zen ? 'zen' : 'immersive'} />
+            {/* 编辑模式是「选择模式」的入口：沿用原有的书 / 笔形图标，
+                不要随模式换成 format——那会和上方「格式工具栏」按钮完全一样。 */}
+            <ActivityIcon name={wysiwyg || zen ? 'zen' : 'immersive'} />
           </button>
           {modeMenuOpen && (
             <div className="immersive-mode-menu" role="menu" aria-label="选择编辑模式">

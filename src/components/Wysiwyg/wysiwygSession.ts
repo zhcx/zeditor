@@ -27,10 +27,12 @@ import {
   exitEmptyItem,
   mergeBlocks,
   mergeForward,
+  retypeBlock,
   setHeadingLevel,
   splitBlock,
   stripBlockPrefix,
   type BlockArrowDirection,
+  type BlockRetypeTarget,
 } from '../../utils/wysiwyg/blockOps.ts';
 import { createUndoStack } from '../../utils/wysiwyg/undoStack.ts';
 import { extractFenceInfo, extractFenceLanguage, extractFenceMarker, formatFence, withFenceLanguage } from '../../utils/wysiwyg/codeFence.ts';
@@ -364,7 +366,10 @@ export class WysiwygSession {
     if (collected.serialized.markdown.slice(contentStart).trim().length === 0) {
       this.checkpointBlock(collected);
       const removed = removeBlockFromSource(this.document, index);
-      return this.applySource(removed.source, removed.caret);
+      // 删掉空块后光标回到上一块的末尾（"上升一行"）。留在删除点等于把光标交给
+      // 下一块的开头——视觉上是下一行的内容跳到光标位置，而不是光标上移一行。
+      const previous = this.document.blocks[index - 1];
+      return this.applySource(removed.source, previous ? previous.offset + previous.length : removed.caret);
     }
 
     const stripped = stripBlockPrefix(collected.serialized.markdown, collected.block.kind);
@@ -488,6 +493,16 @@ export class WysiwygSession {
     );
   }
 
+  /** 块菜单「转换为」：换掉行首前缀（段落 / 标题 / 列表 / 引用）。 */
+  setBlockKind(index: number, target: BlockRetypeTarget): boolean {
+    const collected = this.collectBlock(index);
+    if (!collected) return false;
+    const result = retypeBlock(collected.serialized.markdown, target);
+    if (result.source === collected.serialized.markdown) return false;
+    this.checkpointBlock(collected);
+    return this.applyBlockSource(collected.block, result.source, collected.block.offset + result.caret);
+  }
+
   /**
    * 方向键跨块：光标贴到块的上下/左右边界时，把光标交给相邻的可编辑块。
    *
@@ -581,6 +596,10 @@ export class WysiwygSession {
     return null;
   }
 
+  /** 右键菜单的撤销 / 重做可用态。 */
+  canUndo(): boolean { return this.undo.canUndo(); }
+  canRedo(): boolean { return this.undo.canRedo(); }
+
   /** Ctrl+Z / Ctrl+Shift+Z。 */
   handleUndo(): boolean {
     this.flushWriteBack();
@@ -645,6 +664,22 @@ export class WysiwygSession {
     const gap = `${this.document.eol}${this.document.eol}`;
     return this.applySource(
       this.document.source.slice(0, insertAt) + gap + this.document.source.slice(insertAt),
+      insertAt + gap.length,
+    );
+  }
+
+  /** 在指定块之后插入一段 Markdown 并落光标（块菜单「在下方插入」）。空模板退化为插入段落。 */
+  insertBlockAfter(index: number, markdown: string): boolean {
+    if (markdown.length === 0) return this.insertParagraphAfter(index);
+    this.flushWriteBack();
+    const block = this.document.blocks[index];
+    if (!block) return false;
+    this.pushUndo({ coalesce: false });
+    const insertAt = block.offset + block.length;
+    const gap = `${this.document.eol}${this.document.eol}`;
+    const text = `${gap}${markdown}`;
+    return this.applySource(
+      this.document.source.slice(0, insertAt) + text + this.document.source.slice(insertAt),
       insertAt + gap.length,
     );
   }
@@ -783,6 +818,11 @@ export class WysiwygSession {
 
   getCaretOffset(): number { return this.pendingCaret ?? this.lastCaret; }
 
+  /** The active edit's selection must exist before restoring it into new DOM. */
+  getRenderTargetOffset(): number {
+    return this.pendingCaret === null || !this.restoreFocus ? 0 : Math.max(this.pendingCaret, this.pendingSelectionEnd ?? this.pendingCaret);
+  }
+
   /** 焦点必须落在块宿主上；外层只负责滚动，不再可编辑。 */
   focus(): void {
     if (this.awaitingRender) return;
@@ -796,14 +836,24 @@ export class WysiwygSession {
       ? index
       : this.document.blocks.findIndex(block => block.editable);
     if (targetIndex < 0) return;
-    this.accessors.getBlockElement(targetIndex)?.focus();
+    // preventScroll：滚动交给显式的 revealElement / 光标恢复逻辑，浏览器隐式
+    // scrollIntoView 在长文档里会带来数百毫秒的布局成本（打开文档时尤其明显）。
+    this.accessors.getBlockElement(targetIndex)?.focus({ preventScroll: true });
     if (targetIndex === index) this.applySelection(from, to);
   }
 
   /** 渲染完成后由外壳调用：把待恢复的光标落到新 DOM 上。 */
   restoreCaretAfterRender(): void {
+    if (this.pendingCaret === null) { this.awaitingRender = false; return; }
+    const startIndex = this.blockIndexAtOffset(this.pendingCaret);
+    const endIndex = this.blockIndexAtOffset(this.pendingSelectionEnd ?? this.pendingCaret);
+    if (this.restoreFocus && this.accessors.getSurface()
+      && ((startIndex !== null && !this.accessors.getBlockElement(startIndex))
+        || (endIndex !== null && !this.accessors.getBlockElement(endIndex)))) {
+      this.awaitingRender = true;
+      return;
+    }
     this.awaitingRender = false;
-    if (this.pendingCaret === null) return;
     const caret = this.pendingCaret;
     const selectionEnd = this.pendingSelectionEnd ?? caret;
     const restoreFocus = this.restoreFocus;
@@ -816,7 +866,7 @@ export class WysiwygSession {
     if (!restoreFocus) return;
     const index = this.blockIndexAtOffset(caret);
     if (index !== null && this.document.blocks[index]?.editable) {
-      this.accessors.getBlockElement(index)?.focus();
+      this.accessors.getBlockElement(index)?.focus({ preventScroll: true });
     }
     this.applySelection(caret, selectionEnd);
   }
@@ -1042,7 +1092,7 @@ export class WysiwygSession {
       return;
     }
     const startElement = start.startContainer.nodeType === 1 ? start.startContainer as HTMLElement : start.startContainer.parentElement;
-    startElement?.closest<HTMLElement>('[contenteditable="true"]')?.focus();
+    startElement?.closest<HTMLElement>('[contenteditable="true"]')?.focus({ preventScroll: true });
     const selection = surface.ownerDocument.getSelection();
     if (!selection) return;
     const range = surface.ownerDocument.createRange();
@@ -1052,7 +1102,7 @@ export class WysiwygSession {
     else range.collapse(true);
     selection.removeAllRanges();
     selection.addRange(range);
-    if (preserveFocus) active?.focus();
+    if (preserveFocus) active?.focus({ preventScroll: true });
   }
 
   private domRangeOfOffset(offset: number): Range | null {

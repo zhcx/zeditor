@@ -23,6 +23,7 @@ import { insertImageFromPath } from '../../services/imageAssets';
 import { imageDialogFilters } from '../../utils/imageSyntax';
 import { insertTable as buildTableInsert } from '../../utils/markdownTable';
 import { stripInlineFormatting } from '../../utils/inlineFormatting';
+import { applyHeadingLevel, createHeadingEdit } from '../../utils/headingFormatting';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste';
 import { fitToolbarButtons } from '../../utils/workbenchNavigation';
 
@@ -389,6 +390,12 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     editorView.focus();
   };
 
+  const applyHeading = (level: number) => {
+    if (editorView) { applyHeadingLevel(editorView, level); return; }
+    const edit = createHeadingEdit(content, { from: content.length, to: content.length }, level);
+    if (edit) setContent(content.slice(0, edit.from) + edit.text + content.slice(edit.to));
+  };
+
   const insertImage = (url: string, alt?: string) => {
     const imageMarkdown = `![${alt || '图片'}](${url})`;
     insertAtCursor(imageMarkdown);
@@ -465,14 +472,14 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
         },
         {
           label: '标题',
-          title: '插入标题（H1 - H6）',
+          title: '设置标题（H1 - H6）',
           menu: [
-            { label: '一级标题', action: () => insertBlock('# ') },
-            { label: '二级标题', action: () => insertBlock('## ') },
-            { label: '三级标题', action: () => insertBlock('### ') },
-            { label: '四级标题', action: () => insertBlock('#### ') },
-            { label: '五级标题', action: () => insertBlock('##### ') },
-            { label: '六级标题', action: () => insertBlock('###### ') },
+            { label: '一级标题', action: () => applyHeading(1) },
+            { label: '二级标题', action: () => applyHeading(2) },
+            { label: '三级标题', action: () => applyHeading(3) },
+            { label: '四级标题', action: () => applyHeading(4) },
+            { label: '五级标题', action: () => applyHeading(5) },
+            { label: '六级标题', action: () => applyHeading(6) },
           ],
         },
         {

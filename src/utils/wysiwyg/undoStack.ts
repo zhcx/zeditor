@@ -12,6 +12,8 @@ export interface UndoSnapshot {
 
 export interface UndoStack {
   size(): number;
+  canUndo(): boolean;
+  canRedo(): boolean;
   push(snapshot: UndoSnapshot, options: { coalesce: boolean }): void;
   undo(current: UndoSnapshot): UndoSnapshot | null;
   redo(current: UndoSnapshot): UndoSnapshot | null;
@@ -28,6 +30,8 @@ export function createUndoStack(limit = 200): UndoStack {
 
   return {
     size: () => past.length,
+    canUndo: () => past.length > 0,
+    canRedo: () => future.length > 0,
     push: (snapshot, options) => {
       future = [];
       const top = past[past.length - 1];

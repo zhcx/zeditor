@@ -1,0 +1,31 @@
+/* Read-only code captions share the editor's surface without adding controls. */
+.app :is(.preview-pane, .immersive-preview) .preview-code-block {
+  padding: 0;
+  overflow: hidden;
+  border: 1px solid var(--border-color);
+  border-radius: 8px;
+}
+
+.app .preview-code-language {
+  display: block;
+  padding: 6px 16px;
+  overflow: hidden;
+  border-bottom: 1px solid var(--border-soft);
+  background: color-mix(in srgb, var(--surface-muted) 45%, transparent);
+  color: var(--text-secondary);
+  font: 500 12px/18px var(--font-sans);
+  letter-spacing: 0.02em;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  user-select: none;
+}
+
+.app :is(.preview-pane, .immersive-preview) .preview-code-block > code {
+  display: block;
+  padding: 14px 16px;
+  overflow-x: auto;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  white-space: pre;
+}

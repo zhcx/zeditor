@@ -173,6 +173,38 @@ export function setHeadingLevel(
   return { source: `${'#'.repeat(clamped)} ${stripped}`, caret: clamped + 1 };
 }
 
+export type BlockRetypeTarget = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bullet' | 'ordered' | 'quote';
+
+const RETYPE_PREFIX: Record<BlockRetypeTarget, string> = {
+  paragraph: '',
+  heading1: '# ',
+  heading2: '## ',
+  heading3: '### ',
+  bullet: '- ',
+  ordered: '1. ',
+  quote: '> ',
+};
+
+/** 行首的块前缀（引用 / 列表 / 标题），转换时逐行剥掉。 */
+const LINE_BLOCK_PREFIX = /^[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]*|#{1,6}[ \t]+)?/;
+
+/**
+ * 块菜单「转换为」：把块源码换成另一种文本块。
+ *
+ * 逐行处理——剥掉行首的引用 / 列表 / 标题前缀，再按目标补前缀；空行保持为空。
+ * 多行块按行扁平化（引用或列表的续行各自成行），不做层级推导。表格、代码块等
+ * 自带交互面的块由调用方拦下（不在 PREFIXED_TEXT_KINDS 里）。
+ */
+export function retypeBlock(source: string, target: BlockRetypeTarget): { source: string; caret: number } {
+  const prefix = RETYPE_PREFIX[target];
+  const eol = source.includes('\r\n') ? '\r\n' : '\n';
+  const lines = source.split(/\r\n|\n|\r/).map(line => {
+    const content = line.replace(LINE_BLOCK_PREFIX, '');
+    return content.length === 0 ? '' : `${prefix}${content}`;
+  });
+  return { source: lines.join(eol), caret: lines[0]?.length ? prefix.length : 0 };
+}
+
 /** Tab / Shift+Tab：当前项及后代的层级调整，缩进宽度由前一项的实际标记决定。 */
 export function adjustListIndent(
   source: string,

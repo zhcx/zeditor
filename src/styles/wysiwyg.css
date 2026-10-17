@@ -222,20 +222,33 @@
 
 .status-mode-button:hover { background: var(--bg-hover); }
 
-/* 编辑区采用连续文档间距，不能叠加阅读预览的上下段落留白。 */
-.wysiwyg-surface > .wysiwyg-document { width: 100%; max-width: 960px; box-sizing: border-box; padding: 24px 48px 35vh; }
-.wysiwyg-document .wysiwyg-block-shell { margin: 0 0 .45em; }
+/* 编辑区采用连续文档间距，不能叠加阅读预览的上下段落留白。
+   宽度完全跟随窗口（与源码对照 / 阅读预览一致），左右留白随视口增长。 */
+.wysiwyg-surface > .wysiwyg-document {
+  width: 100%;
+  max-width: 100%;
+  box-sizing: border-box;
+  padding: 24px clamp(24px, 4vw, 88px) 35vh;
+}
+.wysiwyg-document .wysiwyg-block-shell { margin: 0 0 .32em; }
 .wysiwyg-document .wysiwyg-block { padding: 0; }
 .wysiwyg-document .wysiwyg-block.is-editable { min-height: 1.5em; }
 /*
    直接承载文本的段落块（刚回车出来的空段落、正在就地输入的段落）必须与渲染出的
-   <p> 使用同一行高：main.css 里 .preview-document p 的行高是 1.84，而壳自身继承
-   normal，于是「输入态 21px → 重渲染后 25.76px」每次回车都会跳一次高度，写下去
-   的段间距看起来越来越大。空段落没有内容行盒，min-height 也要同步（1.84em 与
-   1.84 行高相等），否则它仍是旧高度、与相邻段落对不齐。
+   <p> 使用同一行高：壳自身继承 normal，渲染态却是 .preview-document p 的行高，
+   两态不一致时每次回车都会跳一次高度。空段落没有内容行盒，min-height 也要同步，
+   否则它仍是旧高度、与相邻段落对不齐。
+   行高取 1.62 而不是阅读预览的 1.84：编辑时正文更紧凑（行盒留白从各 3.4px 降到
+   各 1.8px），段间距随之收窄；预览排版不受影响。
  */
-.wysiwyg-document .wysiwyg-block[data-block-kind="paragraph"] { line-height: 1.84; }
-.wysiwyg-document .wysiwyg-block[data-block-kind="paragraph"].is-editable { min-height: 1.84em; }
+/* 段落：section（就地输入态）与渲染出的 <p> 都要命中——.preview-document p 显式写了
+   1.84，只给 section 设行高会被它盖掉，两态高度又会不一致。 */
+.wysiwyg-document .wysiwyg-block[data-block-kind="paragraph"],
+.wysiwyg-document .wysiwyg-block[data-block-kind="paragraph"] :is(p, li) { line-height: 1.62; }
+.wysiwyg-document .wysiwyg-block[data-block-kind="paragraph"].is-editable { min-height: 1.62em; }
+/* 列表项与引用内的正文跟随同一行高，避免段落紧、列表松的混排落差。 */
+.wysiwyg-document .wysiwyg-block[data-block-kind="list"] :is(li, p),
+.wysiwyg-document .wysiwyg-block[data-block-kind="blockquote"] :is(p, li) { line-height: 1.62; }
 .wysiwyg-document .wysiwyg-block > :first-child { margin-top: 0; }
 .wysiwyg-document .wysiwyg-block > :last-child { margin-bottom: 0; }
 .wysiwyg-document .wysiwyg-block > p { margin: 0; }
@@ -279,9 +292,9 @@
    隐藏时必须一并关掉命中：否则一个透明的手柄会吃掉正文左侧留白的点击
    （点左留白定位光标是常见动作，会被误判成“打开块菜单”）。 */
 /* 手柄的垂直中心对齐块首行的行盒中心：行高由块视图测量后写到壳的自定义属性上
-   （段落的 1.84 行高、各级标题、表格首格各不相同），拿不到测量值时回退到段落的
-   1.84em——与段落块的 min-height 相等，中心一致。 */
-.wysiwyg-block-actions { top: 0; left: -34px; right: auto; pointer-events: none; height: var(--wysiwyg-first-line, 1.84em); align-items: center; }
+   （段落、各级标题、表格首格各不相同），拿不到测量值时回退到段落的 1.62em——
+   与段落块的 min-height 相等，中心一致。 */
+.wysiwyg-block-actions { top: 0; left: -34px; right: auto; pointer-events: none; height: var(--wysiwyg-first-line, 1.62em); align-items: center; }
 .wysiwyg-block-shell:focus-within > .wysiwyg-block-actions { opacity: 0; pointer-events: none; }
 .wysiwyg-block-shell:hover > .wysiwyg-block-actions,
 .wysiwyg-block-shell > .wysiwyg-block-actions:focus-within,
@@ -297,7 +310,25 @@
   right: 100%;
   width: 34px;
 }
-.wysiwyg-block-actions .wysiwyg-block-handle { width: 28px; height: 28px; justify-content: center; border-color: transparent; background: transparent; cursor: pointer; }
+/* 块手柄按 VS Code 的块按钮外观：圆角方块 + 常驻底色 + 强调色点阵。
+   悬停只提亮底色，不再改边框/图标色（那会让按钮在指针进出时"跳"一下）。 */
+.wysiwyg-block-actions .wysiwyg-block-handle {
+  width: 26px;
+  height: 26px;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 6px;
+  background: var(--surface-muted, var(--bg-hover));
+  color: var(--accent);
+  cursor: pointer;
+}
+
+.wysiwyg-block-actions .wysiwyg-block-handle:hover {
+  border-color: transparent;
+  background: var(--bg-hover);
+  color: var(--accent-hover, var(--accent));
+}
+
 .wysiwyg-block-actions .wysiwyg-block-handle .app-icon { display: block; }
 .wysiwyg-block-menu { position: absolute; top: 30px; left: 0; z-index: 80; width: 190px; padding: 5px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--bg-elevated); box-shadow: 0 8px 24px #0004; }
 .wysiwyg-block-menu button { width: 100%; padding: 7px 10px; border: 0; background: transparent; font-size: 12px; text-align: left; }
@@ -312,3 +343,8 @@
 .wysiwyg-code-layer .wysiwyg-code-editor { position: static; display: block; width: 100%; height: auto; min-height: 140px; box-sizing: border-box; resize: vertical; border-radius: 0 0 7px 7px; padding: 12px 14px; tab-size: 2; }
 .wysiwyg-block.is-code-editing { display: none; }
 .wysiwyg-document .has-code pre { border-top-left-radius: 0; border-top-right-radius: 0; }
+
+/* 代码块与正文同族：模板没有覆盖浏览器对 pre/code 的默认等宽字体，与正文观感差异过大。
+   放在文件末尾（本文件最后加载）以压过模板与主题里的等宽声明。 */
+.app .wysiwyg-document .wysiwyg-block :is(pre, pre code),
+.app :is(.preview-document, .preview-container) :is(pre, pre code) { font-family: inherit; }

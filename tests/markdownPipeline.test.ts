@@ -15,6 +15,18 @@ it('keeps fenced code away from math and languages intact', () => {
   assert.doesNotMatch(html, /class="katex"/);
 });
 
+it('preserves custom fence languages even when syntax highlighting is unavailable', () => {
+  const html = renderMarkdownSource('```my-custom-language\nexample <value>\n```\n');
+  assert.match(html, /<code class="language-my-custom-language">/);
+  assert.match(html, /example &lt;value&gt;/);
+});
+
+it('escapes language names before putting them in a code class', () => {
+  const html = renderMarkdownSource('```vendor"demo\nexample\n```\n');
+  assert.match(html, /<code class="language-vendor&quot;demo">/);
+  assert.doesNotMatch(html, /class="language-vendor"demo"/);
+});
+
 it('renders inline math with katex', () => {
   const html = renderMarkdownSource('体积 $V = a^3$ 计算\n');
   assert.match(html, /class="katex"/);

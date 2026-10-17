@@ -590,55 +590,6 @@ body {
 .toolbar-overflow-menu.is-pinned button:hover { background: var(--ui-bg-hover); }
 .toolbar-overflow-menu.is-pinned button > span { color: var(--ui-text-secondary); }
 
-.main-content.split > .divider.resizable,
-.preview-with-panel > .proofread-divider,
-.app-body > .chatbot-divider,
-.sidebar-divider.resizable {
-  background: transparent;
-}
-
-.main-content.split > .divider.resizable::after,
-.preview-with-panel > .proofread-divider::after,
-.app-body > .chatbot-divider::after,
-.sidebar-divider.resizable::after {
-  width: 1px;
-  border-radius: 0;
-  background: var(--ui-border-default);
-}
-
-.main-content.split > .divider.resizable:hover::after,
-.main-content.split > .divider.resizable:active::after,
-.preview-with-panel > .proofread-divider:hover::after,
-.preview-with-panel > .proofread-divider:active::after,
-.app-body > .chatbot-divider:hover::after,
-.app-body > .chatbot-divider:active::after,
-.sidebar-divider.resizable:hover::after,
-.sidebar-divider.resizable:active::after {
-  width: 2px;
-  background: var(--ui-accent);
-}
-
-/* Keep the sidebar hit target usable without turning it into a thick blue
-   block. Older styles colored the full divider on hover. */
-.sidebar-divider.resizable {
-  flex: 0 0 4px;
-  width: 4px;
-  margin: 0;
-}
-
-.sidebar-divider.resizable:hover,
-.sidebar-divider.resizable:active {
-  background: transparent;
-}
-
-.sidebar-divider.resizable::after,
-.sidebar-divider.resizable:hover::after,
-.sidebar-divider.resizable:active::after {
-  top: 0;
-  bottom: 0;
-  width: 1px;
-}
-
 .editor-document-card,
 .preview-card,
 .chatbot-panel,
@@ -1675,13 +1626,6 @@ body {
   .chatbot-provider-select { max-width: 34%; }
 }
 
-@media (max-width: 900px) {
-  .app-body > .chatbot-side-panel,
-  .preview-with-panel > .proofread-side-panel {
-    width: clamp(250px, 38vw, 320px) !important;
-  }
-}
-
 @media (max-width: 760px) {
   :root { --ui-activitybar-width: 44px; }
   .titlebar-command-center { display: none; }
@@ -2078,15 +2022,15 @@ body {
 }
 
 .immersive-reading .immersive-preview .preview-document {
-  width: min(100%, 920px);
-  max-width: 920px;
+  /* 跟随窗口：沉浸阅读不再被 920px 限在中间，边距交给 padding。 */
+  width: 100%;
+  max-width: 100%;
   padding: clamp(30px, 4vw, 62px) clamp(28px, 5vw, 72px) 80px;
 }
 
 .immersive-mode-active .chatbot-side-panel.immersive-chatbot-panel {
-  min-width: 280px;
   padding: 0;
-  border-left: 1px solid var(--ui-border-default);
+  border: 0;
   background: var(--ui-bg-sidebar);
 }
 
@@ -2095,11 +2039,6 @@ body {
   border-radius: 0;
   background: transparent;
   box-shadow: none;
-}
-
-.immersive-mode-active .immersive-chatbot-divider {
-  flex-basis: 5px;
-  width: 5px;
 }
 
 @media (max-width: 980px) {

@@ -75,8 +75,35 @@ function measureColumnWidths(table: HTMLTableElement): number[] {
 
 /** 给表格加列宽拖动把手：拖动改列宽，双击把手恢复该列的自动宽度。 */
 function enhanceTables(container: HTMLElement, documentPath: string | null): () => void {
+  const tables = Array.from(container.querySelectorAll<HTMLTableElement>('table'));
+  if (tables.length === 0) return () => {};
   const cleanups: Array<() => void> = [];
-  Array.from(container.querySelectorAll<HTMLTableElement>('table')).forEach((table, tableIndex) => {
+  // Measure visible tables together, then write handle positions together. Reading
+  // after each table's writes forces the entire document to lay out repeatedly.
+  const pending = new Map<HTMLElement, () => () => void>();
+  const measures = new Map<HTMLElement, () => () => void>();
+  const visible = new Set<HTMLElement>();
+  let frame = 0;
+  const schedule = (wrap: HTMLElement) => {
+    const measure = measures.get(wrap);
+    if (!measure || !visible.has(wrap)) return;
+    pending.set(wrap, measure);
+    if (frame) return;
+    frame = requestAnimationFrame(() => {
+      frame = 0;
+      const writes = [...pending.values()].map(read => read());
+      pending.clear();
+      writes.forEach(write => write());
+    });
+  };
+  const visibility = typeof IntersectionObserver === 'undefined' ? null : new IntersectionObserver(entries => {
+    for (const entry of entries) {
+      const wrap = entry.target as HTMLElement;
+      if (entry.isIntersecting) { visible.add(wrap); schedule(wrap); }
+      else { visible.delete(wrap); pending.delete(wrap); }
+    }
+  }, { rootMargin: '500px' });
+  tables.forEach((table, tableIndex) => {
     if (tableColumnCount(table) < 2) return;
     const key = tableLayoutKey(documentPath, table, tableIndex);
     const wrap = document.createElement('div');
@@ -91,27 +118,23 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): () 
     // 拖动起点永远取当前渲染宽度：手柄按渲染位置摆放，若沿用上次写入的
     // 设置值，起点会和手柄所在的实际边界脱节，越拖偏差越大。
     const currentWidths = () => measureColumnWidths(table);
-    // 只有内容真的超出可用宽度时才允许横向滚动：否则窄表格下方会出现一条空滚动条。
-    const syncScrollable = () => {
-      const overflow = table.getBoundingClientRect().width > wrap.clientWidth + 1;
-      wrap.classList.toggle('is-scrollable', overflow);
-    };
-    const reposition = () => {
+    const measurePosition = () => {
       const wrapRect = wrap.getBoundingClientRect();
       const cells = Array.from(table.rows[0]?.cells ?? []);
-      const height = table.getBoundingClientRect().height;
-      syncScrollable();
-      handles.forEach((handle, index) => {
-        const cell = cells[index];
-        if (!cell) {
-          handle.style.display = 'none';
-          return;
-        }
-        handle.style.display = 'block';
-        handle.style.left = `${cell.getBoundingClientRect().right - wrapRect.left + wrap.scrollLeft}px`;
-        handle.style.height = `${Math.max(24, height)}px`;
-      });
+      const tableRect = table.getBoundingClientRect();
+      const overflow = tableRect.width > wrap.clientWidth + 1;
+      const positions = cells.map(cell => cell.getBoundingClientRect().right - wrapRect.left + wrap.scrollLeft);
+      return () => {
+        wrap.classList.toggle('is-scrollable', overflow);
+        handles.forEach((handle, index) => {
+          handle.style.display = index < positions.length ? 'block' : 'none';
+          handle.style.left = `${positions[index] || 0}px`;
+          handle.style.height = `${Math.max(24, tableRect.height)}px`;
+        });
+      };
     };
+    const reposition = () => measurePosition()();
+    measures.set(wrap, measurePosition);
 
     // 每列一个右边界手柄：列与列之间 + 最右列的右边缘都能拖动调宽。
     for (let index = 0; index < tableColumnCount(table); index += 1) {
@@ -153,7 +176,7 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): () 
         widths = next;
         tableColumnWidths.set(key, next);
         applyColumnWidths(table, next);
-        reposition();
+        schedule(wrap);
       });
     }
 
@@ -166,17 +189,25 @@ function enhanceTables(container: HTMLElement, documentPath: string | null): () 
           repositionObserver?.disconnect();
           return;
         }
-        reposition();
+        schedule(wrap);
       });
       repositionObserver.observe(wrap);
     }
-    window.requestAnimationFrame(reposition);
+    if (visibility) visibility.observe(wrap);
+    else { visible.add(wrap); schedule(wrap); }
     cleanups.push(() => {
       repositionObserver?.disconnect();
+      visibility?.unobserve(wrap);
       if (wrap.parentNode) { wrap.parentNode.insertBefore(table, wrap); wrap.remove(); }
     });
   });
-  return () => cleanups.forEach(cleanup => cleanup());
+  return () => {
+    cancelAnimationFrame(frame);
+    visibility?.disconnect();
+    pending.clear();
+    measures.clear();
+    cleanups.forEach(cleanup => cleanup());
+  };
 }
 
 function addListItemContentAnchors(container: HTMLElement) {

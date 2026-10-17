@@ -1,3 +1,5 @@
+import { PanelDivider } from './components/Layout/PanelDivider';
+import { fitPanelWidths } from './utils/panelSizing';
 import { AppIcon } from './components/Icons/AppIcon';
 import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useCallback, useState, lazy, Suspense } from 'react';
@@ -62,8 +64,6 @@ interface DragDropPayload {
   position: { x: number; y: number };
 }
 
-const DEFAULT_EDITOR_RATIO = 0.5;
-
 function App() {
   const {
     mode,
@@ -86,20 +86,14 @@ function App() {
   const encodingDialog = useAppStore(state => state.encodingDialog);
   const { proofreadResults, setProofreadPanelVisible, translationPosition, translationOriginal, translationResult, setTranslationVisible, chatbotVisible, setChatbotVisible, companionVisible, pendingEdit } = useAIStore(useShallow(state => ({ proofreadResults: state.proofreadResults, setProofreadPanelVisible: state.setProofreadPanelVisible, translationPosition: state.translationPosition, translationOriginal: state.translationOriginal, translationResult: state.translationResult, setTranslationVisible: state.setTranslationVisible, chatbotVisible: state.chatbotVisible, setChatbotVisible: state.setChatbotVisible, companionVisible: state.companionVisible, pendingEdit: state.pendingEdit })));
 
-  const dividerRef = useRef<HTMLDivElement>(null);
-  const sidebarDividerRef = useRef<HTMLDivElement>(null);
-  const proofreadDividerRef = useRef<HTMLDivElement>(null);
-  const chatbotDividerRef = useRef<HTMLDivElement>(null);
-  const isDragging = useRef(false);
-  const isDraggingSidebar = useRef(false);
-  const isDraggingProofread = useRef(false);
-  const isDraggingChatbot = useRef(false);
-  const dragFrame = useRef<number | null>(null);
-  const pendingDrag = useRef<{ type: 'split' | 'sidebar' | 'proofread' | 'chatbot'; clientX: number } | null>(null);
-  const dragBounds = useRef<DOMRect | null>(null);
-  const layoutWidth = useRef<number | null>(null);
-  const [proofreadPanelWidth, setProofreadPanelWidth] = useState(280);
-  const [chatbotPanelWidth, setChatbotPanelWidth] = useState(340);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  const [bodyWidth, setBodyWidth] = useState(() => window.innerWidth);
+  const [proofreadPreferredWidth, setProofreadPanelWidth] = useState(280);
+  const [chatbotPreferredWidth, setChatbotPanelWidth] = useState<number | null>(null);
+  const [outlinePreferredWidth, setOutlinePanelWidth] = useState(224);
+  const standardMode = mode === 'split' || mode === 'wysiwyg';
+  const hasSidebar = standardMode && (sidebarVisible || outlineVisible);
+  const hasProofread = standardMode && proofreadResults.length > 0;
   const [previewScrollElement, setPreviewScrollElement] = useState<HTMLDivElement | null>(null);
   /** 设置读取完成前不弹首次选择框，避免闪一下又被持久模式顶掉。 */
   const [settingsLoaded, setSettingsLoaded] = useState(false);
@@ -218,7 +212,6 @@ function App() {
     };
   }, []);
   const closePromptResolver = useRef<((action: UnsavedChangesAction) => void) | null>(null);
-  const dragValues = useRef({ splitRatio, sidebarWidth, proofreadPanelWidth, chatbotPanelWidth });
   const immersivePolicy = getImmersiveWorkspacePolicy(mode, chatbotVisible);
 
   const promptUnsavedChanges = useCallback((tabs: CloseGuardTab[]) => new Promise<UnsavedChangesAction>((resolve) => {
@@ -349,71 +342,43 @@ function App() {
     return () => window.clearInterval(timer);
   }, [settings.editor.auto_save_interval]);
 
-  const balanceDocumentPanes = useCallback((proofreadWidth = proofreadPanelWidth, chatWidth = chatbotPanelWidth) => {
-    const appBody = dividerRef.current?.closest('.app-body') as HTMLElement | null;
-    const divider = dividerRef.current;
-    if (!appBody || !divider) return;
+  const hasImmersiveOutline = !standardMode && !immersiveOutlineCollapsed;
+  const outlineRailWidth = !standardMode && immersiveOutlineCollapsed ? 40 : 0;
+  const leftPreferred = hasSidebar ? sidebarWidth : hasImmersiveOutline ? outlinePreferredWidth : 0;
+  const proofreadPreferred = hasProofread ? proofreadPreferredWidth : 0;
+  const panelSpace = (Number(hasSidebar || hasImmersiveOutline) + Number(hasProofread) + Number(chatbotVisible) + Number(mode === 'split')) * 4;
+  const chatPreferred = chatbotVisible
+    ? chatbotPreferredWidth ?? Math.max(180, (bodyWidth - leftPreferred - proofreadPreferred - panelSpace - outlineRailWidth) / 3)
+    : 0;
+  const [leftPanelWidth, proofreadPanelWidth, chatbotPanelWidth] = fitPanelWidths(
+    bodyWidth - panelSpace - outlineRailWidth, [leftPreferred, proofreadPreferred, chatPreferred], 240,
+  );
 
-    const hasProofreadPanel = proofreadResults.length > 0;
-    const sidebarSpace = (sidebarVisible || outlineVisible) ? sidebarWidth + 6 : 0;
-    const proofreadSpace = hasProofreadPanel ? proofreadWidth + 8 : 0;
-    const chatbotSpace = chatbotVisible ? chatWidth + 8 : 0;
-    // During a drag the container width is fixed; reuse its captured bounds to
-    // avoid a synchronous layout read on every animation frame.
-    const appBodyWidth = layoutWidth.current ?? appBody.clientWidth;
-    const mainWidth = appBodyWidth - sidebarSpace - chatbotSpace;
-    const documentWidth = mainWidth - proofreadSpace;
-    if (mainWidth <= 0 || documentWidth <= 0) return;
+  const commitPanelWidth = (panel: 'sidebar' | 'outline' | 'proofread' | 'chatbot', width: number) => {
+    // In a constrained window, a deliberate resize starts a new layout from the
+    // displayed widths. Refitting old, larger preferences would move the divider
+    // again on release. Window resizing alone never changes these preferences.
+    const fitted = leftPanelWidth < leftPreferred - 0.5 || proofreadPanelWidth < proofreadPreferred - 0.5 || chatbotPanelWidth < chatPreferred - 0.5;
+    if (fitted) {
+      if (hasSidebar) setSidebarWidth(panel === 'sidebar' ? width : leftPanelWidth);
+      if (hasImmersiveOutline) setOutlinePanelWidth(panel === 'outline' ? width : leftPanelWidth);
+      if (hasProofread) setProofreadPanelWidth(panel === 'proofread' ? width : proofreadPanelWidth);
+      if (chatbotVisible) setChatbotPanelWidth(panel === 'chatbot' ? width : chatbotPanelWidth);
+      return;
+    }
+    if (panel === 'sidebar') setSidebarWidth(width);
+    else if (panel === 'outline') setOutlinePanelWidth(width);
+    else if (panel === 'proofread') setProofreadPanelWidth(width);
+    else setChatbotPanelWidth(width);
+  };
 
-    const ratio = Math.max(0.1, Math.min(0.9, (documentWidth * DEFAULT_EDITOR_RATIO) / mainWidth));
-    const editor = divider.previousElementSibling as HTMLElement | null;
-    const preview = divider.nextElementSibling as HTMLElement | null;
-    if (editor) editor.style.flex = String(ratio);
-    if (preview) preview.style.flex = String(1 - ratio);
-    dragValues.current.splitRatio = ratio;
-  }, [chatbotPanelWidth, chatbotVisible, outlineVisible, proofreadPanelWidth, proofreadResults.length, sidebarVisible, sidebarWidth]);
-
-  const scheduleDragFrame = useCallback((type: 'split' | 'sidebar' | 'proofread' | 'chatbot', clientX: number) => {
-    pendingDrag.current = { type, clientX };
-    if (dragFrame.current !== null) return;
-
-    dragFrame.current = window.requestAnimationFrame(() => {
-      dragFrame.current = null;
-      const drag = pendingDrag.current;
-      const bounds = dragBounds.current;
-      if (!drag || !bounds) return;
-
-      if (drag.type === 'split') {
-        const sidebarOffset = sidebarVisible ? sidebarWidth : 0;
-        const ratio = Math.max(0.1, Math.min(0.9,
-          (drag.clientX - bounds.left - sidebarOffset) / (bounds.width - sidebarOffset),
-        ));
-        const divider = dividerRef.current;
-        const editor = divider?.previousElementSibling as HTMLElement | null;
-        const preview = divider?.nextElementSibling as HTMLElement | null;
-        if (editor) editor.style.flex = String(ratio);
-        if (preview) preview.style.flex = String(1 - ratio);
-        dragValues.current.splitRatio = ratio;
-      } else if (drag.type === 'sidebar') {
-        const width = Math.max(150, Math.min(400, drag.clientX - bounds.left));
-        const sidebar = sidebarDividerRef.current?.previousElementSibling as HTMLElement | null;
-        if (sidebar) sidebar.style.width = `${width}px`;
-        dragValues.current.sidebarWidth = width;
-      } else if (drag.type === 'proofread') {
-        const width = Math.max(200, Math.min(500, bounds.right - drag.clientX));
-        const panel = proofreadDividerRef.current?.nextElementSibling as HTMLElement | null;
-        if (panel) panel.style.width = `${width}px`;
-        dragValues.current.proofreadPanelWidth = width;
-        balanceDocumentPanes(width, dragValues.current.chatbotPanelWidth);
-      } else {
-        const width = Math.max(200, Math.min(500, bounds.right - drag.clientX));
-        const panel = chatbotDividerRef.current?.nextElementSibling as HTMLElement | null;
-        if (panel) panel.style.width = `${width}px`;
-        dragValues.current.chatbotPanelWidth = width;
-        balanceDocumentPanes(dragValues.current.proofreadPanelWidth, width);
-      }
-    });
-  }, [balanceDocumentPanes, sidebarVisible, sidebarWidth]);
+  useEffect(() => {
+    const body = bodyRef.current;
+    if (!body) return;
+    const observer = new ResizeObserver(([entry]) => setBodyWidth(entry.contentRect.width));
+    observer.observe(body);
+    return () => observer.disconnect();
+  }, []);
 
   useEffect(() => {
     void loadSettings().then(() => {
@@ -667,91 +632,6 @@ function App() {
     return () => { unlisten.then(fn => fn()); };
   }, [openFile]);
 
-  // Pointer Events with capture keep the drag attached to the divider even when
-  // the pointer leaves the window, which makes resizing feel continuous instead
-  // of dropping input at the webview edge.
-  const beginPanelDrag = useCallback((e: React.PointerEvent, flag: React.MutableRefObject<boolean>, ref: React.RefObject<HTMLDivElement | null>) => {
-    e.preventDefault();
-    flag.current = true;
-    const handle = ref.current;
-    handle?.setPointerCapture?.(e.pointerId);
-    document.body.style.cursor = 'col-resize';
-    document.body.style.userSelect = 'none';
-    // Block scroll chaining while a split is being resized so wheel/touchpad
-    // gestures cannot fight the drag.
-    document.documentElement.style.overscrollBehavior = 'none';
-    dragBounds.current = handle?.parentElement?.getBoundingClientRect() || null;
-    layoutWidth.current = (handle?.closest('.app-body') as HTMLElement | null)?.clientWidth ?? null;
-    document.documentElement.classList.add('panel-resizing');
-  }, []);
-
-  const handleSplitPointerDown = useCallback((e: React.PointerEvent) => {
-    beginPanelDrag(e, isDragging, dividerRef);
-  }, [beginPanelDrag]);
-
-  const handleSplitPointerMove = useCallback((e: PointerEvent) => {
-    if (!isDragging.current) return;
-
-    scheduleDragFrame('split', e.clientX);
-  }, [scheduleDragFrame]);
-
-  const handleSidebarPointerDown = useCallback((e: React.PointerEvent) => {
-    beginPanelDrag(e, isDraggingSidebar, sidebarDividerRef);
-  }, [beginPanelDrag]);
-
-  const handleSidebarPointerMove = useCallback((e: PointerEvent) => {
-    if (!isDraggingSidebar.current) return;
-
-    scheduleDragFrame('sidebar', e.clientX);
-  }, [scheduleDragFrame]);
-
-  const handleProofreadPointerDown = useCallback((e: React.PointerEvent) => {
-    beginPanelDrag(e, isDraggingProofread, proofreadDividerRef);
-  }, [beginPanelDrag]);
-
-  const handleProofreadPointerMove = useCallback((e: PointerEvent) => {
-    if (!isDraggingProofread.current) return;
-
-    scheduleDragFrame('proofread', e.clientX);
-  }, [scheduleDragFrame]);
-
-  const handleChatbotPointerDown = useCallback((e: React.PointerEvent) => {
-    beginPanelDrag(e, isDraggingChatbot, chatbotDividerRef);
-  }, [beginPanelDrag]);
-
-  const handleChatbotPointerMove = useCallback((e: PointerEvent) => {
-    if (!isDraggingChatbot.current) return;
-
-    scheduleDragFrame('chatbot', e.clientX);
-  }, [scheduleDragFrame]);
-
-  useEffect(() => {
-    const rebalancePanels = () => {
-      const appBody = dividerRef.current?.closest('.app-body') as HTMLElement | null;
-      if (!appBody) return;
-      const sidebarSpace = (sidebarVisible || outlineVisible) ? sidebarWidth + 6 : 0;
-      const proofreadSpace = proofreadResults.length > 0 ? proofreadPanelWidth + 8 : 0;
-      const availableWidth = appBody.clientWidth - sidebarSpace - proofreadSpace;
-      const nextChatWidth = chatbotVisible
-        ? Math.max(200, Math.min(500, Math.round((availableWidth - 8) / 3)))
-        : chatbotPanelWidth;
-
-      if (chatbotVisible && Math.abs(nextChatWidth - chatbotPanelWidth) > 1) {
-        setChatbotPanelWidth(nextChatWidth);
-        dragValues.current.chatbotPanelWidth = nextChatWidth;
-      }
-      balanceDocumentPanes(proofreadPanelWidth, nextChatWidth);
-      setSplitRatio(dragValues.current.splitRatio);
-    };
-
-    const frame = window.requestAnimationFrame(rebalancePanels);
-    window.addEventListener('resize', rebalancePanels);
-    return () => {
-      window.cancelAnimationFrame(frame);
-      window.removeEventListener('resize', rebalancePanels);
-    };
-  }, [balanceDocumentPanes, chatbotPanelWidth, chatbotVisible, outlineVisible, proofreadPanelWidth, proofreadResults.length, setSplitRatio, sidebarVisible, sidebarWidth]);
-
   // 活动栏切换侧栏视图：点当前视图收起侧栏，点另一个视图切换过去。
   const selectActivityView = useCallback((view: 'explorer' | 'search') => {
     if (sidebarVisible && activityView === view) {
@@ -822,56 +702,6 @@ function App() {
     window.addEventListener('keydown', onKeyDown);
     return () => window.removeEventListener('keydown', onKeyDown);
   }, [chooseMode, showModeChooser]);
-
-  const handlePointerUp = useCallback(() => {
-    if (isDragging.current) {
-      isDragging.current = false;
-      setSplitRatio(dragValues.current.splitRatio);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    }
-    if (isDraggingSidebar.current) {
-      isDraggingSidebar.current = false;
-      setSidebarWidth(dragValues.current.sidebarWidth);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    }
-    if (isDraggingProofread.current) {
-      isDraggingProofread.current = false;
-      setProofreadPanelWidth(dragValues.current.proofreadPanelWidth);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    }
-    if (isDraggingChatbot.current) {
-      isDraggingChatbot.current = false;
-      setChatbotPanelWidth(dragValues.current.chatbotPanelWidth);
-      setSplitRatio(dragValues.current.splitRatio);
-      document.body.style.cursor = '';
-      document.body.style.userSelect = '';
-    }
-    pendingDrag.current = null;
-    dragBounds.current = null;
-    layoutWidth.current = null;
-    document.documentElement.style.overscrollBehavior = '';
-    document.documentElement.classList.remove('panel-resizing');
-  }, [setChatbotPanelWidth, setProofreadPanelWidth, setSidebarWidth, setSplitRatio]);
-
-  useEffect(() => {
-    document.addEventListener('pointermove', handleSplitPointerMove);
-    document.addEventListener('pointermove', handleSidebarPointerMove);
-    document.addEventListener('pointermove', handleProofreadPointerMove);
-    document.addEventListener('pointermove', handleChatbotPointerMove);
-    document.addEventListener('pointerup', handlePointerUp);
-    document.addEventListener('pointercancel', handlePointerUp);
-    return () => {
-      document.removeEventListener('pointermove', handleSplitPointerMove);
-      document.removeEventListener('pointermove', handleSidebarPointerMove);
-      document.removeEventListener('pointermove', handleProofreadPointerMove);
-      document.removeEventListener('pointermove', handleChatbotPointerMove);
-      document.removeEventListener('pointerup', handlePointerUp);
-      document.removeEventListener('pointercancel', handlePointerUp);
-    };
-  }, [handleSplitPointerMove, handleSidebarPointerMove, handleProofreadPointerMove, handleChatbotPointerMove, handlePointerUp]);
 
   const handlePreviewScrollContainerReady = useCallback((element: HTMLDivElement | null) => {
     setPreviewScrollElement(element);
@@ -1141,15 +971,12 @@ function App() {
           }}
         />
         <div className="app-workbench-content">
-          <div className="app-body">
+          <div className="app-body" ref={bodyRef}>
           {(mode === 'split' || mode === 'wysiwyg') && (sidebarVisible || outlineVisible) && (
           <>
-            <Sidebar style={{ width: sidebarWidth }} view={activityView} />
-            <div
-              ref={sidebarDividerRef}
-              className="sidebar-divider resizable"
-              onPointerDown={handleSidebarPointerDown}
-            />
+            <Sidebar style={{ width: leftPanelWidth }} view={activityView} />
+            <PanelDivider className="sidebar-divider resizable" label="调整侧栏宽度" side="before"
+              onChange={width => commitPanelWidth('sidebar', width)} onReset={() => setSidebarWidth(250)} />
           </>
           )}
           <div className="workspace-shell">
@@ -1173,11 +1000,8 @@ function App() {
                   />
                 </Suspense>
               </section>
-              <div
-                ref={dividerRef}
-                className="divider resizable"
-                onPointerDown={handleSplitPointerDown}
-              />
+              <PanelDivider className="divider resizable" label="调整编辑与预览比例" side="split"
+                onChange={setSplitRatio} onReset={() => setSplitRatio(0.5)} />
               <section className="document-pane preview-workspace-pane" style={{ flex: 1 - splitRatio }}>
                 <div className="document-pane-tabs">
                   <TabsBar />
@@ -1197,13 +1021,103 @@ function App() {
                     onScrollContainerReady={handlePreviewScrollContainerReady}
                     onContentRendered={handlePreviewContentRendered}
                   />
-                  {proofreadResults.length > 0 && (
-                    <>
-                      <div
-                        ref={proofreadDividerRef}
-                        className="proofread-divider resizable"
-                        onPointerDown={handleProofreadPointerDown}
+                </div>
+              </section>
+
+            </>
+          ) : mode === 'wysiwyg' ? (
+            <section className="document-pane wysiwyg-workspace-pane">
+              <div className="document-pane-tabs">
+                <TabsBar />
+              </div>
+              {settings.editor.pin_toolbar && (
+                <div className="editor-pane-toolbar">
+                  <Toolbar />
+                </div>
+              )}
+              <Suspense fallback={<div className="editor-container editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
+                <WysiwygEditor key={activeTabId} />
+              </Suspense>
+            </section>
+          ) : (
+            <section
+              className={`immersive-workspace immersive-${immersivePolicy.kind}`}
+              aria-label={mode === 'zen' ? '沉浸写作' : '沉浸阅读'}
+            >
+              {immersivePolicy.showOutline && (
+                <Suspense fallback={null}>
+                  <ImmersiveOutline
+                    width={leftPanelWidth}
+                    mode={mode === 'zen' ? 'zen' : 'immersive'}
+                    collapsed={immersiveOutlineCollapsed}
+                    previewScrollElement={immersivePreviewScrollElement}
+                    onToggle={() => setImmersiveOutlineCollapsed((collapsed) => !collapsed)}
+                  />
+                </Suspense>
+              )}
+              {immersivePolicy.showOutline && !immersiveOutlineCollapsed && (
+                <PanelDivider className="outline-divider resizable" label="调整大纲宽度" side="before"
+                  onChange={width => commitPanelWidth('outline', width)} onReset={() => setOutlinePanelWidth(224)} />
+              )}
+              <div className="immersive-document-area">
+                <header className="immersive-command-strip">
+                  {immersivePolicy.showEditorToolbar && settings.editor.pin_toolbar ? (
+                    <div className="immersive-writing-toolbar" aria-label="编辑器快捷工具栏">
+                      <Toolbar />
+                    </div>
+                  ) : (
+                    <div className="immersive-reading-label">
+                      <span aria-hidden="true"><AppIcon name="book" size={16} /></span>
+                      <strong>沉浸阅读</strong>
+                    </div>
+                  )}
+                  <div className="immersive-command-actions">
+                    <button
+                      className={`immersive-control-button ${chatbotVisible ? 'is-active' : ''}`}
+                      type="button"
+                      onClick={() => setChatbotVisible(!chatbotVisible)}
+                      title={chatbotVisible ? '收起 AI 对话' : '打开 AI 对话'}
+                      aria-pressed={chatbotVisible}
+                    >
+                      <span className="immersive-ai-button-mark" aria-hidden="true">AI</span>
+                      <span>对话</span>
+                    </button>
+                    <button
+                      className="immersive-control-button"
+                      type="button"
+                      onClick={() => useAppStore.getState().setMode('split')}
+                      title={`退出${mode === 'zen' ? '沉浸写作' : '沉浸阅读'} (Esc)`}
+                    >
+                      <span aria-hidden="true">↙</span>
+                      <span>退出</span>
+                    </button>
+                  </div>
+                </header>
+                <div className="immersive-document-surface">
+                  {mode === 'zen' ? (
+                    <Suspense fallback={<div className="editor-container zen-editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
+                      <Editor
+                        className="zen-editor-pane"
+                        onActiveLineChange={setActiveEditorLine}
+                        onActiveLineReveal={handleEditorLineReveal}
                       />
+                    </Suspense>
+                  ) : (
+                    <Preview
+                      className="immersive-preview"
+                      activeEditorLine={activeEditorLine}
+                      onSourceLineClick={handlePreviewSourceClick}
+                      onScrollContainerReady={setImmersivePreviewScrollElement}
+                    />
+                  )}
+                </div>
+              </div>
+            </section>
+          )}
+                  {hasProofread && (
+                    <>
+                      <PanelDivider className="proofread-divider resizable" label="调整校对栏宽度" side="after"
+                        onChange={width => commitPanelWidth('proofread', width)} onReset={() => setProofreadPanelWidth(280)} />
                       <div className="proofread-side-panel" style={{ width: proofreadPanelWidth }}>
                         <div className="proofread-side-header">
                           <h4>校对建议 ({proofreadResults.length})</h4>
@@ -1263,102 +1177,12 @@ function App() {
                       </div>
                     </>
                   )}
-                </div>
-              </section>
-            </>
-          ) : mode === 'wysiwyg' ? (
-            <section className="document-pane wysiwyg-workspace-pane">
-              <div className="document-pane-tabs">
-                <TabsBar />
-              </div>
-              {settings.editor.pin_toolbar && (
-                <div className="editor-pane-toolbar">
-                  <Toolbar />
-                </div>
-              )}
-              <Suspense fallback={<div className="editor-container editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
-                <WysiwygEditor key={activeTabId} />
-              </Suspense>
-            </section>
-          ) : (
-            <section
-              className={`immersive-workspace immersive-${immersivePolicy.kind}`}
-              aria-label={mode === 'zen' ? '沉浸写作' : '沉浸阅读'}
-            >
-              {immersivePolicy.showOutline && (
-                <Suspense fallback={null}>
-                  <ImmersiveOutline
-                    mode={mode === 'zen' ? 'zen' : 'immersive'}
-                    collapsed={immersiveOutlineCollapsed}
-                    previewScrollElement={immersivePreviewScrollElement}
-                    onToggle={() => setImmersiveOutlineCollapsed((collapsed) => !collapsed)}
-                  />
-                </Suspense>
-              )}
-              <div className="immersive-document-area">
-                <header className="immersive-command-strip">
-                  {immersivePolicy.showEditorToolbar && settings.editor.pin_toolbar ? (
-                    <div className="immersive-writing-toolbar" aria-label="编辑器快捷工具栏">
-                      <Toolbar />
-                    </div>
-                  ) : (
-                    <div className="immersive-reading-label">
-                      <span aria-hidden="true"><AppIcon name="book" size={16} /></span>
-                      <strong>沉浸阅读</strong>
-                    </div>
-                  )}
-                  <div className="immersive-command-actions">
-                    <button
-                      className={`immersive-control-button ${chatbotVisible ? 'is-active' : ''}`}
-                      type="button"
-                      onClick={() => setChatbotVisible(!chatbotVisible)}
-                      title={chatbotVisible ? '收起 AI 对话' : '打开 AI 对话'}
-                      aria-pressed={chatbotVisible}
-                    >
-                      <span className="immersive-ai-button-mark" aria-hidden="true">AI</span>
-                      <span>对话</span>
-                    </button>
-                    <button
-                      className="immersive-control-button"
-                      type="button"
-                      onClick={() => useAppStore.getState().setMode('split')}
-                      title={`退出${mode === 'zen' ? '沉浸写作' : '沉浸阅读'} (Esc)`}
-                    >
-                      <span aria-hidden="true">↙</span>
-                      <span>退出</span>
-                    </button>
-                  </div>
-                </header>
-                <div className="immersive-document-surface">
-                  {mode === 'zen' ? (
-                    <Suspense fallback={<div className="editor-container zen-editor-pane"><div className="editor-loading-placeholder" role="status">正在加载编辑器…</div></div>}>
-                      <Editor
-                        className="zen-editor-pane"
-                        onActiveLineChange={setActiveEditorLine}
-                        onActiveLineReveal={handleEditorLineReveal}
-                      />
-                    </Suspense>
-                  ) : (
-                    <Preview
-                      className="immersive-preview"
-                      activeEditorLine={activeEditorLine}
-                      onSourceLineClick={handlePreviewSourceClick}
-                      onScrollContainerReady={setImmersivePreviewScrollElement}
-                    />
-                  )}
-                </div>
-              </div>
-            </section>
-          )}
         </main>
           </div>
           {chatbotVisible && (
           <>
-            <div
-              ref={chatbotDividerRef}
-              className={`chatbot-divider resizable ${immersivePolicy.active ? 'immersive-chatbot-divider' : ''}`}
-              onPointerDown={handleChatbotPointerDown}
-            />
+            <PanelDivider className={`chatbot-divider resizable ${immersivePolicy.active ? 'immersive-chatbot-divider' : ''}`}
+              label="调整 AI 栏宽度" side="after" onChange={width => commitPanelWidth('chatbot', width)} onReset={() => setChatbotPanelWidth(null)} />
             <div className={`chatbot-side-panel ${immersivePolicy.active ? 'immersive-chatbot-panel' : ''}`} style={{ width: chatbotPanelWidth }}>
               <Suspense fallback={null}>
                 <AIChatbotPanel />

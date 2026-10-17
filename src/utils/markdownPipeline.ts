@@ -99,7 +99,8 @@ function highlightFence(str: string, lang: string): string {
       // ignore
     }
   }
-  return `<pre class="hljs"><code>${escape(str)}</code></pre>`;
+  const languageClass = lang ? ` class="language-${escape(lang)}"` : '';
+  return `<pre class="hljs"><code${languageClass}>${escape(str)}</code></pre>`;
 }
 
 /**

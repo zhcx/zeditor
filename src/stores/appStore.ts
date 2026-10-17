@@ -716,7 +716,7 @@ export const useAppStore = create<AppState>((set, get) => ({
   markEditorBootReady: () => {
     if (!get().editorBootReady) set({ editorBootReady: true });
   },
-  setSidebarWidth: (width) => set({ sidebarWidth: Math.max(150, Math.min(400, width)) }),
+  setSidebarWidth: (width) => { if (Number.isFinite(width)) set({ sidebarWidth: Math.max(0, width) }); },
   setOutlineVisible: (visible) => set({ outlineVisible: visible }),
 
   setSettingsOpen: (open) => set({ settingsOpen: open }),
