@@ -6,7 +6,7 @@
 
 .wysiwyg-surface {
   /* 空文档提示（.editor-empty-guide）以编辑表面为定位基准，
-     与源码编辑同一条 --empty-guide-top 基准线。 */
+     垂直居中后与源码编辑、阅读预览的提示同高。 */
   position: relative;
   flex: 1;
   min-height: 0;
