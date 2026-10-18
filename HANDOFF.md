@@ -1,9 +1,10 @@
 # HANDOFF：feat/editor-display-wheel-block-menu
 
-## 当前接续状态（2026-10-18 v0.6.5 发布）
+## 当前接续状态（2026-10-18 v0.6.5 已发布）
 
-- 版本号已升到 **0.6.5**，稳定性审查修复已提交，合并到 `main` 并推送 GitHub。
-- 发布说明见 `docs/releases/v0.6.5.md`（CI 依据 `v0.6.5` 标签构建 Windows / macOS Apple Silicon / macOS Intel / Linux 安装包）。
+- 版本号已升到 **0.6.5**，稳定性审查修复已提交（`ca03ce7`），发布改动为 `756f2c0`，已快进合并到 `main` 并推送 GitHub；标签 `v0.6.5` 已推送。
+- GitHub Actions 发布成功（run 39135604211，约 26 分钟）：质量门禁 10m13s，macOS Apple Silicon / Intel、Linux x64、Windows x64 四个平台构建全部通过，Release <https://github.com/zhcx/zeditor/releases/tag/v0.6.5> 已上传 9 个资产（MSI、NSIS、两个 DMG、两个 `.app.tar.gz`、deb、rpm、AppImage）。
+- 文档站（Deploy Docs）随 `main` 自动部署成功；README、CHANGELOG、`docs/releases/v0.6.5.md`、使用指南与文档站已同步到 v0.6.5。
 - 以下「本轮审查修复保留在本地工作区」为审查当时的记录，已过时。
 - 已修复增量分块边界、Wiki/脚注光标与 Enter 完整性、脚注定义/悬停、空标题折叠、Wiki 路径/反向链接/异步导航，以及 macOS 菜单、CLI 子进程环境和签名配置问题。
 - 完整验证：TypeScript、ESLint、构建、Rust fmt/严格 Clippy 通过；前端 687 项通过；Rust 182 项通过、3 项原有忽略项；隔离 Edge 浏览器 44 个场景通过。
