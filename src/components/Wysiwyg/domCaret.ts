@@ -9,6 +9,28 @@ import { nodeAtPath, pathOfNode, type InlinePoint } from '../../utils/wysiwyg/in
 const TEXT_NODE = 3;
 const ELEMENT_NODE = 1;
 
+/** Enter 不能把 Wiki/脚注原子克隆成两个半节点（空 Wiki 克隆也会生成完整链接）。 */
+export function snapRangeAroundInlineAtoms(range: Range, host: HTMLElement): void {
+  if (typeof range.setStartBefore !== 'function') return;
+  const selector = '.wiki-link[data-wiki-target], .footnote-ref[data-footnote-name]';
+  const atomOf = (node: Node): Element | null => {
+    const element = node.nodeType === ELEMENT_NODE ? node as Element : node.parentElement;
+    const atom = element?.closest?.(selector);
+    return atom?.matches?.(selector) && host.contains(atom) ? atom : null;
+  };
+  const start = atomOf(range.startContainer);
+  const end = atomOf(range.endContainer);
+  if (range.collapsed) {
+    if (!start) return;
+    if (range.startOffset === 0) range.setStartBefore(start);
+    else range.setStartAfter(start);
+    range.collapse(true);
+    return;
+  }
+  if (start) range.setStartBefore(start);
+  if (end) range.setEndAfter(end);
+}
+
 /** 元素节点上的偏移 → 文本节点 + 文本偏移。 */
 function normalizePoint(node: Node, offset: number): { node: Node; offset: number } {
   if (node.nodeType === TEXT_NODE) return { node, offset };

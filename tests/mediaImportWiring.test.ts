@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
 import { MEDIA_FILE_EXTENSIONS } from '../src/utils/media.ts';
+import { renderMarkdownSource } from '../src/utils/markdownPipeline.ts';
 
 const read = (path: string) => readFile(new URL(path, import.meta.url), 'utf8');
 
@@ -12,7 +13,10 @@ test('preview resolves local media through the desktop command and builds player
   const enhancers = await read('../src/utils/markdownEnhancers.tsx');
 
   assert.match(pipeline, /import\s*\{[\s\S]*?findMediaEmbeds[\s\S]*?\}\s*from\s*'\.\/media\.ts'/);
-  assert.match(pipeline, /renderMediaPlaceholders\(source\)/);
+  const rendered = renderMarkdownSource('@[video](demo.mp4)\n\n[^note]: $x$\n');
+  assert.match(rendered, /data-zeditor-media-src="demo\.mp4"/);
+  assert.match(rendered, /\[\^note\]:/);
+  assert.doesNotMatch(rendered, /zeditor_footnote_prefix/);
   assert.match(preview, /renderMarkdownToHtml\(deferredContent\)/);
   assert.match(pipeline, /data-zeditor-media-key/);
   assert.match(enhancers, /resolveMediaSources\(options\.documentPath,\s*localSources\)/);

@@ -16,7 +16,7 @@ import { resolveSaveBaseName } from '../../utils/saveName';
 import { formatShortcut } from '../../utils/platformShortcuts';
 import { isMacOS, isNativeMenuActive } from '../../utils/platform';
 import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
-import { collectMenuActions, type AppMenuItem } from '../../utils/menuModel';
+import { createMenuDispatcher, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
 import { THEMES, resolveThemePreference } from '../../themes/apply';
 
@@ -1019,7 +1019,13 @@ export function MenuBar() {
       showAll: t('显示全部', language),
       quitApp: t('退出 Zeditor', language),
     };
-    const actions = collectMenuActions(appItems, fileItems, featureItems, helpItems);
+    // 原生菜单不会随每次正文编辑重建；点击时再读取当前模型，避免导出旧正文。
+    const dispatch = createMenuDispatcher(() => [
+      appItems,
+      toAppMenuItems(menusRef.current[1]?.items ?? [], 'file'),
+      toAppMenuItems(menusRef.current[2]?.items ?? [], 'feature'),
+      helpItems,
+    ]);
 
     void buildMacAppMenu({
       appName: APP_NAME,
@@ -1037,16 +1043,18 @@ export function MenuBar() {
           window.dispatchEvent(new CustomEvent('zeditor-editor-find', { detail: { replace: false } }));
           return;
         }
-        actions.get(id)?.();
+        dispatch(id);
       },
       // 勾选态通过重建同步，无需单独登记。
       registerCheckItem: () => undefined,
     })
-      .then(menu => menu.setAsAppMenu())
-      .then(() => {
+      .then(async menu => {
+        if (cancelled) return;
+        await menu.setAsAppMenu();
         if (!cancelled) document.documentElement.dataset.nativeMenu = 'active';
       })
       .catch(error => {
+        if (cancelled) return;
         console.warn('Failed to install the macOS application menu; keeping the in-window menu.', error);
         delete document.documentElement.dataset.nativeMenu;
       });

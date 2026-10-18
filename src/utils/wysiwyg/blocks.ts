@@ -7,7 +7,6 @@
  */
 import { markdownRenderer } from '../markdownPipeline.ts';
 import { findMediaEmbeds } from '../media.ts';
-import { countLines } from './textLines.ts';
 
 export type WysiwygBlockKind =
   | 'heading'
@@ -82,6 +81,8 @@ export function detectEol(source: string): '\n' | '\r\n' {
  */
 function isEditableBlock(kind: WysiwygBlockKind, source: string): boolean {
   if (!EDITABLE_KINDS.has(kind)) return false;
+  // 多行定义的缩进属于语法；普通段落 DOM 会移除这些缩进，只能通过块源码编辑保留。
+  if (/^ {0,3}\[\^[^\]\r\n]+\]:/.test(source) && /[\r\n]/.test(source)) return false;
   if (findMediaEmbeds(source).length > 0) return false;
   if (/^\s*(?:\$\$|\\\[)/.test(source)) return false;
   if (/^[ \t]*(?:```|~~~)/m.test(source)) return false;
@@ -216,14 +217,21 @@ export function replaceBlockSource(doc: WysiwygDocument, block: WysiwygBlock, so
 /**
  * 这次改写是否仍属于「同一个块」。
  *
- * 判据交给渲染器本身：只解析这一块的源码，若它仍然生成唯一一个类型、可编辑性都相同、
- * 且完整覆盖输入的块，那么全文分块结果不会改变，可以只平移后续块的偏移。
+ * 只优化普通段落 / 标题中的文字编辑，并保持原有换行与行首缩进。
+ * 单块解析类型不变不足以保证全文边界不变：相邻列表会合并，未闭合的代码 / HTML
+ * 会吞掉后面的块，清空段落也会改变间隙里的空光标块。此类编辑必须全文重分块。
  *
  * 输入普通文字或行内标记时（每 250ms 写回一次），全文 markdown-it 解析是长文档
- * 输入停顿的主要来源；而敲出 `# `、`- `、换行等结构变化时，单块解析会得到不同结果，
- * 自动退回全文重新分块，不会留下错误的块边界。
+ * 输入停顿的主要来源；结构编辑保守地退回全文解析，避免留下错误的块边界。
  */
 function canUpdateBlockInPlace(block: WysiwygBlock, source: string): boolean {
+  if (!block.editable || (block.kind !== 'paragraph' && block.kind !== 'heading')) return false;
+  if (!source.trim()) return false;
+  // 改变缩进可能把段落吸进前面的列表；改变换行可能影响空块位置和文档 EOL。
+  if (source.match(/^[ \t]*/)?.[0] !== block.source.match(/^[ \t]*/)?.[0]) return false;
+  const lineBreaks = source.match(/\r\n|\n|\r/g) ?? [];
+  const previousBreaks = block.source.match(/\r\n|\n|\r/g) ?? [];
+  if (lineBreaks.length !== previousBreaks.length || lineBreaks.some((eol, index) => eol !== previousBreaks[index])) return false;
   const standalone = splitMarkdownDocument(source);
   if (standalone.blocks.length !== 1) return false;
   const parsed = standalone.blocks[0];
@@ -240,24 +248,19 @@ function updateBlockInPlace(
   source: string,
 ): WysiwygDocument {
   const offsetDelta = source.length - block.length;
-  const lineDelta = countLines(source) - countLines(block.source);
   const blocks = doc.blocks.map((item, position) => {
     if (position === index) {
-      // 行号按行数差平移，而不是按新块行数重算：全文分块时列表等 token 会把块尾
-      // 空行算进自己的结束行，局部更新看不到这些间隙，平移才与原有语义一致。
+      // 快路径保持原有换行，行号不变；仅更新块源码与后续字符偏移。
       return {
         ...item,
         source,
         length: source.length,
-        endLine: item.endLine + lineDelta,
       };
     }
     if (item.offset <= block.offset) return item;
     return {
       ...item,
       offset: item.offset + offsetDelta,
-      startLine: item.startLine + lineDelta,
-      endLine: item.endLine + lineDelta,
     };
   });
   return {

@@ -19,6 +19,8 @@ export interface MarkdownPiece {
   path: number[];
   /** text 片段对应节点内的原文，可按字映射；syntax 片段没有对应文本。 */
   kind: 'text' | 'syntax';
+  /** Wiki/脚注作为源码原子，DOM 内的光标只能吸附到语法两侧。 */
+  atomic?: boolean;
   /** text 片段：原文起始下标。 */
   textFrom?: number;
   /** text 片段：原文结束下标（不含）。 */
@@ -31,6 +33,7 @@ export interface MarkdownPiece {
 }
 
 export interface SerializeOptions {
+  preserveFootnoteDefinition?: boolean;
   escapePipes?: boolean;
   /** 内容是否位于行首（段落为 true，带 `# `/`- ` 前缀的块为 false）。 */
   escapeLineStart?: boolean;
@@ -45,6 +48,8 @@ export function escapeSteps(text: string, options: SerializeOptions = {}): Array
   const steps: Array<{ from: number; escaped: string }> = [];
   let atLineStart = escapeLineStart;
   let digits = 0;
+  const definition = options.preserveFootnoteDefinition ? /^ {0,3}\[\^[^\]\r\n]+\]:/.exec(text) : null;
+  const definitionEnd = definition ? definition[0].length : 0;
   for (let index = 0; index < text.length; index += 1) {
     const char = text[index];
     let escaped = char;
@@ -54,7 +59,9 @@ export function escapeSteps(text: string, options: SerializeOptions = {}): Array
       steps.push({ from: index, escaped });
       continue;
     }
-    if (ALWAYS_ESCAPED.has(char) || (options.escapePipes && char === '|')) {
+    if (index < definitionEnd) {
+      escaped = char;
+    } else if (ALWAYS_ESCAPED.has(char) || (options.escapePipes && char === '|')) {
       escaped = `\\${char}`;
     } else if (atLineStart && LINE_START_ESCAPED.has(char)) {
       escaped = `\\${char}`;
@@ -161,13 +168,13 @@ function emitNode(node: InlineNode, path: number[], options: SerializeOptions, o
     }, textContentOf(node.children));
     // 表格单元格里别名分隔符 `|` 必须转义，否则会被当成列分隔符。
     if (options.escapePipes) text = text.replace(/\|/g, '\\|');
-    out.push({ text, path, kind: 'syntax' });
+    out.push({ text, path, kind: 'syntax', atomic: true });
     return;
   }
 
   // 脚注引用：渲染后是 <sup data-footnote-name>，回写成 `[^name]`。
   if (node.tag === 'sup' && node.attrs['data-footnote-name'] !== undefined) {
-    out.push({ text: `[^${node.attrs['data-footnote-name']}]`, path, kind: 'syntax' });
+    out.push({ text: `[^${node.attrs['data-footnote-name']}]`, path, kind: 'syntax', atomic: true });
     return;
   }
 

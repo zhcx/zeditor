@@ -10,6 +10,7 @@ import { textContentOf, type InlineElementNode, type InlineNode } from './inline
 import type { WysiwygBlockKind } from './blocks.ts';
 
 export interface BlockContainerOffset {
+  preserveFootnoteDefinition?: boolean;
   /** Enter 的容器语义：包括所有祖先引用和列表的前缀。 */
   continuation?: { prefix: string; separator: string; kind: WysiwygBlockKind; exitPrefix?: string };
   escapePipes?: boolean;
@@ -101,8 +102,10 @@ function writeContainer(
   // 段落里刚敲出的块标记不转义，其余情况保持行首转义（`#不是标题` 仍然是普通文本）。
   const lineStart = escapeLineStart && !(allowBlockMarkers && BLOCK_MARKER_PATTERN.test(textContentOf(nodes)));
   writer.openContainer(path, writer.length(), lineStart);
+  const preserveFootnoteDefinition = allowBlockMarkers && /^ {0,3}\[\^[^\]\r\n]+\]:/.test(textContentOf(nodes));
+  if (preserveFootnoteDefinition) writer.containers[writer.containers.length - 1].preserveFootnoteDefinition = true;
   if (continuation) writer.containers[writer.containers.length - 1].continuation = continuation;
-  const markdown = serializeInlineNodes(nodes, { escapeLineStart: lineStart });
+  const markdown = serializeInlineNodes(nodes, { escapeLineStart: lineStart, preserveFootnoteDefinition });
   writer.write(singleLine ? markdown.replace(/\n/g, ' ') : markdown);
 }
 

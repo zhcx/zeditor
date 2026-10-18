@@ -31,3 +31,9 @@ it('matches a reference just closed at the caret', () => {
   assert.equal(matchFootnoteAt('[^注]', 4), null);
   assert.equal(matchFootnoteAt('正文[^注', 5), null);
 });
+
+it('does not treat an info-bearing fence inside code as its closing fence', () => {
+  const definitions = parseFootnoteDefinitions('````md\n```` not a closing fence\n[^fake]: 假定义\n````\n\n[^real]: 真定义');
+  assert.equal(definitions.has('fake'), false);
+  assert.equal(definitions.get('real')?.content, '真定义');
+});

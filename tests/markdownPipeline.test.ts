@@ -79,3 +79,21 @@ it('marks unresolved footnotes and leaves inline code alone', () => {
   assert.match(html, /class="footnote-ref is-unresolved"/);
   assert.equal((html.match(/footnote-ref/g) ?? []).length, 1);
 });
+
+it('keeps single-word footnote definitions visible instead of turning references into ordinary links', () => {
+  const html = renderMarkdownSource('正文[^n]。\n\n[^n]: 定义');
+  assert.match(html, /data-footnote-name="n" data-footnote-content="定义"/);
+  assert.match(html, /\[\^n\]: 定义/);
+  assert.doesNotMatch(html, /<a href="定义"/);
+  assert.match(renderMarkdownSource('[普通][id]\n\n[id]: https://example.com'), /<a href="https:\/\/example.com">普通<\/a>/);
+});
+
+it('stores the original footnote Markdown before math and media preprocessing', () => {
+  const html = renderMarkdownSource('引用[^m]\n\n[^m]: $x$ & "原文"');
+  assert.match(html, /data-footnote-content="\$x\$ &amp; &quot;原文&quot;"/);
+});
+
+it('keeps definition name punctuation literal before formatting its body', () => {
+  const html = renderMarkdownSource('[^my*note*]: **正文**');
+  assert.match(html, /\[\^my\*note\*\]: <strong>正文<\/strong>/);
+});

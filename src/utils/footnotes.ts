@@ -41,7 +41,7 @@ export function parseFootnoteDefinitions(source: string): Map<string, FootnoteDe
       const marker = fenceMatch[1][0];
       const length = fenceMatch[1].length;
       if (!fence) fence = { marker, length };
-      else if (fence.marker === marker && length >= fence.length) fence = null;
+      else if (fence.marker === marker && length >= fence.length && /^ {0,3}(`{3,}|~{3,})[ \t]*$/.test(line)) fence = null;
       continue;
     }
     if (fence) continue;

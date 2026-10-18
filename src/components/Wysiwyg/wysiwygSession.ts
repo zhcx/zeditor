@@ -38,7 +38,7 @@ import { createUndoStack } from '../../utils/wysiwyg/undoStack.ts';
 import { extractFenceInfo, extractFenceLanguage, extractFenceMarker, formatFence, withFenceLanguage } from '../../utils/wysiwyg/codeFence.ts';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown.ts';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste.ts';
-import { pointInContainer, rangeInContainer } from './domCaret.ts';
+import { pointInContainer, rangeInContainer, snapRangeAroundInlineAtoms } from './domCaret.ts';
 import { navigateTableCell, parseTableAt } from '../../utils/markdownTable.ts';
 import { caretAtVisualEdge, caretOnVisualLine } from './caretGeometry.ts';
 import { escapeInlineText, serializeInlineNodes } from '../../utils/wysiwyg/inlineSerialize.ts';
@@ -952,9 +952,10 @@ export class WysiwygSession {
     const index = Number(rawIndex);
     const collected = this.collectBlock(index) ?? this.collectBlockForOffset(index);
     if (!collected) return null;
-    const local = this.containerOffsetOfPoint(collected, target, 0);
+    const atom = element?.closest('.wiki-link[data-wiki-target], .footnote-ref[data-footnote-name]');
+    const local = this.containerOffsetOfPoint(collected, atom ?? target, 0);
     if (local === null) return null;
-    return { index, offset: collected.block.offset + local, blockStart: collected.block.offset };
+    return { index, offset: collected.block.offset + local + (atom ? 1 : 0), blockStart: collected.block.offset };
   }
 
   /** 控制器用：块索引 → 元素（滚动定位）。 */
@@ -990,12 +991,13 @@ export class WysiwygSession {
     if (!owner?.createRange || !selection?.rangeCount) return null;
     const range = selection.getRangeAt(0);
     // 列表父项的 DOM 包含整棵子列表，但其行内源码不包含子列表。
+    snapRangeAroundInlineAtoms(range, collected.element);
     // 先找最深的文本容器，避免把子项内的回车错误应用到父项。
     const entries = [...collected.serialized.containers].sort((left, right) => right.path.length - left.path.length);
     for (const entry of entries) {
       const container = pathToNode(collected.element, entry.path);
       if (!container?.contains(range.startContainer) || !container.contains(range.endContainer)) continue;
-      const options = { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes };
+      const options = { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes, preserveFootnoteDefinition: entry.preserveFootnoteDefinition };
       const before = owner.createRange();
       before.selectNodeContents(container);
       before.setEnd(range.startContainer, range.startOffset);

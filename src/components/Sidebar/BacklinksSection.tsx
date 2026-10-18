@@ -6,8 +6,7 @@
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { AppIcon } from '../Icons/AppIcon';
-import { useAppStore } from '../../stores/appStore';
-import { revealSourceLine, workspaceRoots } from '../../services/wikiLinks';
+import { openWikiBacklink, workspaceRoots } from '../../services/wikiLinks';
 
 interface WikiBacklinkEntry {
   path: string;
@@ -18,7 +17,6 @@ interface WikiBacklinkEntry {
 }
 
 export function BacklinksSection({ documentPath }: { documentPath: string | null }) {
-  const openFile = useAppStore(state => state.openFile);
   const [expanded, setExpanded] = useState(true);
   // 结果与它对应的文档路径放在一起：切换文档时无需在 effect 里同步清空状态。
   const [result, setResult] = useState<{ path: string; items: WikiBacklinkEntry[] } | null>(null);
@@ -38,12 +36,11 @@ export function BacklinksSection({ documentPath }: { documentPath: string | null
   }, [documentPath, expanded, revision]);
 
   const entries = result && result.path === documentPath ? result.items : [];
-  const loading = Boolean(documentPath) && !(result && result.path === documentPath);
+  const loading = '__TAURI_INTERNALS__' in window && Boolean(documentPath) && !(result && result.path === documentPath);
 
   const openEntry = async (entry: WikiBacklinkEntry) => {
     try {
-      await openFile(entry.path);
-      await revealSourceLine(entry.line);
+      await openWikiBacklink(entry.path, entry.line);
     } catch {
       // 文件可能已被移动或删除：保留列表，下次刷新会去掉它。
     }
@@ -78,18 +75,20 @@ export function BacklinksSection({ documentPath }: { documentPath: string | null
                   {entry.excerpt && <span className="backlink-excerpt">{entry.excerpt}</span>}
                 </button>
               ))}
-              <button
-                className="backlink-refresh"
-                onClick={() => {
-                  setResult(null);
-                  setRevision(value => value + 1);
-                }}
-              >
-                刷新
-              </button>
             </>
           ) : (
             <div className="explorer-empty-state">{loading ? '正在查找引用…' : '暂无反向链接'}</div>
+          )}
+          {documentPath && (
+            <button
+              className="backlink-refresh"
+              onClick={() => {
+                setResult(null);
+                setRevision(value => value + 1);
+              }}
+            >
+              刷新
+            </button>
           )}
         </div>
       )}

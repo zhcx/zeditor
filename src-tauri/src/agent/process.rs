@@ -23,6 +23,8 @@ fn hide_console(command: &mut Command) {
 pub fn system_command(program: impl AsRef<OsStr>) -> Command {
     let mut command = Command::new(program);
     hide_console(&mut command);
+    #[cfg(target_os = "macos")]
+    extend_macos_command_environment(&mut command, None);
     command
 }
 
@@ -67,7 +69,7 @@ fn discover_executable_uncached(name: &str) -> Option<PathBuf> {
         }
     }
 
-    // 仅 Windows 会追加 npm / WinGet / 用户目录候选，其它平台只读 PATH。
+    // Windows 和 macOS 会追加常见安装目录；Linux 读取继承的 PATH。
     #[allow(unused_mut)]
     let mut directories: Vec<PathBuf> = std::env::var_os("PATH")
         .map(|value| std::env::split_paths(&value).collect())
@@ -107,12 +109,17 @@ fn discover_executable_uncached(name: &str) -> Option<PathBuf> {
 }
 
 /// macOS 上 CLI 的常见安装位置（不依赖登录 shell 的 PATH）。
-#[cfg(target_os = "macos")]
+#[cfg(any(target_os = "macos", test))]
 fn macos_binary_directories() -> Vec<PathBuf> {
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let mut directories = vec![
         PathBuf::from("/opt/homebrew/bin"),
         PathBuf::from("/usr/local/bin"),
+        // PATH/HOME 缺失时仍保留系统工具（git、env、shell）的默认搜索位置。
+        PathBuf::from("/usr/bin"),
+        PathBuf::from("/bin"),
+        PathBuf::from("/usr/sbin"),
+        PathBuf::from("/sbin"),
     ];
     let Some(home) = home else {
         return directories;
@@ -132,6 +139,45 @@ fn macos_binary_directories() -> Vec<PathBuf> {
         directories.extend(versions.into_iter().take(4));
     }
     directories
+}
+
+#[cfg(any(target_os = "macos", test))]
+fn extended_command_path(
+    executable: Option<&Path>,
+    inherited: Option<&OsStr>,
+    fallbacks: impl IntoIterator<Item = PathBuf>,
+) -> Result<std::ffi::OsString, std::env::JoinPathsError> {
+    let mut directories = Vec::new();
+    // nvm 安装的 CLI 与 node 在同一目录，优先用与该 CLI 配套的运行时。
+    if let Some(parent) = executable
+        .and_then(Path::parent)
+        .filter(|path| path.is_absolute())
+    {
+        directories.push(parent.to_path_buf());
+    }
+    for directory in inherited
+        .into_iter()
+        .flat_map(std::env::split_paths)
+        .chain(fallbacks)
+    {
+        if !directories.contains(&directory) {
+            directories.push(directory);
+        }
+    }
+    std::env::join_paths(directories)
+}
+
+#[cfg(target_os = "macos")]
+fn extend_macos_command_environment(command: &mut Command, executable: Option<&Path>) {
+    // 发现绝对路径还不够：#!/usr/bin/env node 和 Agent 启动的工具仍需 PATH。
+    // 只改当前子进程的环境，避免修改 GUI 进程全局环境造成并发竞态。
+    if let Ok(path) = extended_command_path(
+        executable,
+        std::env::var_os("PATH").as_deref(),
+        macos_binary_directories(),
+    ) {
+        command.env("PATH", path);
+    }
 }
 
 #[cfg(windows)]
@@ -265,6 +311,8 @@ pub fn executable_command(executable: &Path) -> Result<Command, String> {
     let mut command = Command::new(executable);
 
     hide_console(&mut command);
+    #[cfg(target_os = "macos")]
+    extend_macos_command_environment(&mut command, Some(executable));
     Ok(command)
 }
 
@@ -329,7 +377,92 @@ pub fn select_discovered(paths: impl IntoIterator<Item = PathBuf>) -> Option<Pat
 
 #[cfg(test)]
 mod tests {
-    // 该模块的测试全部是 Windows 专用的，非 Windows 平台不引入这些依赖。
+    #[cfg(target_os = "macos")]
+    #[test]
+    fn macos_commands_receive_the_augmented_path() {
+        use super::{executable_command, system_command};
+        use std::{ffi::OsStr, path::Path};
+
+        let command = executable_command(Path::new("/zeditor-fixture/node-bin/codex")).unwrap();
+        let path = command
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new("PATH"))
+            .and_then(|(_, value)| value)
+            .unwrap();
+        assert_eq!(
+            std::env::split_paths(path).next().as_deref(),
+            Some(Path::new("/zeditor-fixture/node-bin"))
+        );
+        let command = system_command("git");
+        let path = command
+            .get_envs()
+            .find(|(name, _)| *name == OsStr::new("PATH"))
+            .and_then(|(_, value)| value)
+            .unwrap();
+        assert!(std::env::split_paths(path).any(|path| path == Path::new("/opt/homebrew/bin")));
+    }
+
+    #[test]
+    fn child_path_includes_cli_runtime_and_discovery_fallbacks() {
+        use super::extended_command_path;
+        use std::path::PathBuf;
+
+        let root = std::env::temp_dir().join("zeditor-command-path-fixture");
+        let runtime = root.join("node-bin");
+        let system = root.join("system-bin");
+        let homebrew = root.join("homebrew-bin");
+        let inherited = std::env::join_paths([&system]).unwrap();
+        let path = extended_command_path(
+            Some(&runtime.join("codex")),
+            Some(&inherited),
+            [homebrew.clone(), system.clone(), runtime.clone()],
+        )
+        .unwrap();
+        assert_eq!(
+            std::env::split_paths(&path).collect::<Vec<PathBuf>>(),
+            vec![runtime, system, homebrew]
+        );
+    }
+
+    #[test]
+    fn system_command_path_keeps_inherited_priority_and_handles_missing_path() {
+        use super::extended_command_path;
+        use std::path::PathBuf;
+
+        let root = std::env::temp_dir().join("zeditor-system-path-fixture");
+        let system = root.join("system-bin");
+        let homebrew = root.join("homebrew-bin");
+        let inherited = std::env::join_paths([&system]).unwrap();
+        let path = extended_command_path(None, Some(&inherited), [homebrew.clone()]).unwrap();
+        assert_eq!(
+            std::env::split_paths(&path).collect::<Vec<PathBuf>>(),
+            vec![system, homebrew.clone()]
+        );
+        let path = extended_command_path(None, None, [homebrew.clone()]).unwrap();
+        assert_eq!(
+            std::env::split_paths(&path).collect::<Vec<_>>(),
+            vec![homebrew]
+        );
+    }
+
+    #[test]
+    fn missing_or_empty_path_keeps_macos_system_tools_searchable() {
+        use super::{extended_command_path, macos_binary_directories};
+        use std::{ffi::OsStr, path::PathBuf};
+
+        for inherited in [None, Some(OsStr::new(""))] {
+            let path = extended_command_path(None, inherited, macos_binary_directories()).unwrap();
+            let directories = std::env::split_paths(&path).collect::<Vec<_>>();
+            for system in ["/usr/bin", "/bin", "/usr/sbin", "/sbin"] {
+                assert!(
+                    directories.contains(&PathBuf::from(system)),
+                    "missing standard macOS tool directory: {system}"
+                );
+            }
+        }
+    }
+
+    // 下方既有测试只在 Windows 上运行，平台无关的 PATH 测试显式导入依赖。
     #[cfg(windows)]
     use super::*;
     #[cfg(windows)]

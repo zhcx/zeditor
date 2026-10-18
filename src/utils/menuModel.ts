@@ -47,6 +47,11 @@ export function collectMenuActions(...itemLists: AppMenuItem[][]): Map<string, (
   return actions;
 }
 
+/** 原生菜单可以跨多次渲染存活，点击时由读取函数提供菜单动作。 */
+export function createMenuDispatcher(readItems: () => AppMenuItem[][]): (id: string) => void {
+  return id => collectMenuActions(...readItems()).get(id)?.();
+}
+
 /** 汇总带勾选态的条目（模式、主题、语言），用于同步原生勾选项。 */
 export function collectCheckedStates(...itemLists: AppMenuItem[][]): Record<string, boolean> {
   const states: Record<string, boolean> = {};

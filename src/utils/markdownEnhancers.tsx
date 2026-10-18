@@ -22,6 +22,7 @@ import { isRemoteMediaSource } from './media.ts';
 import { findImages } from './imageSyntax.ts';
 import { resolveMediaSources } from '../services/mediaAssets';
 import { resolveWikiLinkTargets } from '../services/wikiLinks';
+import { parseFootnoteDefinitions, type FootnoteDefinition } from './footnotes.ts';
 
 // 工作流查看器（含 YAML 解析器）与思维导图只在真的遇到时加载。
 const WorkflowViewer = lazy(() => import('../components/WorkflowViewer/WorkflowViewer').then(m => ({ default: m.WorkflowViewer })));
@@ -301,6 +302,8 @@ function createMediaFigure(
 }
 
 export interface EnhanceRenderedMarkdownOptions {
+  /** 所见即所得在整篇表面统一处理脚注，避免每块重复绑定事件。 */
+  footnotes?: boolean;
   /** 内容所在的可滚动容器（IntersectionObserver 的 root）；为空时用视口。 */
   scrollRoot: HTMLElement | null;
   /** 本次渲染所用的 Markdown 源码：图片语法定位与工作流行号换算都基于它。 */
@@ -332,9 +335,16 @@ export interface EnhanceRenderedMarkdownOptions {
  * 浮层挂在 body 上，既不会被 contenteditable 回写，也不会被预览容器的
  * overflow 裁剪；鼠标移入浮层时暂停隐藏，滚动或缩放时立即收起。
  */
-function enhanceFootnotes(root: HTMLElement): () => void {
-  const references = Array.from(root.querySelectorAll<HTMLElement>('.footnote-ref[data-footnote-name]'));
-  if (references.length === 0) return () => undefined;
+export function refreshFootnoteReferences(root: HTMLElement, definitions: ReadonlyMap<string, FootnoteDefinition>): void {
+  root.querySelectorAll<HTMLElement>('.footnote-ref[data-footnote-name]').forEach(reference => {
+    const definition = definitions.get(reference.dataset.footnoteName ?? '');
+    reference.classList.toggle('is-unresolved', !definition);
+    if (definition) reference.dataset.footnoteContent = definition.content;
+    else delete reference.dataset.footnoteContent;
+  });
+}
+
+export function enhanceFootnotes(root: HTMLElement, source: string | (() => string)): () => void {
 
   let popover: HTMLElement | null = null;
   let hideTimer = 0;
@@ -369,7 +379,9 @@ function enhanceFootnotes(root: HTMLElement): () => void {
     cancelHide();
     removePopover();
     const name = reference.dataset.footnoteName ?? '';
-    const content = reference.dataset.footnoteContent;
+    // 悬停时读取最新全文：WYS 按块渲染，定义可能在另一个块且刚刚被编辑。
+    const content = parseFootnoteDefinitions(typeof source === 'function' ? source() : source).get(name)?.content;
+    reference.classList.toggle('is-unresolved', content === undefined);
     const title = `<div class="footnote-popover-title">脚注 ${markdownRenderer.utils.escapeHtml(name)}</div>`;
     const body = content === undefined
       ? '<div class="footnote-popover-empty">未找到脚注定义</div>'
@@ -384,23 +396,28 @@ function enhanceFootnotes(root: HTMLElement): () => void {
     position(reference);
   };
 
-  const cleanups: Array<() => void> = [];
-  for (const reference of references) {
-    const enter = () => show(reference);
-    const leave = () => hide();
-    reference.addEventListener('pointerenter', enter);
-    reference.addEventListener('pointerleave', leave);
-    reference.addEventListener('focus', enter);
-    reference.addEventListener('blur', leave);
-    cleanups.push(() => {
-      reference.removeEventListener('pointerenter', enter);
-      reference.removeEventListener('pointerleave', leave);
-      reference.removeEventListener('focus', enter);
-      reference.removeEventListener('blur', leave);
-    });
-  }
+  const referenceOf = (target: EventTarget | null) => target instanceof Element
+    ? target.closest<HTMLElement>('.footnote-ref[data-footnote-name]') : null;
+  const enter = (event: Event) => {
+    const reference = referenceOf(event.target);
+    if (!reference || !root.contains(reference)) return;
+    if (event instanceof PointerEvent && event.relatedTarget instanceof Node && reference.contains(event.relatedTarget)) return;
+    show(reference);
+  };
+  const leave = (event: Event) => {
+    const reference = referenceOf(event.target);
+    if (!reference) return;
+    if (event instanceof PointerEvent && event.relatedTarget instanceof Node && reference.contains(event.relatedTarget)) return;
+    hide();
+  };
+  // 委托给编辑表面，输入时新增的引用同样可用，不需要重建已绑定的块 DOM。
+  root.addEventListener('pointerover', enter);
+  root.addEventListener('pointerout', leave);
+  root.addEventListener('focusin', enter);
+  root.addEventListener('focusout', leave);
 
-  const closeOnViewportChange = () => {
+  const closeOnViewportChange = (event: Event) => {
+    if (popover && event.target instanceof Node && popover.contains(event.target)) return;
     cancelHide();
     removePopover();
   };
@@ -410,7 +427,10 @@ function enhanceFootnotes(root: HTMLElement): () => void {
   return () => {
     window.clearTimeout(hideTimer);
     removePopover();
-    cleanups.forEach(cleanup => cleanup());
+    root.removeEventListener('pointerover', enter);
+    root.removeEventListener('pointerout', leave);
+    root.removeEventListener('focusin', enter);
+    root.removeEventListener('focusout', leave);
     window.removeEventListener('scroll', closeOnViewportChange, true);
     window.removeEventListener('resize', closeOnViewportChange);
   };
@@ -712,7 +732,7 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
   }
 
   const cleanupTables = enhanceTables(root, options.documentPath);
-  const cleanupFootnotes = enhanceFootnotes(root);
+  const cleanupFootnotes = options.footnotes === false ? () => undefined : enhanceFootnotes(root, options.source);
 
   return () => {
     disposed = true;

@@ -371,7 +371,7 @@ fn main() {
             }
             #[cfg(not(target_os = "macos"))]
             {
-                let _ = api;
+                let _ = (api, app_handle);
             }
         }
         // 点按 Dock 图标（窗口已隐藏）时恢复窗口。

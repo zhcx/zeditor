@@ -33,6 +33,48 @@ export const markdownRenderer = new MarkdownIt({
 });
 markdownRenderer.use(taskLists);
 
+// MarkdownIt 的普通引用定义会吞掉 `[^n]: 单词` 并将 [^n] 当成 URL 链接。
+// 保留脚注定义为可编辑段落；普通 [label]: URL 仍交给原有规则。
+markdownRenderer.block.ruler.before('reference', 'footnote_definition', (state, startLine, endLine, silent) => {
+  if (state.sCount[startLine] - state.blkIndent >= 4) return false;
+  const first = state.src.slice(state.bMarks[startLine] + state.tShift[startLine], state.eMarks[startLine]);
+  if (!/^\[\^([^\]\r\n]+)\]:/.test(first)) return false;
+  if (silent) return true;
+  let next = startLine + 1;
+  while (next < endLine) {
+    if (state.sCount[next] - state.blkIndent >= 4 && !state.isEmpty(next)) { next += 1; continue; }
+    if (state.isEmpty(next)) {
+      let following = next + 1;
+      while (following < endLine && state.isEmpty(following)) following += 1;
+      if (following < endLine && state.sCount[following] - state.blkIndent >= 4) { next = following; continue; }
+    }
+    break;
+  }
+  const opening = state.push('paragraph_open', 'p', 1);
+  opening.map = [startLine, next];
+  const content = state.getLines(startLine, next, state.blkIndent, false).trimEnd();
+  const prefix = /^ {0,3}\[\^[^\]\r\n]+\]:[ \t]*/.exec(content)![0];
+  const marker = state.push('inline', '', 0);
+  marker.content = prefix;
+  marker.children = [];
+  marker.meta = { footnoteDefinitionPrefix: true };
+  const inline = state.push('inline', '', 0);
+  inline.content = content.slice(prefix.length);
+  inline.map = [startLine, next];
+  inline.children = [];
+  state.push('paragraph_close', 'p', -1);
+  state.line = next;
+  return true;
+}, { alt: ['paragraph'] });
+markdownRenderer.core.ruler.after('inline', 'footnote_definition_prefix', state => {
+  for (const token of state.tokens) {
+    if (!token.meta?.footnoteDefinitionPrefix) continue;
+    const literal = new state.Token('html_inline', '', 0);
+    literal.content = markdownRenderer.utils.escapeHtml(token.content);
+    token.children = [literal];
+  }
+});
+
 const sourceAnchorTokenTypes = new Set([
   'heading_open',
   'paragraph_open',
@@ -162,7 +204,7 @@ function footnoteReferenceHtml(name: string, definition?: FootnoteDefinition): s
 
 markdownRenderer.core.ruler.after('inline', 'footnote_references', (state) => {
   if (!state.src.includes('[^')) return;
-  const definitions = parseFootnoteDefinitions(state.src);
+  const definitions: ReadonlyMap<string, FootnoteDefinition> = state.env.zeditorFootnotes ?? parseFootnoteDefinitions(state.src);
 
   for (const token of state.tokens) {
     if (token.type !== 'inline' || !token.children) continue;
@@ -312,7 +354,20 @@ export const renderMath = (source: string) => source
 
 /** 源码 → 未消毒 HTML：媒体占位 → 公式 → markdown-it 渲染。 */
 export function renderMarkdownSource(source: string): string {
-  return markdownRenderer.render(renderMath(renderMediaPlaceholders(source)));
+  const zeditorFootnotes = source.includes('[^') ? parseFootnoteDefinitions(source) : new Map<string, FootnoteDefinition>();
+  let protectedSource = source;
+  const prefixes: string[] = [];
+  let marker = '\u0000zeditor_footnote_prefix\u0000';
+  if (zeditorFootnotes.size) {
+    while (source.includes(marker)) marker += '_';
+    protectedSource = source.replace(/^ {0,3}\[\^[^\]\r\n]+\]:/gm, prefix => {
+      prefixes.push(prefix);
+      return `${marker}${prefixes.length - 1}${marker}`;
+    });
+  }
+  let prepared = renderMath(renderMediaPlaceholders(protectedSource));
+  if (prefixes.length) prepared = prepared.replace(new RegExp(`${marker}(\\d+)${marker}`, 'g'), (_, index) => prefixes[Number(index)]);
+  return markdownRenderer.render(prepared, { zeditorFootnotes });
 }
 
 /** 源码 → 可写入 DOM 的 HTML（调用方负责再跑增强管线）。 */

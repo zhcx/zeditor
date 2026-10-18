@@ -2482,9 +2482,7 @@ fn select_release_asset<'a>(
             ("macos", "aarch64") => {
                 name.ends_with("_aarch64.dmg") || name.ends_with("_universal.dmg")
             }
-            ("macos", "x86_64") => {
-                name.ends_with("_x64.dmg") || name.ends_with("_universal.dmg")
-            }
+            ("macos", "x86_64") => name.ends_with("_x64.dmg") || name.ends_with("_universal.dmg"),
             ("linux", "x86_64") => {
                 name.ends_with("_amd64.appimage")
                     || name.ends_with("_amd64.deb")
@@ -2579,14 +2577,7 @@ fn compare_versions(latest: &str, current: &str) -> Result<bool, String> {
 fn wiki_ignored_dir(name: &str) -> bool {
     matches!(
         name,
-        ".git"
-            | "node_modules"
-            | "target"
-            | "dist"
-            | ".obsidian"
-            | ".trash"
-            | ".idea"
-            | ".vscode"
+        ".git" | "node_modules" | "target" | "dist" | ".obsidian" | ".trash" | ".idea" | ".vscode"
     )
 }
 
@@ -2599,17 +2590,24 @@ fn ensure_markdown_extension(target: &str) -> String {
     }
 }
 
-fn collect_markdown_files(root: &Path, out: &mut Vec<PathBuf>, budget: &mut usize, depth: usize) {
-    if depth > 8 || *budget == 0 {
+fn collect_markdown_files(
+    root: &Path,
+    out: &mut Vec<PathBuf>,
+    budget: &mut usize,
+    entry_budget: &mut usize,
+    depth: usize,
+) {
+    if depth > 8 || *budget == 0 || *entry_budget == 0 {
         return;
     }
     let Ok(entries) = std::fs::read_dir(root) else {
         return;
     };
     for entry in entries.flatten() {
-        if *budget == 0 {
+        if *budget == 0 || *entry_budget == 0 {
             return;
         }
+        *entry_budget -= 1;
         let Ok(file_type) = entry.file_type() else {
             continue;
         };
@@ -2619,7 +2617,7 @@ fn collect_markdown_files(root: &Path, out: &mut Vec<PathBuf>, budget: &mut usiz
             if wiki_ignored_dir(&name) {
                 continue;
             }
-            collect_markdown_files(&path, out, budget, depth + 1);
+            collect_markdown_files(&path, out, budget, entry_budget, depth + 1);
         } else if file_type.is_file() {
             let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
             if name.ends_with(".md") || name.ends_with(".markdown") {
@@ -2631,32 +2629,102 @@ fn collect_markdown_files(root: &Path, out: &mut Vec<PathBuf>, budget: &mut usiz
 }
 
 /// 在文档目录与工作区根里按文件名查找笔记；文档目录优先。
-fn find_markdown_file_by_name(
-    roots: &[String],
-    document_dir: Option<&Path>,
-    wanted_name: &str,
-) -> Option<PathBuf> {
-    let wanted = wanted_name.to_ascii_lowercase();
+fn collect_wiki_files(roots: &[String], document_dir: Option<&Path>) -> Vec<PathBuf> {
     let mut files = Vec::new();
-
+    // 文件数量限制不约束只有图片/空目录的工作区；所有目录项也必须计入预算。
+    let mut entry_budget = 30_000usize;
     if let Some(dir) = document_dir {
         let mut local_budget = 400usize;
-        collect_markdown_files(dir, &mut files, &mut local_budget, 0);
+        collect_markdown_files(dir, &mut files, &mut local_budget, &mut entry_budget, 0);
     }
     let mut budget = 3000usize;
     for root in roots {
         let path = Path::new(root);
         if path.is_dir() {
-            collect_markdown_files(path, &mut files, &mut budget, 0);
+            collect_markdown_files(path, &mut files, &mut budget, &mut entry_budget, 0);
         }
     }
 
-    files.into_iter().find(|path| {
-        path.file_name()
-            .and_then(|name| name.to_str())
-            .map(|name| name.to_ascii_lowercase() == wanted)
-            .unwrap_or(false)
-    })
+    let mut seen = std::collections::HashSet::new();
+    files.retain(|path| seen.insert(path.clone()));
+    files
+}
+
+fn wiki_target_variants(target: &str) -> Vec<String> {
+    if target.to_ascii_lowercase().ends_with(".md")
+        || target.to_ascii_lowercase().ends_with(".markdown")
+    {
+        vec![target.to_string()]
+    } else {
+        vec![
+            ensure_markdown_extension(target),
+            format!("{target}.markdown"),
+        ]
+    }
+}
+
+fn resolve_wiki_path(
+    document: &Path,
+    target: &str,
+    roots: &[String],
+    files: &[PathBuf],
+) -> Option<PathBuf> {
+    let target = target.trim().replace('\\', "/");
+    if target.is_empty() {
+        return Some(document.to_path_buf());
+    }
+    let variants = wiki_target_variants(&target);
+    let bases = document
+        .parent()
+        .map(Path::to_path_buf)
+        .into_iter()
+        .chain(roots.iter().map(PathBuf::from));
+    for base in bases {
+        for variant in &variants {
+            let candidate = base.join(variant);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+    }
+    // 显式路径是用户的消歧信息；路径不存在时不能丢掉目录去打开其他同名文件。
+    if target.contains('/') {
+        return None;
+    }
+    let local = document.parent();
+    for variant in variants {
+        let matches: Vec<_> = files
+            .iter()
+            .filter(|path| {
+                let name = path
+                    .file_name()
+                    .and_then(|name| name.to_str())
+                    .unwrap_or_default();
+                if cfg!(windows) {
+                    name.eq_ignore_ascii_case(&variant)
+                } else {
+                    name == variant
+                }
+            })
+            .collect();
+        let local_matches: Vec<_> = matches
+            .iter()
+            .filter(|path| local.is_some_and(|dir| path.starts_with(dir)))
+            .collect();
+        if local_matches.len() == 1 {
+            return Some((**local_matches[0]).clone());
+        }
+        if local_matches.len() > 1 {
+            return None;
+        }
+        if matches.len() == 1 {
+            return Some(matches[0].clone());
+        }
+        if matches.len() > 1 {
+            return None;
+        }
+    }
+    None
 }
 
 /// 把 `[[笔记]]` 解析成绝对路径：文档目录 → 工作区根 → 按文件名递归查找。
@@ -2677,39 +2745,15 @@ pub async fn resolve_wiki_link(
 
     tokio::task::spawn_blocking(move || {
         let document = PathBuf::from(&document_path);
-        let document_dir = document.parent().map(Path::to_path_buf);
-        let with_extension = ensure_markdown_extension(&target);
-
-        // 带路径的目标：相对文档目录或工作区根解析。
-        if with_extension.contains('/') {
-            if let Some(dir) = &document_dir {
-                let candidate = dir.join(&with_extension);
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
-            for root in &roots {
-                let candidate = Path::new(root).join(&with_extension);
-                if candidate.is_file() {
-                    return Some(candidate);
-                }
-            }
+        // 常见相对路径无需扫描整个工作区。
+        if let Some(path) = resolve_wiki_path(&document, &target, &roots, &[]) {
+            return Some(path);
         }
-
-        // 同目录同名笔记优先于工作区深处的同名文件。
-        if let Some(dir) = &document_dir {
-            let candidate = dir.join(&with_extension);
-            if candidate.is_file() {
-                return Some(candidate);
-            }
+        if target.contains('/') {
+            return None;
         }
-
-        let wanted = Path::new(&with_extension)
-            .file_name()
-            .and_then(|name| name.to_str())
-            .unwrap_or_default()
-            .to_string();
-        find_markdown_file_by_name(&roots, document_dir.as_deref(), &wanted)
+        let files = collect_wiki_files(&roots, document.parent());
+        resolve_wiki_path(&document, &target, &roots, &files)
     })
     .await
     .map(|path| path.map(|value| value.to_string_lossy().to_string()))
@@ -2726,7 +2770,141 @@ pub struct WikiBacklink {
 }
 
 /// 从一行文本里取出所有 `[[…]]` 的内部内容。
+#[cfg(test)]
 fn extract_wiki_links(line: &str) -> Vec<String> {
+    markdown_wiki_links(line)
+        .into_iter()
+        .flat_map(|(_, links)| links)
+        .collect()
+}
+
+/// 返回可见 Markdown 中的链接及源行号，排除围栏、缩进代码、行内代码、转义和注释。
+fn markdown_wiki_links(content: &str) -> Vec<(usize, Vec<String>)> {
+    let mut result = Vec::new();
+    let mut fence: Option<(u8, usize, usize)> = None;
+    let mut code_ticks = 0;
+    let mut comment = false;
+    let mut source_offset = 0;
+    for (index, raw_line) in content.split_inclusive('\n').enumerate() {
+        let mut line = raw_line.trim_end_matches(['\r', '\n']);
+        let mut line_offset = source_offset;
+        source_offset += raw_line.len();
+        let mut quote_depth = 0;
+        let quote_limit = fence.map(|(_, _, depth)| depth).unwrap_or(usize::MAX);
+        while quote_depth < quote_limit {
+            let trimmed = line.trim_start_matches(' ');
+            let indent = line.len() - trimmed.len();
+            if indent > 3 || !trimmed.starts_with('>') {
+                break;
+            }
+            let prefix = indent
+                + 1
+                + usize::from(
+                    trimmed
+                        .as_bytes()
+                        .get(1)
+                        .is_some_and(|byte| *byte == b' ' || *byte == b'\t'),
+                );
+            line = &line[prefix..];
+            line_offset += prefix;
+            quote_depth += 1;
+        }
+        if fence.is_some_and(|(_, _, depth)| quote_depth < depth) {
+            fence = None;
+        }
+        let trimmed = line.trim_start();
+        let indent = line.len() - trimmed.len();
+        if indent <= 3
+            && (trimmed.starts_with('`') || trimmed.starts_with('~'))
+            && !comment
+            && code_ticks == 0
+        {
+            let marker = trimmed.as_bytes()[0];
+            let length = trimmed.bytes().take_while(|byte| *byte == marker).count();
+            if let Some((open_marker, open_length, _)) = fence {
+                if marker == open_marker
+                    && length >= open_length
+                    && trimmed[length..].trim().is_empty()
+                {
+                    fence = None;
+                }
+                continue;
+            }
+            if length >= 3 && (marker != b'`' || !trimmed[length..].contains('`')) {
+                fence = Some((marker, length, quote_depth));
+                continue;
+            }
+        }
+        if fence.is_some() || (indent >= 4 && code_ticks == 0 && !comment) {
+            continue;
+        }
+        let mut visible = String::new();
+        let mut cursor = 0;
+        while cursor < line.len() {
+            let rest = &line[cursor..];
+            if comment {
+                if let Some(end) = rest.find("-->") {
+                    cursor += end + 3;
+                    comment = false;
+                } else {
+                    break;
+                }
+            } else if code_ticks == 0 && rest.starts_with("<!--") {
+                comment = true;
+                cursor += 4;
+                visible.push(' ');
+            } else if rest.starts_with('`') {
+                let count = rest.bytes().take_while(|byte| *byte == b'`').count();
+                if code_ticks == 0
+                    && has_closing_wiki_code_ticks(&content[line_offset + cursor + count..], count)
+                {
+                    code_ticks = count;
+                } else if code_ticks == count {
+                    code_ticks = 0;
+                }
+                cursor += count;
+                visible.push(' ');
+            } else if code_ticks == 0 && rest.starts_with('\\') {
+                cursor += 1;
+                if let Some(next) = line[cursor..].chars().next() {
+                    cursor += next.len_utf8();
+                }
+                visible.push(' ');
+            } else {
+                let next = rest.chars().next().unwrap();
+                if code_ticks == 0 {
+                    visible.push(next);
+                }
+                cursor += next.len_utf8();
+            }
+        }
+        let links = extract_visible_wiki_links(&visible);
+        if !links.is_empty() {
+            result.push((index, links));
+        }
+    }
+    result
+}
+
+fn has_closing_wiki_code_ticks(tail: &str, wanted: usize) -> bool {
+    for (index, line) in tail.lines().enumerate() {
+        if index > 0 && line.trim().is_empty() {
+            break;
+        }
+        let mut rest = line;
+        while let Some(start) = rest.find('`') {
+            rest = &rest[start..];
+            let length = rest.bytes().take_while(|byte| *byte == b'`').count();
+            if length == wanted {
+                return true;
+            }
+            rest = &rest[length..];
+        }
+    }
+    false
+}
+
+fn extract_visible_wiki_links(line: &str) -> Vec<String> {
     let mut links = Vec::new();
     let mut rest = line;
     while let Some(start) = rest.find("[[") {
@@ -2735,7 +2913,7 @@ fn extract_wiki_links(line: &str) -> Vec<String> {
             break;
         };
         let body = &after[..end];
-        if !body.is_empty() && !body.contains('\n') {
+        if !body.is_empty() && !body.contains(['[', ']']) {
             links.push(body.to_string());
         }
         rest = &after[end + 2..];
@@ -2746,11 +2924,20 @@ fn extract_wiki_links(line: &str) -> Vec<String> {
 /// `[[目标#标题|别名]]` 是否指向某个笔记名（不含扩展名、忽略大小写）。
 fn wiki_target_matches(body: &str, note_name: &str) -> bool {
     let target = body.split('|').next().unwrap_or(body);
-    let target = target.split('#').next().unwrap_or(target).trim().replace('\\', "/");
+    let target = target
+        .split('#')
+        .next()
+        .unwrap_or(target)
+        .trim()
+        .replace('\\', "/");
     if target.is_empty() {
         return false;
     }
-    let file_name = target.rsplit('/').next().unwrap_or(&target).to_ascii_lowercase();
+    let file_name = target
+        .rsplit('/')
+        .next()
+        .unwrap_or(&target)
+        .to_ascii_lowercase();
     let stem = file_name
         .strip_suffix(".markdown")
         .or_else(|| file_name.strip_suffix(".md"))
@@ -2773,55 +2960,61 @@ pub async fn find_wiki_backlinks(
         else {
             return Vec::new();
         };
-        let document_dir = document.parent().map(Path::to_path_buf);
-
-        let mut files = Vec::new();
-        let mut budget = 2000usize;
-        for root in &roots {
-            let path = Path::new(root);
-            if path.is_dir() {
-                collect_markdown_files(path, &mut files, &mut budget, 0);
-            }
-        }
-        if let Some(dir) = &document_dir {
-            if !roots.iter().any(|root| Path::new(root) == dir) {
-                let mut local_budget = 500usize;
-                collect_markdown_files(dir, &mut files, &mut local_budget, 0);
-            }
-        }
+        let mut files = collect_wiki_files(&roots, document.parent());
         files.sort();
         files.dedup();
-
-        let document_string = document.to_string_lossy().to_string();
+        let document_identity = std::fs::canonicalize(&document).unwrap_or(document.clone());
         let mut backlinks = Vec::new();
-        for file in files {
-            if file.to_string_lossy() == document_string {
+        for file in &files {
+            if std::fs::canonicalize(file).unwrap_or(file.clone()) == document_identity {
                 continue;
             }
-            let Ok(metadata) = std::fs::metadata(&file) else {
+            let Ok(metadata) = std::fs::metadata(file) else {
                 continue;
             };
             if metadata.len() > 2 * 1024 * 1024 {
                 continue;
             }
-            let Ok(content) = std::fs::read_to_string(&file) else {
+            let Ok(content) = std::fs::read_to_string(file) else {
                 continue;
             };
 
             let mut first_line = 0u32;
             let mut excerpt = String::new();
             let mut count = 0u32;
-            for (index, line) in content.lines().enumerate() {
-                let hits = extract_wiki_links(line)
+            for (index, links) in markdown_wiki_links(&content) {
+                let hits = links
                     .iter()
-                    .filter(|body| wiki_target_matches(body, &note_name))
+                    .filter(|body| {
+                        if !wiki_target_matches(body, &note_name) {
+                            return false;
+                        }
+                        let target = body
+                            .split('|')
+                            .next()
+                            .unwrap_or(body)
+                            .split('#')
+                            .next()
+                            .unwrap_or("")
+                            .trim();
+                        resolve_wiki_path(file, target, &roots, &files)
+                            .and_then(|path| std::fs::canonicalize(path).ok())
+                            .is_some_and(|path| path == document_identity)
+                    })
                     .count();
                 if hits == 0 {
                     continue;
                 }
                 if count == 0 {
                     first_line = (index + 1) as u32;
-                    excerpt = line.trim().chars().take(160).collect();
+                    excerpt = content
+                        .lines()
+                        .nth(index)
+                        .unwrap_or("")
+                        .trim()
+                        .chars()
+                        .take(160)
+                        .collect();
                 }
                 count += hits as u32;
             }
@@ -2850,8 +3043,8 @@ pub async fn find_wiki_backlinks(
 #[cfg(test)]
 mod wiki_link_tests {
     use super::{
-        ensure_markdown_extension, extract_wiki_links, find_wiki_backlinks, resolve_wiki_link,
-        wiki_target_matches,
+        collect_markdown_files, ensure_markdown_extension, extract_wiki_links, find_wiki_backlinks,
+        resolve_wiki_link, wiki_target_matches,
     };
 
     #[test]
@@ -2860,13 +3053,23 @@ mod wiki_link_tests {
         assert!(wiki_target_matches("folder/笔记.md", "笔记"));
         assert!(!wiki_target_matches("另一篇", "笔记"));
         assert_eq!(extract_wiki_links("见 [[A]] 和 [[B#C]]"), vec!["A", "B#C"]);
+        assert!(extract_wiki_links("`[[示例]]` 和 \\[[转义]]").is_empty());
+        assert_eq!(extract_wiki_links("an unmatched ` marker [[A]]"), vec!["A"]);
+        assert!(extract_wiki_links("`multi\n[[示例]]\nline`").is_empty());
+        assert_eq!(
+            extract_wiki_links("> ~~~md\n> [[示例]]\n> ~~~\n> [[A]]"),
+            vec!["A"]
+        );
     }
 
     #[test]
     fn adds_markdown_extension_once() {
         assert_eq!(ensure_markdown_extension("笔记"), "笔记.md");
         assert_eq!(ensure_markdown_extension("笔记.md"), "笔记.md");
-        assert_eq!(ensure_markdown_extension("notes/笔记.MARKDOWN"), "notes/笔记.MARKDOWN");
+        assert_eq!(
+            ensure_markdown_extension("notes/笔记.MARKDOWN"),
+            "notes/笔记.MARKDOWN"
+        );
     }
 
     #[tokio::test]
@@ -2884,8 +3087,8 @@ mod wiki_link_tests {
         .await
         .unwrap();
         assert_eq!(
-            resolved,
-            Some(root.join("notes/目标.md").to_string_lossy().into())
+            std::fs::canonicalize(resolved.unwrap()).unwrap(),
+            std::fs::canonicalize(root.join("notes/目标.md")).unwrap()
         );
 
         let backlinks = find_wiki_backlinks(
@@ -2899,6 +3102,109 @@ mod wiki_link_tests {
         assert!(backlinks[0].excerpt.contains("[[目标]]"));
 
         std::fs::remove_dir_all(&root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn resolves_markdown_extension_without_discarding_explicit_directories() {
+        let root = std::env::temp_dir().join(format!("zeditor-wiki-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join("notes/Long.markdown"), "# Long\n").unwrap();
+        std::fs::write(root.join("notes/Other.md"), "# Other\n").unwrap();
+        let source = root.join("current.md").to_string_lossy().into_owned();
+        let roots = vec![root.to_string_lossy().into_owned()];
+        let resolved = resolve_wiki_link(source.clone(), "Long".into(), roots.clone())
+            .await
+            .unwrap();
+        assert!(
+            resolved.is_some(),
+            "bare note names must also find .markdown files"
+        );
+        assert_eq!(
+            resolve_wiki_link(source, "missing/Other".into(), roots)
+                .await
+                .unwrap(),
+            None
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn backlinks_respect_target_paths_and_exclude_code() {
+        let root = std::env::temp_dir().join(format!("zeditor-wiki-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::create_dir_all(root.join("b")).unwrap();
+        std::fs::write(root.join("a/Note.md"), "# A\n").unwrap();
+        std::fs::write(root.join("b/Note.md"), "# B\n").unwrap();
+        std::fs::write(root.join("source.md"), "[[a/Note]]\n`[[b/Note]]`\n```md\n[[b/Note]]\n```\n    [[b/Note]]\n<!-- [[b/Note]] -->\n\\[[b/Note]]\n").unwrap();
+        let roots = vec![root.to_string_lossy().into_owned()];
+        let actual = find_wiki_backlinks(
+            root.join("b/Note.md").to_string_lossy().into_owned(),
+            roots.clone(),
+        )
+        .await
+        .unwrap();
+        assert!(
+            actual.is_empty(),
+            "another folder's target and code examples are not incoming links: {actual:?}"
+        );
+        let valid =
+            find_wiki_backlinks(root.join("a/Note.md").to_string_lossy().into_owned(), roots)
+                .await
+                .unwrap();
+        assert_eq!(valid.len(), 1);
+        assert_eq!(valid[0].count, 1);
+        assert_eq!(valid[0].line, 1);
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn duplicate_bare_names_require_context_or_an_explicit_path() {
+        let root = std::env::temp_dir().join(format!("zeditor-wiki-test-{}", uuid::Uuid::new_v4()));
+        for dir in ["a", "b"] {
+            std::fs::create_dir_all(root.join(dir)).unwrap();
+            std::fs::write(root.join(dir).join("Note.md"), "# Note").unwrap();
+        }
+        let roots = vec![root.to_string_lossy().into_owned()];
+        assert_eq!(
+            resolve_wiki_link(
+                root.join("source.md").to_string_lossy().into_owned(),
+                "Note".into(),
+                roots.clone()
+            )
+            .await
+            .unwrap(),
+            None
+        );
+        let local = resolve_wiki_link(
+            root.join("a/source.md").to_string_lossy().into_owned(),
+            "Note".into(),
+            roots,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+        assert_eq!(
+            std::fs::canonicalize(local).unwrap(),
+            std::fs::canonicalize(root.join("a/Note.md")).unwrap()
+        );
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn scanning_non_markdown_files_consumes_the_directory_entry_budget() {
+        let root = std::env::temp_dir().join(format!("zeditor-wiki-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        for index in 0..20 {
+            std::fs::write(root.join(format!("{index}.txt")), "text").unwrap();
+        }
+        let mut files = Vec::new();
+        let mut file_budget = 100;
+        let mut entry_budget = 5;
+        collect_markdown_files(&root, &mut files, &mut file_budget, &mut entry_budget, 0);
+        assert_eq!(entry_budget, 0);
+        assert_eq!(file_budget, 100);
+        assert!(files.is_empty());
+        std::fs::remove_dir_all(root).unwrap();
     }
 }
 
@@ -2997,7 +3303,8 @@ mod update_tests {
             saved["editor"][name] = serde_json::json!(false);
         }
         saved["editor"]["line_width"] = serde_json::json!(65);
-        let saved = serde_json::to_value(serde_json::from_value::<Settings>(saved).unwrap()).unwrap();
+        let saved =
+            serde_json::to_value(serde_json::from_value::<Settings>(saved).unwrap()).unwrap();
         assert_eq!(saved["editor"]["line_width"], 65);
         for name in display_switches {
             assert_eq!(saved["editor"][name], false);

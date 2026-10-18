@@ -64,7 +64,7 @@ import { contentFontStack, typographyCssVariables } from './utils/appearanceSett
 import { resolveEditorDisplay } from './utils/editorDisplay';
 import { LineWidthWheel } from './components/Editor/LineWidthWheel';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
-import { isMacOS } from './utils/platform';
+import { isMacOS, isNativeMenuActive } from './utils/platform';
 
 interface DragDropPayload {
   paths: string[];
@@ -199,6 +199,7 @@ function App() {
   useEffect(() => {
     const openPalette = () => setAiPaletteVisible(true);
     const onKeyDown = (event: KeyboardEvent) => {
+      if (isNativeMenuActive()) return;
       if ((event.ctrlKey || event.metaKey) && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'j') {
         event.preventDefault();
         setAiPaletteVisible(visible => !visible);
@@ -233,7 +234,7 @@ function App() {
       return true;
     };
     const onKeyDown = (event: KeyboardEvent) => {
-      if ((event.ctrlKey || event.metaKey) && event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
+      if (!isNativeMenuActive() && (event.ctrlKey || event.metaKey) && event.altKey && !event.shiftKey && event.key.toLowerCase() === 'v') {
         event.preventDefault();
         runCheck();
         return;

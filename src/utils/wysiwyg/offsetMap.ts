@@ -25,8 +25,11 @@ function containerEntryOf(block: BlockSerializeResult, path: number[]): BlockCon
 }
 
 function firstTextPoint(pieces: MarkdownPiece[]): InlinePoint | null {
-  const piece = pieces.find(candidate => candidate.kind === 'text');
-  return piece ? { path: piece.path, offset: 0 } : null;
+  const piece = pieces.find(candidate => candidate.kind === 'text' || candidate.atomic);
+  if (!piece) return null;
+  return piece.atomic
+    ? { path: piece.path.slice(0, -1), offset: piece.path[piece.path.length - 1] }
+    : { path: piece.path, offset: 0 };
 }
 
 /** 光标位置 → 块内 Markdown 偏移；容器未知或光标不在任何文本片段内时返回 null。 */
@@ -35,10 +38,13 @@ export function blockOffsetFromPoint(block: BlockSerializeResult, container: Con
   if (!entry) return null;
 
   // 转义上下文必须与序列化时一致，否则片段长度对不上、光标会整体偏移。
-  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes });
+  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes, preserveFootnoteDefinition: entry.preserveFootnoteDefinition });
   if (pieces.length === 0) return entry.contentOffset;
   let local = 0;
   for (const piece of pieces) {
+    if (piece.atomic && piece.path.every((part, index) => point.path[index] === part)) {
+      return entry.contentOffset + local + (point.offset === 0 ? 0 : piece.text.length);
+    }
     if (piece.kind === 'text' && samePath(piece.path, point.path)) {
       const escaped = (piece.steps ?? [])
         .filter(step => step.from < point.offset)
@@ -55,13 +61,22 @@ export function pointFromBlockOffset(block: BlockSerializeResult, container: Con
   const entry = containerEntryOf(block, container.path);
   if (!entry) return null;
 
-  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes });
+  const pieces = emitInlineMarkdown(container.nodes, { escapeLineStart: entry.escapeLineStart, escapePipes: entry.escapePipes, preserveFootnoteDefinition: entry.preserveFootnoteDefinition });
   if (pieces.length === 0) return { path: [], offset: 0 };
   const target = offset - entry.contentOffset;
   let local = 0;
   let last: InlinePoint | null = null;
 
   for (const piece of pieces) {
+    if (piece.atomic) {
+      const path = piece.path.slice(0, -1);
+      const offset = piece.path[piece.path.length - 1];
+      if (target <= local) return { path, offset };
+      last = { path, offset: offset + 1 };
+      if (target <= local + piece.text.length) return last;
+      local += piece.text.length;
+      continue;
+    }
     if (piece.kind === 'text') {
       if (target <= local) return { path: piece.path, offset: 0 };
       let escaped = 0;

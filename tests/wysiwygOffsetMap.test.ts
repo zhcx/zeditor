@@ -67,3 +67,34 @@ it('maps the empty paragraph caret to and from its block offset', () => {
   assert.deepEqual(pointFromBlockOffset(block, container, 0), point);
   assert.equal(blockOffsetFromPoint(block, container, { path: [0], offset: 0 }), 0);
 });
+
+it('maps wiki and footnote atoms to their own source boundaries without falling back to another text node', () => {
+  for (const atom of [elementNode('span', { 'data-wiki-target': 'note' }, [textNode('note')]), elementNode('sup', { 'data-footnote-name': 'n' }, [textNode('[n]')])]) {
+    const nodes = [textNode('before '), atom, textNode(' after')];
+    const block = serializeBlockMarkdown('paragraph', nodes);
+    const token = atom.tag === 'span' ? '[[note]]' : '[^n]';
+    assert.equal(blockOffsetFromPoint(block, { nodes, path: [] }, { path: [1, 0], offset: 0 }), 7);
+    assert.equal(blockOffsetFromPoint(block, { nodes, path: [] }, { path: [1, 0], offset: 2 }), 7 + token.length);
+    assert.deepEqual(pointFromBlockOffset(block, { nodes, path: [] }, 8), { path: [], offset: 2 });
+  }
+});
+
+it('preserves an editable footnote definition and maps its raw prefix consistently', () => {
+  const nodes = [textNode('[^n]: 定义')];
+  const block = serializeBlockMarkdown('paragraph', nodes, { allowBlockMarkers: true });
+  assert.equal(block.markdown, '[^n]: 定义');
+  assert.equal(blockOffsetFromPoint(block, { nodes, path: [] }, { path: [0], offset: 6 }), 6);
+  assert.deepEqual(pointFromBlockOffset(block, { nodes, path: [] }, 6), { path: [0], offset: 6 });
+});
+
+it('preserves underscores and other syntax in definition names while escaping the definition body', () => {
+  const nodes = [textNode('[^my_note]: *literal*')];
+  const block = serializeBlockMarkdown('paragraph', nodes, { allowBlockMarkers: true });
+  assert.equal(block.markdown, '[^my_note]: \\*literal\\*');
+});
+
+it('finds the first atom as the selectable fallback inside a formatting wrapper', () => {
+  const nodes = [strong(elementNode('span', { 'data-wiki-target': 'note' }, [textNode('note')]))];
+  const block = serializeBlockMarkdown('paragraph', nodes);
+  for (const offset of [0, 1]) assert.deepEqual(pointFromBlockOffset(block, { nodes, path: [] }, offset), { path: [0], offset: 0 });
+});

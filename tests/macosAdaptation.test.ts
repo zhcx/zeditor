@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import test from 'node:test';
+import { parse } from 'yaml';
 
 import { collectCheckedStates, collectMenuActions, findMenuItemById, type AppMenuItem } from '../src/utils/menuModel.ts';
 import { planMacAppMenu, type NativePlanNode, type SystemMenuLabels } from '../src/utils/nativeMenu.ts';
@@ -74,10 +78,8 @@ test('native system panels follow the app language', () => {
   const macosConfig = JSON.parse(read('src-tauri/tauri.macos.conf.json'));
 
   assert.equal(macosConfig.bundle.macOS.infoPlist, 'Info.plist');
-  // 没有开发者证书时也必须做完整的 ad-hoc 签名：否则只剩链接器签名，
-  // Info.plist 与资源未封装，codesign --strict / spctl 会判定签名不完整。
-  // CI 的 APPLE_SIGNING_IDENTITY 环境变量会覆盖这里的 "-"。
-  assert.equal(macosConfig.bundle.macOS.signingIdentity, '-');
+  // 无证书时保持既有的未签名构建；开发者签名由 CI 显式配置。
+  assert.equal(macosConfig.bundle.macOS.signingIdentity, undefined);
   assert.match(infoPlist, /<key>CFBundleDevelopmentRegion<\/key>/);
   assert.match(infoPlist, /<string>zh-Hans<\/string>/);
   assert.match(infoPlist, /<key>CFBundleLocalizations<\/key>/);
@@ -327,10 +329,96 @@ test('macOS release metadata and signing hooks are configured', () => {
 
   assert.match(infoPlist, /<key>LSApplicationCategoryType<\/key>/);
   assert.match(infoPlist, /<key>NSHumanReadableCopyright<\/key>/);
-  // 签名与公证只在 secrets 存在时启用，未配置时保持未签名流程。
-  assert.match(workflow, /APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/);
-  assert.match(workflow, /APPLE_SIGNING_IDENTITY: \$\{\{ secrets\.APPLE_SIGNING_IDENTITY \}\}/);
-  assert.match(workflow, /APPLE_TEAM_ID: \$\{\{ secrets\.APPLE_TEAM_ID \}\}/);
+  // secrets 先经过配置步骤，不能把空 APPLE_* 环境变量交给 Tauri。
+  assert.match(workflow, /MACOS_APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/);
+  assert.match(workflow, /MACOS_APPLE_SIGNING_IDENTITY: \$\{\{ secrets\.APPLE_SIGNING_IDENTITY \}\}/);
+  assert.match(workflow, /MACOS_APPLE_TEAM_ID: \$\{\{ secrets\.APPLE_TEAM_ID \}\}/);
   // 更新检查同时识别分架构 DMG 与 universal 包。
   assert.match(commands, /_universal\.dmg/);
+});
+
+const appleVariableNames = [
+  'APPLE_CERTIFICATE', 'APPLE_CERTIFICATE_PASSWORD', 'APPLE_SIGNING_IDENTITY',
+  'APPLE_ID', 'APPLE_PASSWORD', 'APPLE_TEAM_ID',
+];
+
+function runSigningConfiguration(secrets: Record<string, string>) {
+  const workflow = parse(read('.github/workflows/build.yml'));
+  const steps = workflow.jobs['build-macos'].steps;
+  const configure = steps.find((step: { name: string }) => step.name === 'Configure optional macOS signing');
+  assert.ok(configure, 'missing optional signing configuration step');
+  const build = steps.find((step: { uses?: string }) => step.uses === 'tauri-apps/tauri-action@v0');
+  for (const name of appleVariableNames) {
+    assert.equal(build.env?.[name], undefined, `${name} must not be passed unconditionally`);
+  }
+  const script = configure.run.match(/node <<'NODE'\r?\n([\s\S]*?)\r?\nNODE/);
+  assert.ok(script, 'missing runnable Node signing configuration');
+  const directory = mkdtempSync(join(tmpdir(), 'zeditor-signing-'));
+  const envFile = join(directory, 'github-env');
+  const childEnv = { ...process.env, GITHUB_ENV: envFile };
+  for (const name of appleVariableNames) {
+    delete childEnv[name];
+    delete childEnv[`MACOS_${name}`];
+  }
+  Object.assign(childEnv, secrets);
+  writeFileSync(envFile, '');
+  try {
+    const result = spawnSync(process.execPath, ['-e', script[1]], { env: childEnv, encoding: 'utf8' });
+    return { status: result.status, stderr: result.stderr, exported: readFileSync(envFile, 'utf8') };
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+}
+
+test('macOS release leaves signing variables absent when secrets are not configured', () => {
+  const result = runSigningConfiguration(Object.fromEntries(appleVariableNames.map(name => [`MACOS_${name}`, ''])));
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.exported, '');
+});
+
+test('macOS release exports configured Developer ID and notarization credentials intact', () => {
+  const secrets = Object.fromEntries(appleVariableNames.map(name => [`MACOS_${name}`, `fixture-${name}`]));
+  const result = runSigningConfiguration(secrets);
+  assert.equal(result.status, 0, result.stderr);
+  for (const name of appleVariableNames) {
+    assert.ok(result.exported.includes(`${name}<<`), `${name} was not exported`);
+    assert.ok(result.exported.includes(`\nfixture-${name}\n`), `${name} was changed`);
+  }
+});
+
+test('macOS release supports signing without notarization and an empty certificate password', () => {
+  const result = runSigningConfiguration({
+    MACOS_APPLE_CERTIFICATE: 'fixture-certificate',
+    MACOS_APPLE_CERTIFICATE_PASSWORD: '',
+    MACOS_APPLE_SIGNING_IDENTITY: 'fixture-identity',
+  });
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(result.exported, /APPLE_CERTIFICATE_PASSWORD<<[^\n]+\n\n/);
+  assert.doesNotMatch(result.exported, /APPLE_ID<<|APPLE_PASSWORD<<|APPLE_TEAM_ID<</);
+});
+
+test('macOS release rejects incomplete credentials before exporting signing state', () => {
+  const result = runSigningConfiguration({ MACOS_APPLE_CERTIFICATE: 'fixture-certificate' });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /APPLE_SIGNING_IDENTITY/);
+  assert.equal(result.exported, '');
+});
+
+test('macOS release rejects notarization credentials without a signing certificate', () => {
+  const result = runSigningConfiguration({
+    MACOS_APPLE_ID: 'fixture-account',
+    MACOS_APPLE_PASSWORD: 'fixture-password',
+    MACOS_APPLE_TEAM_ID: 'fixture-team',
+  });
+  assert.notEqual(result.status, 0);
+  assert.match(result.stderr, /requires signing credentials/);
+  assert.equal(result.exported, '');
+});
+
+test('macOS signs the nested helper before the application executable', () => {
+  const manifest = read('src-tauri/Cargo.toml');
+  const binaries = [...manifest.matchAll(/\[\[bin\]\][\s\S]*?name = "([^"]+)"/g)].map(match => match[1]);
+  assert.deepEqual(binaries, ['zeditor_mcp_server', 'zeditor']);
+  // Tauri identifies the main binary by package name, independently of manifest order.
+  assert.match(manifest, /^\[package\]\r?\nname = "zeditor"/);
 });

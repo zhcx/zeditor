@@ -147,6 +147,54 @@ it('falls back to a full reparse when the block structure changes', () => {
   }
 });
 
+it('reparses neighboring blocks when a same-kind edit changes their Markdown boundaries', () => {
+  const cases: Array<[string, number, string]> = [
+    ['- a\n\n+ b', 0, '+ a'],
+    ['1. a\n\n- b', 0, '- a'],
+    ['a\n***', 1, '---'],
+    ['```js\nx\n```\n\nafter', 0, '```js\nx'],
+    ['<pre>x</pre>\n\nafter', 0, '<pre>x'],
+    ['- a\n\nb', 1, '  b'],
+  ];
+  for (const [source, index, replacement] of cases) {
+    const document = splitMarkdownDocument(source);
+    const next = replaceBlockSource(document, document.blocks[index], replacement);
+    assert.deepEqual(next, splitMarkdownDocument(next.source), JSON.stringify({ source, index, replacement }));
+  }
+});
+
+it('recalculates empty caret blocks when paragraph content is removed', () => {
+  for (const source of ['a\n\n\nb', 'a\n# heading', '# heading\nb', 'a\n\nb\n\n']) {
+    const document = splitMarkdownDocument(source);
+    const index = document.blocks.findIndex(block => block.kind === 'paragraph');
+    const next = replaceBlockSource(document, document.blocks[index], '');
+    assert.deepEqual(next, splitMarkdownDocument(next.source), JSON.stringify(source));
+  }
+  const document = splitMarkdownDocument('a\n\n\nb');
+  const next = replaceBlockSource(document, document.blocks[1], '');
+  assert.deepEqual(next, splitMarkdownDocument(next.source));
+});
+
+it('updates the document EOL when the replaced block changes the only CRLF sequence', () => {
+  for (const [source, replacement] of [['a\nb', 'x\r\ny'], ['a\r\nb', 'x\ny']]) {
+    const document = splitMarkdownDocument(source);
+    const next = replaceBlockSource(document, document.blocks[0], replacement);
+    assert.deepEqual(next, splitMarkdownDocument(next.source));
+  }
+});
+
+it('keeps ordinary text edits local without rebuilding unaffected blocks', () => {
+  for (const [source, replacement] of [['first\n\nsecond', 'first changed'], ['# heading\n\nbody', '# heading changed'], ['first\ncontinued\n\nsecond', 'first changed\ncontinued']]) {
+    const document = splitMarkdownDocument(source);
+    const next = replaceBlockSource(document, document.blocks[0], replacement);
+    assert.deepEqual(next, splitMarkdownDocument(next.source));
+    assert.equal(next.blocks[1].source, document.blocks[1].source);
+    // A real local edit keeps the unchanged prefix block rather than parsing it again.
+    const editedLast = replaceBlockSource(document, document.blocks[1], 'second changed');
+    assert.equal(editedLast.blocks[0], document.blocks[0]);
+  }
+});
+
 it('replaces one block source without touching the rest of the document', () => {
   const document = splitMarkdownDocument('# 标题\n\n段落一\n\n段落二\n');
   const target = document.blocks[1];
@@ -164,6 +212,14 @@ it('keeps media and display math blocks read-only', () => {
     ['paragraph', false],
     ['paragraph', true],
   ]);
+});
+
+it('keeps multi-line footnote definition indentation safe behind block source editing', () => {
+  for (const content of ['[^n]: first\n    continued', '[^n]: first\n\n\tcontinued']) {
+    const definition = splitMarkdownDocument(content).blocks[0];
+    assert.equal(definition.editable, false);
+    assert.equal(definition.source, content);
+  }
 });
 
 it('keeps structures the inline serializer cannot round-trip read-only', () => {

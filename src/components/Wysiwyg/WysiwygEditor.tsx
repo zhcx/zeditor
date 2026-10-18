@@ -6,7 +6,8 @@ import { useAIStore } from '../../stores/aiStore';
 import { openWikiLink } from '../../services/wikiLinks';
 import { renderMarkdownSource } from '../../utils/markdownPipeline';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
-import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
+import { enhanceFootnotes, enhanceRenderedMarkdown, refreshFootnoteReferences } from '../../utils/markdownEnhancers';
+import { parseFootnoteDefinitions } from '../../utils/footnotes';
 import type { WysiwygBlockKind, WysiwygDocument } from '../../utils/wysiwyg/blocks';
 import { findHeadingFoldSections, foldedBlockIndexes, type HeadingFoldSection } from '../../utils/wysiwyg/headingFolds';
 import { resolveEditorDisplay } from '../../utils/editorDisplay';
@@ -198,6 +199,7 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
       renderedRevisionRef.current = renderRevision;
     }
     const cleanup = enhanceRenderedMarkdown(host, {
+      footnotes: false,
       scrollRoot,
       source,
       documentPath,
@@ -544,6 +546,15 @@ export function WysiwygEditor() {
 
   // 控制器接管 store.editorView：工具栏、AI、状态栏、大纲随即生效。
   useEffect(() => {
+    const root = surfaceRef.current;
+    return root ? enhanceFootnotes(root, () => session.getVisibleSource()) : undefined;
+  }, [session]);
+  useLayoutEffect(() => {
+    const root = surfaceRef.current;
+    if (root && snapshot.document.source.includes('[^')) refreshFootnoteReferences(root, parseFootnoteDefinitions(snapshot.document.source));
+  }, [snapshot.document.source, renderBudget]);
+
+  useEffect(() => {
     const controller = createWysiwygController({
       session,
       getScrollDOM: () => surfaceRef.current,
@@ -579,7 +590,7 @@ export function WysiwygEditor() {
       const { sections, collapsed } = foldStateRef.current;
       let section: HeadingFoldSection | undefined;
       for (let position = sections.length - 1; position >= 0; position -= 1) {
-        if (sections[position].index <= index) { section = sections[position]; break; }
+        if (sections[position].index <= index && index <= sections[position].lastIndex) { section = sections[position]; break; }
       }
       if (!section) return;
       const folded = collapsed.has(section.key);

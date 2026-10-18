@@ -43,13 +43,15 @@ encoding_rs = "0.8"
 tokio-tungstenite = "0.24"
 futures = "0.3"
 
-[[bin]]
-name = "zeditor"
-path = "src/main.rs"
-
+# Tauri 按此顺序签名：先签嵌套的辅助程序，再签应用主程序和 .app。
+# 主程序仍由与 package 同名的 zeditor 识别，不依赖声明顺序。
 [[bin]]
 name = "zeditor_mcp_server"
 path = "src/bin/mcp_server.rs"
+
+[[bin]]
+name = "zeditor"
+path = "src/main.rs"
 
 [profile.release]
 panic = "abort"
