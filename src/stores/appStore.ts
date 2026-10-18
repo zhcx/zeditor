@@ -352,6 +352,7 @@ interface AppState {
   saveFile: (path: string) => Promise<void>;
   saveTab: (tabId: string, path: string) => Promise<void>;
   updateWordCount: () => void;
+  scheduleWordCount: () => void;
 
   addTab: (tab?: Partial<Tab>) => string;
   closeTab: (id: string) => void;
@@ -553,6 +554,9 @@ const timelineCaptureTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const pendingTimelineBaselines = new Map<string, string>();
 let uploadStatusResetTimer: ReturnType<typeof setTimeout> | null = null;
 let conversionStatusResetTimer: ReturnType<typeof setTimeout> | null = null;
+// 字数统计要对全文跑两次正则：输入期间按停顿合并，避免每按键都扫一遍长文档。
+const WORD_COUNT_DELAY = 160;
+let wordCountTimer: ReturnType<typeof setTimeout> | null = null;
 
 const formatTimelineText = (text: string) => text
   .replace(/\r?\n/g, '↵')
@@ -707,7 +711,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     } else {
       set({ content });
     }
-    get().updateWordCount();
+    get().scheduleWordCount();
   },
 
   setMode: (mode) => {
@@ -1026,6 +1030,18 @@ export const useAppStore = create<AppState>((set, get) => ({
   updateWordCount: () => {
     const { content } = get();
     set({ wordCount: formatTextStatistics(content) });
+  },
+
+  /**
+   * 输入路径专用的字数统计：按停顿合并。
+   * 切换标签、打开/关闭文档等一次性操作仍走 updateWordCount 立即刷新。
+   */
+  scheduleWordCount: () => {
+    if (wordCountTimer !== null) clearTimeout(wordCountTimer);
+    wordCountTimer = setTimeout(() => {
+      wordCountTimer = null;
+      get().updateWordCount();
+    }, WORD_COUNT_DELAY);
   },
 
   addTab: (tab?: Partial<Tab>) => {

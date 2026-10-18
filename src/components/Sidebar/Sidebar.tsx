@@ -20,6 +20,7 @@ import {
   type RecentHistoryEntry,
 } from '../../utils/recentHistory';
 import { DocumentSearchPanel } from './DocumentSearchPanel';
+import { BacklinksSection } from './BacklinksSection';
 import {
   OPENABLE_FILE_EXTENSIONS,
   isConvertibleDocumentName,
@@ -974,6 +975,8 @@ function ExplorerSidebar({ style }: SidebarProps) {
               </div>
             )}
           </section>
+
+          <BacklinksSection documentPath={currentFile} />
 
           <section className="explorer-section history-section">
             <button className="explorer-section-heading" onClick={() => setHistoryExpanded(expanded => !expanded)}>

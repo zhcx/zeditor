@@ -3,6 +3,8 @@ import { useShallow } from 'zustand/react/shallow';
 import { lazy, Suspense, useCallback, useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import 'katex/dist/katex.min.css';
 import { useAppStore } from '../../stores/appStore';
+import { useAIStore } from '../../stores/aiStore';
+import { openWikiLink } from '../../services/wikiLinks';
 import { findActiveSourceElement } from '../../utils/activeSourceLine';
 import { findLocalHeadingTarget } from '../../utils/headingAnchors';
 import { isWorkflowLikeFile } from '../../utils/workflowShape';
@@ -52,7 +54,8 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
   // Markdown parsing, sanitization and DOM replacement are comparatively
   // expensive. Deferring them keeps Monaco's keystroke updates responsive.
   const deferredContent = useDeferredValue(content);
-  const isEmpty = content.trim().length === 0;
+  // 用无分配的字符测试代替 trim()：后者每次按键都会复制一份与正文等大的字符串。
+  const isEmpty = !/\S/.test(content);
 
   useEffect(() => {
     onScrollContainerReady?.(cardRef.current);
@@ -158,6 +161,19 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       return;
     }
 
+    // Wiki 链接（双向链接）：普通点击直接打开目标笔记，并定位到 #标题。
+    const wikiLink = clickedElement?.closest<HTMLElement>('.wiki-link[data-wiki-target]');
+    if (wikiLink) {
+      event.preventDefault();
+      const target = wikiLink.dataset.wikiTarget ?? '';
+      const anchor = wikiLink.dataset.wikiAnchor || null;
+      void openWikiLink(`[[${target}${anchor ? `#${anchor}` : ''}]]`, { documentPath: currentFile })
+        .then((opened) => {
+          if (!opened) useAIStore.getState().setStatus('error', `未找到笔记：${target || anchor || '链接目标'}`);
+        });
+      return;
+    }
+
     const localLink = clickedElement?.closest<HTMLAnchorElement>('a[href^="#"]');
     const container = containerRef.current;
     if (localLink && container) {
@@ -198,9 +214,15 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
       : null;
     const lineNumber = Number(target?.dataset.sourceLine);
     if (Number.isFinite(lineNumber) && lineNumber > 0) onSourceLineClick?.(lineNumber);
-  }, [onSourceLineClick, deferredContent]);
+  }, [currentFile, onSourceLineClick, deferredContent]);
 
-  const documentImages = useMemo(() => findImages(content), [content]);
+  // 只有图片属性弹窗 / 右键菜单打开时才需要图片列表：此前每按键都对全文跑一遍
+  // findImages（正则扫描随文档长度线性增长），但绝大多数输入与图片毫无关系。
+  const imageUiOpen = imageEditorIndex !== null || imageMenu !== null;
+  const documentImages = useMemo(
+    () => (imageUiOpen ? findImages(content) : []),
+    [content, imageUiOpen],
+  );
   const editingImage = imageEditorIndex !== null ? documentImages[imageEditorIndex] ?? null : null;
   const menuImage = imageMenu ? documentImages[imageMenu.index] ?? null : null;
   const imageMenuIndex = imageMenu?.index ?? null;

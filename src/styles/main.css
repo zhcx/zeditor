@@ -4169,6 +4169,73 @@ textarea {
   text-decoration: underline;
 }
 
+/* Obsidian 风格 Wiki 链接：未解析时用虚线弱化，点击仍会再尝试解析。 */
+.markdown-body .wiki-link {
+  color: var(--accent-color);
+  text-decoration: none;
+  cursor: pointer;
+  border-bottom: 1px solid color-mix(in srgb, var(--accent-color) 32%, transparent);
+}
+
+.markdown-body .wiki-link:hover {
+  text-decoration: none;
+  border-bottom-color: currentColor;
+}
+
+.markdown-body .wiki-link.is-unresolved {
+  color: var(--text-muted);
+  border-bottom-style: dashed;
+  border-bottom-color: color-mix(in srgb, var(--text-muted) 55%, transparent);
+}
+
+/* ── 脚注引用与悬停预览 ─────────────────────────────────────────── */
+.markdown-body .footnote-ref {
+  color: var(--accent-color);
+  font-size: .75em;
+  line-height: 0;
+  vertical-align: super;
+  cursor: help;
+  border-bottom: 1px dotted color-mix(in srgb, var(--accent-color) 45%, transparent);
+}
+
+.markdown-body .footnote-ref.is-unresolved {
+  color: var(--text-muted);
+  border-bottom-style: dashed;
+  border-bottom-color: color-mix(in srgb, var(--text-muted) 55%, transparent);
+}
+
+.footnote-popover {
+  position: fixed;
+  z-index: 10070;
+  max-height: min(50vh, 420px);
+  overflow-y: auto;
+  padding: 10px 12px;
+  border: 1px solid var(--ui-border-strong, var(--border-color));
+  border-radius: 8px;
+  background: var(--ui-bg-overlay, var(--bg-elevated));
+  box-shadow: var(--ui-shadow-menu, 0 8px 24px #0004);
+  color: var(--ui-text-secondary, var(--text-secondary));
+}
+
+.footnote-popover-title {
+  margin-bottom: 6px;
+  color: var(--ui-text-muted, var(--text-muted));
+  font-size: 11px;
+}
+
+.footnote-popover-body {
+  font-size: 12px;
+  line-height: 1.55;
+}
+
+.footnote-popover-body > :first-child { margin-top: 0; }
+.footnote-popover-body > :last-child { margin-bottom: 0; }
+
+.footnote-popover-empty {
+  color: var(--ui-text-muted, var(--text-muted));
+  font-size: 12px;
+}
+
 .video-embed {
   width: 100%;
   margin: 1.25rem 0;

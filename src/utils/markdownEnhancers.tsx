@@ -13,7 +13,7 @@
 /* eslint-disable react-refresh/only-export-components */
 import { Suspense, lazy } from 'react';
 import { createRoot, type Root } from 'react-dom/client';
-import { markdownRenderer } from './markdownPipeline.ts';
+import { markdownRenderer, renderMarkdownToHtml } from './markdownPipeline.ts';
 import { sanitizeRenderedHtml } from './safeHtml.ts';
 import { addHeadingAnchors } from './headingAnchors.ts';
 import { hasWorkflowShape } from './workflowShape.ts';
@@ -21,6 +21,7 @@ import { MARKMAP_FENCE_SELECTOR } from './markmapSource.ts';
 import { isRemoteMediaSource } from './media.ts';
 import { findImages } from './imageSyntax.ts';
 import { resolveMediaSources } from '../services/mediaAssets';
+import { resolveWikiLinkTargets } from '../services/wikiLinks';
 
 // 工作流查看器（含 YAML 解析器）与思维导图只在真的遇到时加载。
 const WorkflowViewer = lazy(() => import('../components/WorkflowViewer/WorkflowViewer').then(m => ({ default: m.WorkflowViewer })));
@@ -325,6 +326,96 @@ export interface EnhanceRenderedMarkdownOptions {
   keepUnresolvedImages?: boolean;
 }
 
+/**
+ * 脚注悬停预览：引用旁弹出定义内容，不需要跳到文末。
+ *
+ * 浮层挂在 body 上，既不会被 contenteditable 回写，也不会被预览容器的
+ * overflow 裁剪；鼠标移入浮层时暂停隐藏，滚动或缩放时立即收起。
+ */
+function enhanceFootnotes(root: HTMLElement): () => void {
+  const references = Array.from(root.querySelectorAll<HTMLElement>('.footnote-ref[data-footnote-name]'));
+  if (references.length === 0) return () => undefined;
+
+  let popover: HTMLElement | null = null;
+  let hideTimer = 0;
+  const removePopover = () => {
+    if (!popover) return;
+    popover.remove();
+    popover = null;
+  };
+  const hide = () => {
+    window.clearTimeout(hideTimer);
+    hideTimer = window.setTimeout(removePopover, 120);
+  };
+  const cancelHide = () => window.clearTimeout(hideTimer);
+
+  const position = (reference: HTMLElement) => {
+    if (!popover) return;
+    const rect = reference.getBoundingClientRect();
+    const width = Math.min(380, window.innerWidth - 16);
+    popover.style.width = `${width}px`;
+    popover.style.left = `${Math.max(8, Math.min(rect.left, window.innerWidth - width - 8))}px`;
+    // 先按下方定位并测量真实高度，放不下再翻到上方。
+    popover.style.top = `${rect.bottom + 8}px`;
+    const height = popover.offsetHeight;
+    const staysBelow = rect.bottom + height + 16 <= window.innerHeight || rect.top < height + 16;
+    const top = staysBelow
+      ? Math.max(8, Math.min(rect.bottom + 8, window.innerHeight - height - 8))
+      : rect.top - height - 8;
+    popover.style.top = `${Math.max(8, top)}px`;
+  };
+
+  const show = (reference: HTMLElement) => {
+    cancelHide();
+    removePopover();
+    const name = reference.dataset.footnoteName ?? '';
+    const content = reference.dataset.footnoteContent;
+    const title = `<div class="footnote-popover-title">脚注 ${markdownRenderer.utils.escapeHtml(name)}</div>`;
+    const body = content === undefined
+      ? '<div class="footnote-popover-empty">未找到脚注定义</div>'
+      : `<div class="footnote-popover-body markdown-body">${renderMarkdownToHtml(content)}</div>`;
+    popover = document.createElement('div');
+    popover.className = 'footnote-popover';
+    popover.setAttribute('role', 'tooltip');
+    popover.innerHTML = title + body;
+    popover.addEventListener('pointerenter', cancelHide);
+    popover.addEventListener('pointerleave', hide);
+    document.body.append(popover);
+    position(reference);
+  };
+
+  const cleanups: Array<() => void> = [];
+  for (const reference of references) {
+    const enter = () => show(reference);
+    const leave = () => hide();
+    reference.addEventListener('pointerenter', enter);
+    reference.addEventListener('pointerleave', leave);
+    reference.addEventListener('focus', enter);
+    reference.addEventListener('blur', leave);
+    cleanups.push(() => {
+      reference.removeEventListener('pointerenter', enter);
+      reference.removeEventListener('pointerleave', leave);
+      reference.removeEventListener('focus', enter);
+      reference.removeEventListener('blur', leave);
+    });
+  }
+
+  const closeOnViewportChange = () => {
+    cancelHide();
+    removePopover();
+  };
+  window.addEventListener('scroll', closeOnViewportChange, true);
+  window.addEventListener('resize', closeOnViewportChange);
+
+  return () => {
+    window.clearTimeout(hideTimer);
+    removePopover();
+    cleanups.forEach(cleanup => cleanup());
+    window.removeEventListener('scroll', closeOnViewportChange, true);
+    window.removeEventListener('resize', closeOnViewportChange);
+  };
+}
+
 let mermaidSequence = 0;
 
 /** 对已写入 root 的渲染结果做增强，返回清理函数（断开观察者、卸载 React 根）。 */
@@ -339,6 +430,23 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
 
   addHeadingAnchors(root);
   addListItemContentAnchors(root);
+
+  // Wiki 链接存在性：解析失败的链接画成虚线，点击时再给出提示。
+  // 结果有 30 秒缓存，输入期间同一批目标不会反复扫盘。
+  const wikiLinks = Array.from(root.querySelectorAll<HTMLElement>('.wiki-link[data-wiki-target]'));
+  if (wikiLinks.length > 0) {
+    void resolveWikiLinkTargets(options.documentPath, wikiLinks.map(link => link.dataset.wikiTarget ?? ''))
+      .then((resolved) => {
+        if (disposed) return;
+        wikiLinks.forEach((link) => {
+          const path = resolved.get(link.dataset.wikiTarget ?? '');
+          // 非 Tauri 环境返回空表：不做判断，避免把全部链接误标为未解析。
+          if (path === undefined) return;
+          link.classList.toggle('is-unresolved', path === null);
+          if (path) link.dataset.wikiPath = path;
+        });
+      });
+  }
 
   // 本地媒体需要先解析成 asset 地址才能播放，解析完成后再替换占位元素。
   const placeholders = Array.from(root.querySelectorAll<HTMLElement>('[data-zeditor-media-key]'));
@@ -604,10 +712,12 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
   }
 
   const cleanupTables = enhanceTables(root, options.documentPath);
+  const cleanupFootnotes = enhanceFootnotes(root);
 
   return () => {
     disposed = true;
     cleanupTables();
+    cleanupFootnotes();
     mermaidObserver?.disconnect();
     workflowObserver?.disconnect();
     markmapObserver?.disconnect();

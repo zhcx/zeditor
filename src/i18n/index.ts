@@ -122,6 +122,7 @@ const entries: Record<string, Translation> = {
   '导出为 HTML': { 'zh-CN': '导出为 HTML', 'zh-TW': '匯出為 HTML', en: 'Export as HTML' },
   '导出为 Word': { 'zh-CN': '导出为 Word', 'zh-TW': '匯出為 Word', en: 'Export as Word' },
   '查找正文内容': { 'zh-CN': '查找正文内容', 'zh-TW': '尋找內文', en: 'Find in document' },
+  '查找…': { 'zh-CN': '查找…', 'zh-TW': '尋找…', en: 'Find…' },
   '替换': { 'zh-CN': '替换', 'zh-TW': '取代', en: 'Replace' },
   '全部替换': { 'zh-CN': '全部替换', 'zh-TW': '全部取代', en: 'Replace all' },
   '上一个匹配': { 'zh-CN': '上一个匹配', 'zh-TW': '上一個符合', en: 'Previous match' },

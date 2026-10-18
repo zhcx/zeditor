@@ -47,11 +47,13 @@ function StatusGlyph({ name }: { name: 'ai' | 'proofread' | 'success' | 'error' 
 export function StatusBar() {
   const activeEncoding = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.encoding || 'utf-8');
   const modified = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.modified ?? false);
+  // 不订阅 content：状态栏只需要字数（单独字段）和「整篇」动作。订阅 content 会让
+  // 每次按键都整条状态栏重渲染，而这里读到的正文只在点击摘要/大纲时才用到。
   const {
     wordCount, mode, currentFile, isSaving, uploadStatus, uploadProgress, uploadMessage,
-    conversionStatus, conversionMessage, settings, saveSettings, content, editorView,
+    conversionStatus, conversionMessage, settings, saveSettings, editorView,
     setSettingsOpen, setSettingsTab, setMode,
-  } = useAppStore(useShallow(state => ({ wordCount: state.wordCount, mode: state.mode, currentFile: state.currentFile, isSaving: state.isSaving, uploadStatus: state.uploadStatus, uploadProgress: state.uploadProgress, uploadMessage: state.uploadMessage, conversionStatus: state.conversionStatus, conversionMessage: state.conversionMessage, settings: state.settings, saveSettings: state.saveSettings, content: state.content, editorView: state.editorView, setSettingsOpen: state.setSettingsOpen, setSettingsTab: state.setSettingsTab, setMode: state.setMode })));
+  } = useAppStore(useShallow(state => ({ wordCount: state.wordCount, mode: state.mode, currentFile: state.currentFile, isSaving: state.isSaving, uploadStatus: state.uploadStatus, uploadProgress: state.uploadProgress, uploadMessage: state.uploadMessage, conversionStatus: state.conversionStatus, conversionMessage: state.conversionMessage, settings: state.settings, saveSettings: state.saveSettings, editorView: state.editorView, setSettingsOpen: state.setSettingsOpen, setSettingsTab: state.setSettingsTab, setMode: state.setMode })));
   const {
     status: aiStatus,
     statusMessage: aiStatusMessage,
@@ -82,7 +84,7 @@ export function StatusBar() {
   const saveState = isSaving
     ? { key: 'saving', label: '保存中...', hint: '正在把当前内容写入磁盘' }
     : modified
-      ? { key: 'modified', label: '未保存修改', hint: '内容已改动但还没写入磁盘：自动保存会在设定的间隔后触发，也可以按 Ctrl+S 立即保存' }
+      ? { key: 'modified', label: '未保存修改', hint: formatShortcut('内容已改动但还没写入磁盘：自动保存会在设定的间隔后触发，也可以按 Ctrl+S 立即保存') }
       : currentFile
         ? { key: 'saved', label: '已保存', hint: `当前标签没有未保存的修改，最后写入：${currentFile.split(/[\\/]/).pop()}` }
         : { key: 'ready', label: '已就绪', hint: '当前标签没有未保存的修改，也还没有绑定磁盘文件（另存为后才会写入磁盘）' };
@@ -178,7 +180,7 @@ export function StatusBar() {
     setCompanionMenuOpen(false);
     // 校对模式（AI / Markdown 静态检查）由 aiStore.checkProofread 依据设置决定，
     // 这里不再自动启用 AI。
-    await checkProofread(selectedText || content, selectedText && currentSelection ? currentSelection.from : 0);
+    await checkProofread(selectedText || useAppStore.getState().content, selectedText && currentSelection ? currentSelection.from : 0);
   };
 
   const handleRewrite = async () => {
@@ -216,16 +218,17 @@ export function StatusBar() {
 
   const handleSummarize = async () => {
     setAiMenuOpen(false);
-    const summary = await summarizeText(content);
+    const summary = await summarizeText(useAppStore.getState().content);
     if (summary) proposeEdit({ kind: 'structure', reason: 'AI 摘要：自动提炼原文，关键结论与数字请人工复核。', before: '', after: `## 摘要\n\n${summary}\n\n---\n\n`, from: 0, to: 0 });
   };
 
   const handleOutline = async () => {
     const currentSelection = editorView?.getSelection();
-    const position = currentSelection?.from ?? content.length;
+    const latestContent = useAppStore.getState().content;
+    const position = currentSelection?.from ?? latestContent.length;
     setAiMenuOpen(false);
-    const outline = await generateOutline(content);
-    if (outline) proposeEdit({ kind: 'structure', reason: 'AI 大纲：根据现有文档组织结构，内容准确性仍需人工确认。', before: currentSelection ? content.slice(currentSelection.from, currentSelection.to) : '', after: outline, from: position, to: currentSelection?.to ?? position });
+    const outline = await generateOutline(latestContent);
+    if (outline) proposeEdit({ kind: 'structure', reason: 'AI 大纲：根据现有文档组织结构，内容准确性仍需人工确认。', before: currentSelection ? latestContent.slice(currentSelection.from, currentSelection.to) : '', after: outline, from: position, to: currentSelection?.to ?? position });
   };
 
   const openAISettings = () => {
@@ -266,7 +269,7 @@ export function StatusBar() {
             type="button"
             className="status-item status-button status-view-state"
             data-view-state={mode}
-            title={`视图状态：${viewState.label} · 点击切换到${VIEW_STATES[toggleViewMode].label}（Ctrl+Alt+M）`}
+            title={formatShortcut(`视图状态：${viewState.label} · 点击切换到${VIEW_STATES[toggleViewMode].label}（Ctrl+Alt+M）`)}
             onClick={() => setMode(toggleViewMode)}
           >
             <AppIcon name={viewState.icon} size={14} />

@@ -50,3 +50,32 @@ it('keeps the source tex on rendered formulas', () => {
   const blockHtml = renderMarkdownSource('$$\nE = mc^2\n$$\n');
   assert.match(blockHtml, /class="katex-block"[^>]*data-tex=/);
 });
+
+it('renders Obsidian wiki links as clickable elements outside code', () => {
+  const html = renderMarkdownSource('看 [[笔记#标题|别名]] 与 [[另一篇]]');
+  assert.match(html, /<span class="wiki-link" role="link" tabindex="0" data-wiki-target="笔记" data-wiki-anchor="标题">别名<\/span>/);
+  assert.match(html, /data-wiki-target="另一篇">另一篇<\/span>/);
+
+  // 行内代码与围栏代码里的方括号是字面文本。
+  const code = renderMarkdownSource('`[[笔记]]`\n\n```\n[[笔记]]\n```\n');
+  assert.doesNotMatch(code, /wiki-link/);
+});
+
+it('escapes wiki link attributes before rendering', () => {
+  const html = renderMarkdownSource('[[a"b|标题]]');
+  assert.match(html, /data-wiki-target="a&quot;b"/);
+  assert.doesNotMatch(html, /data-wiki-target="a"b"/);
+});
+
+it('renders footnote references with their definition content', () => {
+  const html = renderMarkdownSource('正文[^1]。\n\n[^1]: 脚注内容 **重点**\n');
+  assert.match(html, /<sup class="footnote-ref" role="doc-noteref" tabindex="0" data-footnote-name="1" data-footnote-content="脚注内容 \*\*重点\*\*">\[1\]<\/sup>/);
+  // 定义行保持原文，不转成第二个引用。
+  assert.match(html, /\[\^1\]: 脚注内容/);
+});
+
+it('marks unresolved footnotes and leaves inline code alone', () => {
+  const html = renderMarkdownSource('正文[^缺失]\n\n`[^缺失]`\n');
+  assert.match(html, /class="footnote-ref is-unresolved"/);
+  assert.equal((html.match(/footnote-ref/g) ?? []).length, 1);
+});

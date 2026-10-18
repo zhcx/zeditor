@@ -43,6 +43,8 @@ import { navigateTableCell, parseTableAt } from '../../utils/markdownTable.ts';
 import { caretAtVisualEdge, caretOnVisualLine } from './caretGeometry.ts';
 import { escapeInlineText, serializeInlineNodes } from '../../utils/wysiwyg/inlineSerialize.ts';
 import { INLINE_MARKER_TAGS, matchInlineMarker } from '../../utils/wysiwyg/inlineMarkers.ts';
+import { matchWikiLinkAt, wikiLinkDisplayText } from '../../utils/wikiLinks.ts';
+import { matchFootnoteAt } from '../../utils/footnotes.ts';
 
 export interface WysiwygSessionSnapshot {
   document: WysiwygDocument;
@@ -201,34 +203,83 @@ export class WysiwygSession {
     // 已经处于代码里就不再解释标记：行内代码要显示字面文本。
     const parentElement = textNode.parentElement;
     if (parentElement && parentElement.closest('code, pre')) return;
-    const text = textNode.textContent ?? '';
-    const match = matchInlineMarker(text, range.startOffset);
+    // 绝大多数按键并不会闭合标记：先看光标前一个字符，不是标记字符就直接返回，
+    // 省掉整段文本的复制与匹配（长段落里这一步会随段落长度线性增长）。
+    const text = (textNode as CharacterData).data ?? textNode.textContent ?? '';
+    const caretOffset = range.startOffset;
+    const document_ = textNode.ownerDocument;
+
+    // 输入即渲染：`[[笔记]]` 刚闭合就换成链接元素。否则回写会把方括号转义成
+    // `\[\[笔记\]\]`，重新渲染后永远变不成链接。
+    const wikiLink = matchWikiLinkAt(text, caretOffset);
+    if (wikiLink && !parentElement?.closest('.wiki-link')) {
+      const span = document_.createElement('span');
+      span.className = 'wiki-link';
+      span.setAttribute('role', 'link');
+      span.setAttribute('tabindex', '0');
+      span.dataset.wikiTarget = wikiLink.parts.target;
+      if (wikiLink.parts.anchor) span.dataset.wikiAnchor = wikiLink.parts.anchor;
+      span.textContent = wikiLinkDisplayText(wikiLink.parts);
+      this.replaceTextRange(textNode as CharacterData, text, wikiLink.from, wikiLink.to, span, selection);
+      return;
+    }
+
+    // 脚注引用 `[^1]` 闭合时同样换成元素：回写时再还原成源码。
+    // 行首的 `[^1]:` 是定义，matchFootnoteAt 会主动跳过。
+    const footnote = matchFootnoteAt(text, caretOffset);
+    if (footnote && !parentElement?.closest('.footnote-ref')) {
+      const sup = document_.createElement('sup');
+      sup.className = 'footnote-ref';
+      sup.setAttribute('role', 'doc-noteref');
+      sup.setAttribute('tabindex', '0');
+      sup.dataset.footnoteName = footnote.name;
+      sup.textContent = `[${footnote.name}]`;
+      this.replaceTextRange(textNode as CharacterData, text, footnote.from, footnote.to, sup, selection);
+      return;
+    }
+
+    // 绝大多数按键并不会闭合标记：先看光标前一个字符，不是标记字符就直接返回，
+    // 省掉整段文本的复制与匹配（长段落里这一步会随段落长度线性增长）。
+    const markerChar = caretOffset > 0 ? text.charAt(caretOffset - 1) : '';
+    if (!markerChar || !'*_~`'.includes(markerChar)) return;
+    const match = matchInlineMarker(text, caretOffset);
     if (!match) return;
     const tagName = INLINE_MARKER_TAGS[match.kind];
     // 同种标记不能套自己：`**a**` 在已有的粗体里敲下会得到 `<strong><strong>a</strong></strong>`，
     // 回写成源码是 `****a****`，重新解析已经不再是粗体了。
     if (parentElement?.closest(tagName) || (match.kind === 'strong-em' && parentElement?.closest('strong'))) return;
 
-    const document_ = textNode.ownerDocument;
     const wrapper = document_.createElement(tagName);
     if (match.kind === 'strong-em') {
       const strong = document_.createElement('strong');
       strong.textContent = match.content;
       wrapper.appendChild(strong);
     } else wrapper.textContent = match.content;
-    const fragment = document_.createDocumentFragment();
-    if (match.from > 0) fragment.append(document_.createTextNode(text.slice(0, match.from)));
-    fragment.append(wrapper);
-    const tail = text.slice(match.to);
-    if (tail.length > 0) fragment.append(document_.createTextNode(tail));
-    // 用 replaceChild 而不是 replaceWith：参数类型就是 Node，不必依赖 ChildNode 断言。
+    this.replaceTextRange(textNode as CharacterData, text, match.from, match.to, wrapper, selection);
+  }
+
+  /** 用节点替换文本节点的一段，并把光标放到节点之后（输入即渲染共用）。 */
+  private replaceTextRange(
+    textNode: CharacterData,
+    text: string,
+    from: number,
+    to: number,
+    node: Node,
+    selection: Selection,
+  ): void {
+    const fragment = textNode.ownerDocument.createDocumentFragment();
+    if (from > 0) fragment.append(textNode.ownerDocument.createTextNode(text.slice(0, from)));
+    fragment.append(node);
+    const tail = text.slice(to);
+    if (tail.length > 0) fragment.append(textNode.ownerDocument.createTextNode(tail));
     const parent = textNode.parentNode;
     if (!parent) return;
+    // 用 replaceChild 而不是 replaceWith：参数类型就是 Node，不必依赖 ChildNode 断言。
     parent.replaceChild(fragment, textNode);
 
-    // 光标停在标记之后，用户可以继续输入。
-    const caret = document_.createRange();
-    caret.setStartAfter(wrapper);
+    // 光标停在节点之后，用户可以继续输入。
+    const caret = textNode.ownerDocument.createRange();
+    caret.setStartAfter(node);
     caret.collapse(true);
     selection.removeAllRanges();
     selection.addRange(caret);

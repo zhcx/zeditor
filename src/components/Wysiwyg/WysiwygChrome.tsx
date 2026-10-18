@@ -10,6 +10,7 @@ import { lineAtOffset } from '../../utils/wysiwyg/textLines';
 import { extractGenieTarget, slashAiGenie } from '../../utils/aiGenies';
 import { useAppStore } from '../../stores/appStore';
 import { useAIStore } from '../../stores/aiStore';
+import { isNativeMenuActive } from '../../utils/platform';
 import type { WysiwygSession } from './wysiwygSession';
 
 interface Props { session: WysiwygSession; surface: HTMLElement | null; version: number; pinned: boolean }
@@ -41,11 +42,22 @@ export function WysiwygChrome({ session, surface, version, pinned }: Props) {
       setSelectionBar(null); setTableBar(null); setSlash(null); return;
     }
     const range = selection.getRangeAt(0);
+    const element = range.startContainer.nodeType === 1 ? range.startContainer as Element : range.startContainer.parentElement;
+    const inTable = Boolean(element?.closest('td,th'));
+    const blockHost = element?.closest<HTMLElement>('[data-block-index]');
+    // 折叠光标、不在表格、块内也没有 `/`：没有任何浮动 UI 需要更新。
+    // 先判断再量布局：普通打字时既不读 rect，也不把整块 DOM 序列化成 Markdown
+    //（`getSelectionOffsets` 与 `getVisibleSource` 各是一遍完整序列化，是输入延迟的主要来源）。
+    if (range.collapsed && !inTable && !(blockHost?.textContent?.includes('/') ?? false)) {
+      setSelectionBar(null);
+      setTableBar(null);
+      setSlash(null);
+      return;
+    }
     const rect = range.getBoundingClientRect();
     const bounds = surface.getBoundingClientRect();
     const width = Math.min(720, bounds.width - 24, window.innerWidth - 24);
-    const element = range.startContainer.nodeType === 1 ? range.startContainer as Element : range.startContainer.parentElement;
-    if (!range.collapsed && !element?.closest('td,th') && !draggingSelection.current && rect.height > 0) {
+    if (!range.collapsed && !inTable && !draggingSelection.current && rect.height > 0) {
       const above = rect.top - bounds.top > 54;
       setSelectionBar({ left: Math.max(bounds.left + 8, Math.min(rect.left, bounds.right - width - 8)), top: above ? rect.top - 8 : rect.bottom + 8, width, placement: above ? 'above' : 'below' });
       setSlash(null); setTableBar(null); return;
@@ -53,7 +65,7 @@ export function WysiwygChrome({ session, surface, version, pinned }: Props) {
     setSelectionBar(null);
     const current = session.getSelectionOffsets();
     const source = session.getVisibleSource();
-    const table = element?.closest('td,th') ? parseTableAt(source, current.from) : null;
+    const table = inTable ? parseTableAt(source, current.from) : null;
     if (table) {
       // 锚点用整张表格而不是单元格：工具栏要贴在表格外侧，按单元格定位会把表头盖住。
       const tableRect = (element!.closest('table') ?? element!.closest('td,th')!).getBoundingClientRect();
@@ -150,7 +162,8 @@ export function WysiwygChrome({ session, surface, version, pinned }: Props) {
         return;
       }
       if ((event.target as Element)?.matches('textarea,input')) return;
-      if ((event.ctrlKey || event.metaKey) && event.shiftKey && /^(t|i)$/i.test(event.key)) {
+      // macOS 原生菜单已注册同一组加速键，交给菜单派发，避免插入两次。
+      if ((event.ctrlKey || event.metaKey) && event.shiftKey && /^(t|i)$/i.test(event.key) && !isNativeMenuActive()) {
         event.preventDefault(); event.stopPropagation();
         if (event.key.toLowerCase() === 't') insertTableRequest();
         else insertImageRequest();

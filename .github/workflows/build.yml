@@ -161,6 +161,18 @@ jobs:
         uses: tauri-apps/tauri-action@v0
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          # macOS 签名与公证：Tauri 只在对应 secrets 存在时启用，未配置时保持
+          # 现有的未签名流程（用户仍可右键 → 打开）。配置后 DMG 会被签名、
+          # 提交 Apple 公证并装订票据，首次启动不再出现「无法验证开发者」。
+          # 需要的 secrets：APPLE_CERTIFICATE（.p12 的 base64）、
+          # APPLE_CERTIFICATE_PASSWORD、APPLE_SIGNING_IDENTITY、
+          # APPLE_ID、APPLE_PASSWORD（App 专用密码）、APPLE_TEAM_ID。
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          APPLE_SIGNING_IDENTITY: ${{ secrets.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
         with:
           tagName: ${{ env.RELEASE_TAG }}
           releaseName: Zeditor ${{ env.RELEASE_TAG }}

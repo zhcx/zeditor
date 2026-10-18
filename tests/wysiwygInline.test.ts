@@ -88,3 +88,25 @@ it('escapes pipes inside table cells, including code spans and link text', () =>
   assert.equal(serializeInlineNodes([code('a|b')]), '`a|b`');
   assert.equal(serializeInlineNodes([textNode('前|后')]), '前|后');
 });
+
+it('round-trips wiki links through the rendered span', () => {
+  const wiki = (target: string, anchor: string | null, text: string) => elementNode('span', {
+    class: 'wiki-link',
+    'data-wiki-target': target,
+    ...(anchor ? { 'data-wiki-anchor': anchor } : {}),
+  }, [textNode(text)]);
+
+  assert.equal(serializeInlineNodes([wiki('笔记', null, '笔记')]), '[[笔记]]');
+  assert.equal(serializeInlineNodes([wiki('笔记', '标题', '笔记 > 标题')]), '[[笔记#标题]]');
+  // 就地修改显示文字后作为别名写回。
+  assert.equal(serializeInlineNodes([wiki('笔记', null, '别称')]), '[[笔记|别称]]');
+});
+
+it('round-trips footnote references through the rendered sup', () => {
+  const footnote = (name: string) => elementNode('sup', {
+    class: 'footnote-ref',
+    'data-footnote-name': name,
+  }, [textNode(`[${name}]`)]);
+
+  assert.equal(serializeInlineNodes([textNode('正文'), footnote('1')]), '正文[^1]');
+});

@@ -14,7 +14,7 @@ import { applyExportTemplate, loadExportTemplate } from '../Export/exportTemplat
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { resolveSaveBaseName } from '../../utils/saveName';
 import { formatShortcut } from '../../utils/platformShortcuts';
-import { isMacOS } from '../../utils/platform';
+import { isMacOS, isNativeMenuActive } from '../../utils/platform';
 import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
 import { collectMenuActions, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
@@ -318,6 +318,10 @@ https://github.com/zhcx/zeditor
     const lower = fileName.toLowerCase();
     if (lower.endsWith('.exe')) return 'Windows 安装程序（推荐）';
     if (lower.endsWith('.msi')) return 'Windows MSI 安装包';
+    if (lower.endsWith('.dmg')) return 'macOS 磁盘映像（DMG）';
+    if (lower.endsWith('.app.tar.gz')) return 'macOS 应用归档';
+    if (lower.endsWith('.appimage')) return 'Linux AppImage';
+    if (lower.endsWith('.deb')) return 'Debian 软件包';
     return '安装包';
   };
 
@@ -328,6 +332,9 @@ https://github.com/zhcx/zeditor
     }
     if (lower.endsWith('.msi')) {
       return '适合需要使用 Windows Installer 或企业分发场景的安装包。';
+    }
+    if (lower.endsWith('.dmg')) {
+      return '打开磁盘映像后把 Zeditor 拖入「应用程序」完成更新；首次启动若提示无法验证开发者，请右键选择「打开」。';
     }
     return '可从 GitHub Release 页面手动下载并安装。';
   };
@@ -378,7 +385,7 @@ https://github.com/zhcx/zeditor
                         </>
                       ) : (
                         <p className="update-installer-summary">
-                          本次 Release 暂未提供可自动安装的 Windows 安装包，可前往 GitHub Release 页面手动查看下载项。
+                          本次 Release 暂未找到适配当前平台的安装包，可前往 GitHub Release 页面手动查看下载项。
                         </p>
                       )}
                     </div>
@@ -641,10 +648,12 @@ export function MenuBar() {
     setActiveMenu(null);
   };
 
-  // 文件与视图快捷键：菜单与「帮助 → 快捷键说明」标注的 Ctrl/Cmd+N/O/S、
-  // Ctrl/Cmd+Shift+S、F11。应用使用 WebView 内自绘菜单栏，Tauri 原生菜单
-  // 未注册加速键，因此这里统一补上 window 级监听。ref 持有最新处理器，
-  // 避免监听器随每次渲染重复注册。
+  // 文件与视图快捷键：Ctrl/Cmd+N/O/S、Ctrl/Cmd+Shift+S、F11。
+  //
+  // macOS 原生应用菜单会为同一批菜单项注册加速键（utils/nativeMenu.ts）：两边
+  // 同时处理会让一次按键保存两次、弹出两个「另存为」对话框。因此原生菜单生效时
+  // 这里让位；菜单构建失败（未写入 data-native-menu）或非 macOS 时仍由窗口监听兜底。
+  // ref 持有最新处理器，避免监听器随每次渲染重复注册。
   const fileShortcutRef = useRef({
     newFile: handleNewFile,
     openFile: handleOpenFile,
@@ -667,6 +676,8 @@ export function MenuBar() {
         void toggleAppFullscreen();
         return;
       }
+      // 原生菜单已接管这些加速键，再执行会重复保存/重复弹窗。
+      if (isNativeMenuActive()) return;
       const primary = event.ctrlKey || event.metaKey;
       if (!primary || event.altKey) return;
       const key = event.key.toLowerCase();
@@ -997,6 +1008,7 @@ export function MenuBar() {
       copy: t('复制', language),
       paste: t('粘贴', language),
       selectAll: t('全选', language),
+      find: t('查找…', language),
       minimize: t('最小化', language),
       zoom: t('缩放', language),
       bringAllToFront: t('前置全部窗口', language),
@@ -1018,7 +1030,15 @@ export function MenuBar() {
       featureItems,
       helpItems,
       labels,
-      dispatch: (id) => actions.get(id)?.(),
+      dispatch: (id) => {
+        // 「编辑 → 查找」没有对应的窗口内菜单项：直接派发查找事件，复用
+        // 源码对照与所见即所得里同一套查找栏实现。
+        if (id === 'edit.find') {
+          window.dispatchEvent(new CustomEvent('zeditor-editor-find', { detail: { replace: false } }));
+          return;
+        }
+        actions.get(id)?.();
+      },
       // 勾选态通过重建同步，无需单独登记。
       registerCheckItem: () => undefined,
     })

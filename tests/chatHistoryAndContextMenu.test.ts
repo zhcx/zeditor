@@ -63,7 +63,9 @@ test('editor context menu exposes grouped editing, export, image, and file actio
   assert.match(contextMenu, /await translateText\(selectedText\)/);
   assert.match(contextMenu, /setTranslationVisible\(true, coords \? \{ x: coords\.left, y: coords\.bottom \} : undefined, original, translated\)/);
   assert.match(contextMenu, /onClick=\{\(\) => void translateContextSelection\(\)\}[\s\S]*AI 翻译/);
-  assert.match(editor, /const menuHeight = 660/);
+  // 纵向位置由菜单按实测高度夹紧；宿主不再用固定 660px 估算（小屏会把菜单顶到窗口上方）。
+  assert.match(contextMenu, /window\.innerHeight - element\.offsetHeight - 8/);
+  assert.doesNotMatch(editor, /const menuHeight = 660/);
   assert.match(styles, /\.editor-context-menu \{[\s\S]*max-height: calc\(100vh - 16px\);[\s\S]*overflow-y: auto/);
   assert.match(contextMenu, /sanitizeRenderedHtml\(contextMenuMarkdown\.render\(selectedText\)\)/);
   assert.match(editor, /submenuDirection: x \+ menuWidth \+ submenuWidth \+ 4 <= window\.innerWidth \? 'right' : 'left'/);

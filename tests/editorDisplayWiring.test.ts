@@ -86,6 +86,31 @@ test('显示设置：状态栏视图状态按钮与设置项开关', async () =>
   assert.match(store, /readable_line_length: true/);
 });
 
+test('macOS 适配：⌘+滚轮调行宽、⌘+点击开链接、原生菜单加速键让位', async () => {
+  const platform = await read('../src/utils/platform.ts');
+  const wheel = await read('../src/components/Editor/LineWidthWheel.tsx');
+  const editor = await read('../src/components/Editor/Editor.tsx');
+  const menu = await read('../src/components/MenuBar/MenuBar.tsx');
+  const wysiwyg = await read('../src/components/Wysiwyg/WysiwygEditor.tsx');
+  const macosCss = await read('../src/styles/macos.css');
+
+  // 主修饰键与原生菜单标记：macOS 用 ⌘，Ctrl 留给系统右键。
+  assert.match(platform, /export function isPrimaryModifier/);
+  assert.match(platform, /export function isNativeMenuActive/);
+  // ⌘+滚轮；触控板捏合在 WKWebView 里也带 ctrlKey，必须排除。
+  assert.match(wheel, /event\.metaKey && !event\.ctrlKey/);
+  assert.match(wheel, /event\.key === \(macos \? 'Meta' : 'Control'\)/);
+  assert.match(editor, /isPrimaryModifier\(event\.event\)/);
+  assert.match(wysiwyg, /target\.kind === 'link' && isPrimaryModifier\(event\)/);
+  // 原生菜单已注册 ⌘N/⌘O/⌘S/⇧⌘S：窗口级监听让位，避免保存两次。
+  assert.match(menu, /if \(isNativeMenuActive\(\)\) return;/);
+  // 折叠快捷键：⌘⌥[ / ⌘⌥] 在两种编辑模式下都可用。
+  assert.match(editor, /monaco\.KeyCode\.BracketLeft, 'editor\.fold'/);
+  assert.match(wysiwyg, /event\.key === '\[' \|\| event\.key === '\]'/);
+  // 系统「降低透明度」开启时去掉毛玻璃。
+  assert.match(macosCss, /@media \(prefers-reduced-transparency: reduce\)/);
+});
+
 test('显示设置：Rust 侧带 serde 默认值，旧配置文件不掉字段', async () => {
   const commands = await read('../src-tauri/src/commands.rs');
 

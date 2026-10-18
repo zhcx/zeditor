@@ -57,6 +57,7 @@ export interface SystemMenuLabels {
   copy: string;
   paste: string;
   selectAll: string;
+  find: string;
   minimize: string;
   zoom: string;
   bringAllToFront: string;
@@ -156,6 +157,16 @@ export function planMacAppMenu(options: PlanMacMenuOptions): NativePlanNode[] {
     predefined('edit.paste', 'Paste', labels.paste),
     predefined('edit.selectAll.separator', 'Separator'),
     predefined('edit.selectAll', 'SelectAll', labels.selectAll),
+    // 查找是编辑器在 macOS 上最常从「编辑」菜单进入的命令；派发到窗口内的
+    // 同一条 `zeditor-editor-find` 事件，与 ⌘F / ⌘H 走同一实现。
+    predefined('edit.find.separator', 'Separator'),
+    {
+      id: 'edit.find',
+      kind: 'item',
+      text: labels.find,
+      accelerator: 'CmdOrCtrl+F',
+      dispatchId: 'edit.find',
+    },
   ];
 
   const windowMenu: NativePlanNode[] = [

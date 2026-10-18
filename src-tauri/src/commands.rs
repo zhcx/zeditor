@@ -2478,8 +2478,13 @@ fn select_release_asset<'a>(
             ("windows", "x86_64") => {
                 name.ends_with("_x64-setup.exe") || name.ends_with("_x64_en-us.msi")
             }
-            ("macos", "aarch64") => name.ends_with("_aarch64.dmg"),
-            ("macos", "x86_64") => name.ends_with("_x64.dmg"),
+            // 通用包（universal-apple-darwin）同时适用于两种芯片。
+            ("macos", "aarch64") => {
+                name.ends_with("_aarch64.dmg") || name.ends_with("_universal.dmg")
+            }
+            ("macos", "x86_64") => {
+                name.ends_with("_x64.dmg") || name.ends_with("_universal.dmg")
+            }
             ("linux", "x86_64") => {
                 name.ends_with("_amd64.appimage")
                     || name.ends_with("_amd64.deb")
@@ -2566,6 +2571,335 @@ fn compare_versions(latest: &str, current: &str) -> Result<bool, String> {
     let current =
         semver::Version::parse(current).map_err(|e| format!("无效版本号 {current}：{e}"))?;
     Ok(latest > current)
+}
+
+// ── Wiki 链接（Obsidian 双向链接） ───────────────────────────────
+
+/// 扫描 wiki 链接时跳过的目录：与资源管理器 / 工作区搜索保持一致的忽略集合。
+fn wiki_ignored_dir(name: &str) -> bool {
+    matches!(
+        name,
+        ".git"
+            | "node_modules"
+            | "target"
+            | "dist"
+            | ".obsidian"
+            | ".trash"
+            | ".idea"
+            | ".vscode"
+    )
+}
+
+fn ensure_markdown_extension(target: &str) -> String {
+    let lower = target.to_ascii_lowercase();
+    if lower.ends_with(".md") || lower.ends_with(".markdown") {
+        target.to_string()
+    } else {
+        format!("{target}.md")
+    }
+}
+
+fn collect_markdown_files(root: &Path, out: &mut Vec<PathBuf>, budget: &mut usize, depth: usize) {
+    if depth > 8 || *budget == 0 {
+        return;
+    }
+    let Ok(entries) = std::fs::read_dir(root) else {
+        return;
+    };
+    for entry in entries.flatten() {
+        if *budget == 0 {
+            return;
+        }
+        let Ok(file_type) = entry.file_type() else {
+            continue;
+        };
+        let path = entry.path();
+        if file_type.is_dir() {
+            let name = entry.file_name().to_string_lossy().to_string();
+            if wiki_ignored_dir(&name) {
+                continue;
+            }
+            collect_markdown_files(&path, out, budget, depth + 1);
+        } else if file_type.is_file() {
+            let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+            if name.ends_with(".md") || name.ends_with(".markdown") {
+                *budget = budget.saturating_sub(1);
+                out.push(path);
+            }
+        }
+    }
+}
+
+/// 在文档目录与工作区根里按文件名查找笔记；文档目录优先。
+fn find_markdown_file_by_name(
+    roots: &[String],
+    document_dir: Option<&Path>,
+    wanted_name: &str,
+) -> Option<PathBuf> {
+    let wanted = wanted_name.to_ascii_lowercase();
+    let mut files = Vec::new();
+
+    if let Some(dir) = document_dir {
+        let mut local_budget = 400usize;
+        collect_markdown_files(dir, &mut files, &mut local_budget, 0);
+    }
+    let mut budget = 3000usize;
+    for root in roots {
+        let path = Path::new(root);
+        if path.is_dir() {
+            collect_markdown_files(path, &mut files, &mut budget, 0);
+        }
+    }
+
+    files.into_iter().find(|path| {
+        path.file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.to_ascii_lowercase() == wanted)
+            .unwrap_or(false)
+    })
+}
+
+/// 把 `[[笔记]]` 解析成绝对路径：文档目录 → 工作区根 → 按文件名递归查找。
+#[tauri::command]
+pub async fn resolve_wiki_link(
+    document_path: String,
+    target: String,
+    roots: Vec<String>,
+) -> Result<Option<String>, String> {
+    let target = target.trim().replace('\\', "/");
+    if target.is_empty() {
+        return Ok(if document_path.is_empty() {
+            None
+        } else {
+            Some(document_path)
+        });
+    }
+
+    tokio::task::spawn_blocking(move || {
+        let document = PathBuf::from(&document_path);
+        let document_dir = document.parent().map(Path::to_path_buf);
+        let with_extension = ensure_markdown_extension(&target);
+
+        // 带路径的目标：相对文档目录或工作区根解析。
+        if with_extension.contains('/') {
+            if let Some(dir) = &document_dir {
+                let candidate = dir.join(&with_extension);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+            for root in &roots {
+                let candidate = Path::new(root).join(&with_extension);
+                if candidate.is_file() {
+                    return Some(candidate);
+                }
+            }
+        }
+
+        // 同目录同名笔记优先于工作区深处的同名文件。
+        if let Some(dir) = &document_dir {
+            let candidate = dir.join(&with_extension);
+            if candidate.is_file() {
+                return Some(candidate);
+            }
+        }
+
+        let wanted = Path::new(&with_extension)
+            .file_name()
+            .and_then(|name| name.to_str())
+            .unwrap_or_default()
+            .to_string();
+        find_markdown_file_by_name(&roots, document_dir.as_deref(), &wanted)
+    })
+    .await
+    .map(|path| path.map(|value| value.to_string_lossy().to_string()))
+    .map_err(|error| error.to_string())
+}
+
+#[derive(Debug, Clone, Serialize)]
+pub struct WikiBacklink {
+    pub path: String,
+    pub title: String,
+    pub line: u32,
+    pub excerpt: String,
+    pub count: u32,
+}
+
+/// 从一行文本里取出所有 `[[…]]` 的内部内容。
+fn extract_wiki_links(line: &str) -> Vec<String> {
+    let mut links = Vec::new();
+    let mut rest = line;
+    while let Some(start) = rest.find("[[") {
+        let after = &rest[start + 2..];
+        let Some(end) = after.find("]]") else {
+            break;
+        };
+        let body = &after[..end];
+        if !body.is_empty() && !body.contains('\n') {
+            links.push(body.to_string());
+        }
+        rest = &after[end + 2..];
+    }
+    links
+}
+
+/// `[[目标#标题|别名]]` 是否指向某个笔记名（不含扩展名、忽略大小写）。
+fn wiki_target_matches(body: &str, note_name: &str) -> bool {
+    let target = body.split('|').next().unwrap_or(body);
+    let target = target.split('#').next().unwrap_or(target).trim().replace('\\', "/");
+    if target.is_empty() {
+        return false;
+    }
+    let file_name = target.rsplit('/').next().unwrap_or(&target).to_ascii_lowercase();
+    let stem = file_name
+        .strip_suffix(".markdown")
+        .or_else(|| file_name.strip_suffix(".md"))
+        .unwrap_or(&file_name);
+    stem == note_name
+}
+
+/// 反向链接：扫描工作区与文档目录，找出链接到当前笔记的 Markdown 文件。
+#[tauri::command]
+pub async fn find_wiki_backlinks(
+    document_path: String,
+    roots: Vec<String>,
+) -> Result<Vec<WikiBacklink>, String> {
+    tokio::task::spawn_blocking(move || {
+        let document = PathBuf::from(&document_path);
+        let Some(note_name) = document
+            .file_stem()
+            .and_then(|stem| stem.to_str())
+            .map(|stem| stem.to_ascii_lowercase())
+        else {
+            return Vec::new();
+        };
+        let document_dir = document.parent().map(Path::to_path_buf);
+
+        let mut files = Vec::new();
+        let mut budget = 2000usize;
+        for root in &roots {
+            let path = Path::new(root);
+            if path.is_dir() {
+                collect_markdown_files(path, &mut files, &mut budget, 0);
+            }
+        }
+        if let Some(dir) = &document_dir {
+            if !roots.iter().any(|root| Path::new(root) == dir) {
+                let mut local_budget = 500usize;
+                collect_markdown_files(dir, &mut files, &mut local_budget, 0);
+            }
+        }
+        files.sort();
+        files.dedup();
+
+        let document_string = document.to_string_lossy().to_string();
+        let mut backlinks = Vec::new();
+        for file in files {
+            if file.to_string_lossy() == document_string {
+                continue;
+            }
+            let Ok(metadata) = std::fs::metadata(&file) else {
+                continue;
+            };
+            if metadata.len() > 2 * 1024 * 1024 {
+                continue;
+            }
+            let Ok(content) = std::fs::read_to_string(&file) else {
+                continue;
+            };
+
+            let mut first_line = 0u32;
+            let mut excerpt = String::new();
+            let mut count = 0u32;
+            for (index, line) in content.lines().enumerate() {
+                let hits = extract_wiki_links(line)
+                    .iter()
+                    .filter(|body| wiki_target_matches(body, &note_name))
+                    .count();
+                if hits == 0 {
+                    continue;
+                }
+                if count == 0 {
+                    first_line = (index + 1) as u32;
+                    excerpt = line.trim().chars().take(160).collect();
+                }
+                count += hits as u32;
+            }
+            if count == 0 {
+                continue;
+            }
+            backlinks.push(WikiBacklink {
+                path: file.to_string_lossy().to_string(),
+                title: file
+                    .file_name()
+                    .map(|name| name.to_string_lossy().to_string())
+                    .unwrap_or_default(),
+                line: first_line,
+                excerpt,
+                count,
+            });
+        }
+
+        backlinks.sort_by(|left, right| left.path.cmp(&right.path));
+        backlinks
+    })
+    .await
+    .map_err(|error| error.to_string())
+}
+
+#[cfg(test)]
+mod wiki_link_tests {
+    use super::{
+        ensure_markdown_extension, extract_wiki_links, find_wiki_backlinks, resolve_wiki_link,
+        wiki_target_matches,
+    };
+
+    #[test]
+    fn parses_wiki_targets_with_anchors_and_aliases() {
+        assert!(wiki_target_matches("笔记#标题|别名", "笔记"));
+        assert!(wiki_target_matches("folder/笔记.md", "笔记"));
+        assert!(!wiki_target_matches("另一篇", "笔记"));
+        assert_eq!(extract_wiki_links("见 [[A]] 和 [[B#C]]"), vec!["A", "B#C"]);
+    }
+
+    #[test]
+    fn adds_markdown_extension_once() {
+        assert_eq!(ensure_markdown_extension("笔记"), "笔记.md");
+        assert_eq!(ensure_markdown_extension("笔记.md"), "笔记.md");
+        assert_eq!(ensure_markdown_extension("notes/笔记.MARKDOWN"), "notes/笔记.MARKDOWN");
+    }
+
+    #[tokio::test]
+    async fn resolves_relative_and_workspace_notes() {
+        let root = std::env::temp_dir().join(format!("zeditor-wiki-test-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join("notes")).unwrap();
+        std::fs::write(root.join("notes/目标.md"), "# 目标\n").unwrap();
+        std::fs::write(root.join("current.md"), "# 当前\n\n[[目标]]\n").unwrap();
+
+        let resolved = resolve_wiki_link(
+            root.join("current.md").to_string_lossy().into(),
+            "目标".into(),
+            vec![root.to_string_lossy().into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            resolved,
+            Some(root.join("notes/目标.md").to_string_lossy().into())
+        );
+
+        let backlinks = find_wiki_backlinks(
+            root.join("notes/目标.md").to_string_lossy().into(),
+            vec![root.to_string_lossy().into()],
+        )
+        .await
+        .unwrap();
+        assert_eq!(backlinks.len(), 1);
+        assert_eq!(backlinks[0].line, 3);
+        assert!(backlinks[0].excerpt.contains("[[目标]]"));
+
+        std::fs::remove_dir_all(&root).unwrap();
+    }
 }
 
 #[cfg(test)]

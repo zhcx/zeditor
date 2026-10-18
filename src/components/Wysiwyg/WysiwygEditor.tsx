@@ -2,12 +2,15 @@ import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useStat
 import { useShallow } from 'zustand/react/shallow';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { useAppStore } from '../../stores/appStore';
+import { useAIStore } from '../../stores/aiStore';
+import { openWikiLink } from '../../services/wikiLinks';
 import { renderMarkdownSource } from '../../utils/markdownPipeline';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
 import type { WysiwygBlockKind, WysiwygDocument } from '../../utils/wysiwyg/blocks';
 import { findHeadingFoldSections, foldedBlockIndexes, type HeadingFoldSection } from '../../utils/wysiwyg/headingFolds';
 import { resolveEditorDisplay } from '../../utils/editorDisplay';
+import { isPrimaryModifier } from '../../utils/platform';
 import { blockInsertion } from '../../utils/wysiwyg/blockMenu';
 import { createBlockHtmlRenderer } from '../../utils/wysiwyg/blockHtml';
 import { nextBlockRenderBudget } from '../../utils/wysiwyg/renderBudget';
@@ -455,7 +458,16 @@ export function WysiwygEditor() {
   const [snapshot, setSnapshot] = useState<WysiwygSessionSnapshot>(() => session.getSnapshot());
   /** 已折叠的标题分节键（见 utils/wysiwyg/headingFolds）。 */
   const [collapsedHeadings, setCollapsedHeadings] = useState<ReadonlySet<string>>(() => headingFoldsByTab.get(activeTabId ?? '') ?? new Set<string>());
-  const foldStateRef = useRef<{ sections: HeadingFoldSection[]; collapsed: ReadonlySet<string> }>({ sections: [], collapsed: new Set() });
+  const foldStateRef = useRef<{
+    sections: HeadingFoldSection[];
+    collapsed: ReadonlySet<string>;
+    /** 已折叠分节隐藏的块索引：DOM 访问器每次光标移动都会查询，不能用线性扫描。 */
+    hidden: ReadonlySet<number>;
+    /** 只保留当前真正折叠的分节，供「光标进入折叠区时自动展开」使用。 */
+    collapsedSections: HeadingFoldSection[];
+  }>({ sections: [], collapsed: new Set(), hidden: new Set(), collapsedSections: [] });
+  /** 供块内键盘处理调用折叠回调：toggleHeadingFold 定义在处理器之后，经 ref 取。 */
+  const toggleFoldRef = useRef<(key: string) => void>(() => undefined);
   useEffect(() => {
     const openIds = new Set(useAppStore.getState().tabs.map(tab => tab.id));
     for (const id of headingFoldsByTab.keys()) if (!openIds.has(id)) headingFoldsByTab.delete(id);
@@ -489,7 +501,7 @@ export function WysiwygEditor() {
     else blockElementsRef.current.delete(index);
   }, []);
 
-  const display = resolveEditorDisplay(settings.editor);
+  const display = useMemo(() => resolveEditorDisplay(settings.editor), [settings.editor]);
 
   // DOM 访问器与变更监听都在挂载后注入：渲染期读 ref 会触发 react-hooks/refs。
   useLayoutEffect(() => {
@@ -497,17 +509,21 @@ export function WysiwygEditor() {
     session.setAccessors({
       getSurface: () => surfaceRef.current,
       getBlockElement: (index) => blockElementsRef.current.get(index) ?? null,
-      isBlockHidden: index => {
-        const { sections, collapsed } = foldStateRef.current;
-        return sections.some(section => collapsed.has(section.key) && index > section.index && index <= section.lastIndex);
-      },
+      isBlockHidden: index => foldStateRef.current.hidden.has(index),
       revealBlock: index => {
-        const { sections, collapsed } = foldStateRef.current;
-        const containing = sections.filter(section => collapsed.has(section.key) && index > section.index && index <= section.lastIndex);
+        const { sections, collapsed, collapsedSections } = foldStateRef.current;
+        const containing = collapsedSections.filter(section => index > section.index && index <= section.lastIndex);
         if (!containing.length) return false;
         const next = new Set(collapsed);
         containing.forEach(section => next.delete(section.key));
-        foldStateRef.current = { sections, collapsed: next };
+        // 展开只会让隐藏集合变小：重算一次比维护增量更不容易出错，
+        // 而且这里只在光标落进折叠区时才执行。
+        foldStateRef.current = {
+          sections,
+          collapsed: next,
+          hidden: foldedBlockIndexes(sections, next),
+          collapsedSections: sections.filter(section => next.has(section.key)),
+        };
         const tabId = useAppStore.getState().activeTabId;
         if (tabId) headingFoldsByTab.set(tabId, next);
         setCollapsedHeadings(next);
@@ -557,6 +573,21 @@ export function WysiwygEditor() {
   const handleBlockKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>, index: number) => {
     if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
     const modified = event.ctrlKey || event.metaKey;
+    // ⌘⌥[ / ⌘⌥]（Windows 为 Ctrl+Alt+[ / ]）：折叠/展开光标所在的最近标题分节，
+    // 与源码模式给 Monaco 注册的键位一致。
+    if (modified && event.altKey && (event.key === '[' || event.key === ']')) {
+      const { sections, collapsed } = foldStateRef.current;
+      let section: HeadingFoldSection | undefined;
+      for (let position = sections.length - 1; position >= 0; position -= 1) {
+        if (sections[position].index <= index) { section = sections[position]; break; }
+      }
+      if (!section) return;
+      const folded = collapsed.has(section.key);
+      if (event.key === ']' ? !folded : folded) return;
+      event.preventDefault();
+      toggleFoldRef.current(section.key);
+      return;
+    }
     if (modified && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'k') {
       event.preventDefault();
       const editor = useAppStore.getState().editorView;
@@ -660,8 +691,18 @@ export function WysiwygEditor() {
       });
       return true;
     }
-    // contenteditable 里浏览器不会跟随链接：`Ctrl/Cmd+点击` 打开，普通点击进入编辑弹窗。
-    if (target.kind === 'link' && (event.ctrlKey || event.metaKey)) {
+    // Wiki 链接：主修饰键+点击打开目标笔记；普通点击仍进入编辑弹窗修改目标/别名。
+    if (target.kind === 'wikilink' && isPrimaryModifier(event)) {
+      event.preventDefault();
+      void openWikiLink(target.raw, { documentPath: useAppStore.getState().currentFile })
+        .then((opened) => {
+          if (!opened) useAIStore.getState().setStatus('error', `未找到笔记：${target.target?.text || target.raw}`);
+        });
+      return true;
+    }
+    // contenteditable 里浏览器不会跟随链接：主修饰键+点击（macOS ⌘、Windows/Linux Ctrl）
+    // 打开，普通点击进入编辑弹窗。macOS 的 Ctrl+点击 留给系统右键。
+    if (target.kind === 'link' && isPrimaryModifier(event)) {
       const url = target.url?.text ?? '';
       if (url) {
         event.preventDefault();
@@ -717,7 +758,11 @@ export function WysiwygEditor() {
   const handleDuplicateBlock = useCallback((index: number) => { session.duplicateBlock(index); }, [session]);
 
   const blockDocument: WysiwygDocument = snapshot.document;
-  const emptyDocument = blockDocument.source.trim().length === 0;
+  // 每次渲染都对全文 trim 会在长文档上产生一份与正文等大的临时字符串。
+  // 只需要知道「是否只有空段落」，every 遇到第一个非空块就提前退出。
+  const emptyDocument = blockDocument.blocks.every(
+    block => block.kind === 'paragraph' && block.source.trim().length === 0,
+  );
 
   // 折叠标题：分节范围由块模型算出，折叠状态按标题签名保存，因此改动正文不会漂移。
   const headingSections = useMemo(
@@ -736,8 +781,13 @@ export function WysiwygEditor() {
   // 折叠回调必须是稳定引用（否则每次输入都会让所有块视图重新渲染），
   // 而折叠判断又要用到最新的分节与折叠状态，因此经 ref 读取。
   useLayoutEffect(() => {
-    foldStateRef.current = { sections: headingSections, collapsed: collapsedHeadings };
-  }, [collapsedHeadings, headingSections]);
+    foldStateRef.current = {
+      sections: headingSections,
+      collapsed: collapsedHeadings,
+      hidden: hiddenBlocks,
+      collapsedSections: headingSections.filter(section => collapsedHeadings.has(section.key)),
+    };
+  }, [collapsedHeadings, headingSections, hiddenBlocks]);
 
   // 先更新当前分节，再恢复光标；新段落/撤销/外部定位落入折叠区时自动展开后再落选区。
   useLayoutEffect(() => {
@@ -764,6 +814,11 @@ export function WysiwygEditor() {
     session.setSelectionOffsets(heading.offset);
     session.focus();
   }, [session]);
+
+  // 块内键盘处理在渲染期就要拿到折叠回调，但定义顺序在后：经 ref 转发。
+  useLayoutEffect(() => {
+    toggleFoldRef.current = toggleHeadingFold;
+  }, [toggleHeadingFold]);
 
   return (
     <div
@@ -812,9 +867,9 @@ export function WysiwygEditor() {
         const selection = session.getSelectionOffsets();
         const menuWidth = 336;
         const submenuWidth = 178;
-        const menuHeight = 660;
         const x = Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8));
-        const y = Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8));
+        // 纵向由菜单按实测高度夹紧，避免固定估算把小屏上的菜单顶到窗口上方。
+        const y = Math.max(8, event.clientY);
         const index = session.blockIndexAtOffset(selection.to);
         const block = index === null ? null : session.getBlocks()[index];
         event.preventDefault();

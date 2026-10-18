@@ -17,5 +17,11 @@
     <string>zh-Hant</string>
     <string>en</string>
   </array>
+  <!-- 应用类别：让「关于本机 / 活动监视器 / App Store 连接」与系统搜索正确归类。 -->
+  <key>LSApplicationCategoryType</key>
+  <string>public.app-category.productivity</string>
+  <!-- 关于面板与「显示简介」里的版权行；与 LICENSE 保持一致。 -->
+  <key>NSHumanReadableCopyright</key>
+  <string>Copyright © 2026 zhcx. MIT License.</string>
 </dict>
 </plist>

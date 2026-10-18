@@ -149,6 +149,8 @@ function App() {
     range: ScrollRange;
   } | null>(null);
   const programmaticScrollTargetsRef = useRef(new Map<ObservableScrollViewport, number>());
+  /** 预览重渲染后请求重建滚动锚点；由分屏同步 effect 注入，避免重建整套监听。 */
+  const rebuildScrollAnchorsRef = useRef<() => void>(() => undefined);
   const revealPreviewLineRef = useRef<(lineNumber: number) => void>(() => undefined);
   const revealEditorLineRef = useRef<(lineNumber: number) => void>(() => undefined);
   const closeGuardInProgress = useRef(false);
@@ -1060,6 +1062,7 @@ function App() {
         syncEditorToPreview();
       }, 80);
     };
+    rebuildScrollAnchorsRef.current = scheduleAnchorRebuild;
     const geometryObserver = new ResizeObserver(scheduleAnchorRebuild);
     geometryObserver.observe(previewScrollElement);
     const previewDocument = previewScrollElement.querySelector<HTMLElement>('.preview-document');
@@ -1084,10 +1087,19 @@ function App() {
 
       pendingScrollSync.current = null;
       programmaticScrollTargets.clear();
+      if (rebuildScrollAnchorsRef.current === scheduleAnchorRebuild) rebuildScrollAnchorsRef.current = () => undefined;
       if (revealPreviewLineRef.current === revealPreviewLine) revealPreviewLineRef.current = () => undefined;
       if (revealEditorLineRef.current === revealEditorLine) revealEditorLineRef.current = () => undefined;
     };
-  }, [mode, editorView, previewScrollElement, previewRenderVersion]);
+  }, [mode, editorView, previewScrollElement]);
+
+  // 预览重渲染后重建锚点。此前 previewRenderVersion 是上面 effect 的依赖：
+  // 每次渲染都会拆掉并重装两侧滚动监听、3 个 ResizeObserver，还要清空程序化滚动
+  // 抑制表——长文档输入时这些重建比锚点本身昂贵得多。scheduleAnchorRebuild 内部
+  // 已有 80ms 防抖，连续输入只会在停顿后量一次布局。
+  useEffect(() => {
+    rebuildScrollAnchorsRef.current();
+  }, [previewRenderVersion]);
 
   return (
     <div className={`app ${immersivePolicy.active ? 'immersive-mode-active' : ''} ${mode === 'zen' ? 'zen-mode' : ''}`}>

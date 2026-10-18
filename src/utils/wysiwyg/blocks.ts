@@ -7,6 +7,7 @@
  */
 import { markdownRenderer } from '../markdownPipeline.ts';
 import { findMediaEmbeds } from '../media.ts';
+import { countLines } from './textLines.ts';
 
 export type WysiwygBlockKind =
   | 'heading'
@@ -205,7 +206,65 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
 /** 用新的块源码替换该块，其余字符逐字保留；源码未变化时返回原对象。 */
 export function replaceBlockSource(doc: WysiwygDocument, block: WysiwygBlock, source: string): WysiwygDocument {
   if (source === block.source) return doc;
+  const index = doc.blocks.indexOf(block);
+  if (index >= 0 && canUpdateBlockInPlace(block, source)) {
+    return updateBlockInPlace(doc, index, block, source);
+  }
   return splitMarkdownDocument(doc.source.slice(0, block.offset) + source + doc.source.slice(block.offset + block.length));
+}
+
+/**
+ * 这次改写是否仍属于「同一个块」。
+ *
+ * 判据交给渲染器本身：只解析这一块的源码，若它仍然生成唯一一个类型、可编辑性都相同、
+ * 且完整覆盖输入的块，那么全文分块结果不会改变，可以只平移后续块的偏移。
+ *
+ * 输入普通文字或行内标记时（每 250ms 写回一次），全文 markdown-it 解析是长文档
+ * 输入停顿的主要来源；而敲出 `# `、`- `、换行等结构变化时，单块解析会得到不同结果，
+ * 自动退回全文重新分块，不会留下错误的块边界。
+ */
+function canUpdateBlockInPlace(block: WysiwygBlock, source: string): boolean {
+  const standalone = splitMarkdownDocument(source);
+  if (standalone.blocks.length !== 1) return false;
+  const parsed = standalone.blocks[0];
+  return parsed.kind === block.kind
+    && parsed.editable === block.editable
+    && parsed.offset === 0
+    && parsed.length === source.length;
+}
+
+function updateBlockInPlace(
+  doc: WysiwygDocument,
+  index: number,
+  block: WysiwygBlock,
+  source: string,
+): WysiwygDocument {
+  const offsetDelta = source.length - block.length;
+  const lineDelta = countLines(source) - countLines(block.source);
+  const blocks = doc.blocks.map((item, position) => {
+    if (position === index) {
+      // 行号按行数差平移，而不是按新块行数重算：全文分块时列表等 token 会把块尾
+      // 空行算进自己的结束行，局部更新看不到这些间隙，平移才与原有语义一致。
+      return {
+        ...item,
+        source,
+        length: source.length,
+        endLine: item.endLine + lineDelta,
+      };
+    }
+    if (item.offset <= block.offset) return item;
+    return {
+      ...item,
+      offset: item.offset + offsetDelta,
+      startLine: item.startLine + lineDelta,
+      endLine: item.endLine + lineDelta,
+    };
+  });
+  return {
+    ...doc,
+    source: doc.source.slice(0, block.offset) + source + doc.source.slice(block.offset + block.length),
+    blocks,
+  };
 }
 
 /**

@@ -120,6 +120,33 @@ it('leaves trailing blank lines outside a list block so the caret can land there
   );
 });
 
+it('keeps the in-place block update identical to a full reparse', () => {
+  // 输入普通文字/行内标记时 replaceBlockSource 走局部更新（不重新解析全文），
+  // 结果必须与全文重新分块逐字段一致，否则后续输入会写到错误偏移。
+  const source = '# 标题\n\n段落一\n\n- 列表甲\n- 列表乙\n\n> 引用第一行\n> 引用第二行\n\n| a | b |\n| - | - |\n| 1 | 2 |\n';
+  const document = splitMarkdownDocument(source);
+  const edits: Array<[number, string]> = [
+    [1, '段落一改'],
+    [2, '- 列表甲改\\n- 列表乙'],
+    [3, '> 引用第一行改\\n> 引用第二行'],
+    [4, '| a | b |\\n| - | - |\\n| 1 | 3 |'],
+  ];
+  for (const [index, nextSource] of edits) {
+    const next = replaceBlockSource(document, document.blocks[index], nextSource);
+    const expected = splitMarkdownDocument(next.source);
+    assert.deepEqual(next.blocks, expected.blocks, nextSource);
+    assert.equal(next.source, expected.source);
+  }
+});
+
+it('falls back to a full reparse when the block structure changes', () => {
+  const document = splitMarkdownDocument('标题\n\n正文');
+  for (const [index, nextSource] of [[0, '# 标题'], [1, '- 正文'], [0, '标题\\n\\n新段落']] as Array<[number, string]>) {
+    const next = replaceBlockSource(document, document.blocks[index], nextSource);
+    assert.deepEqual(next.blocks, splitMarkdownDocument(next.source).blocks, nextSource);
+  }
+});
+
 it('replaces one block source without touching the rest of the document', () => {
   const document = splitMarkdownDocument('# 标题\n\n段落一\n\n段落二\n');
   const target = document.blocks[1];

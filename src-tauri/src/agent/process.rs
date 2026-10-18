@@ -93,8 +93,45 @@ fn discover_executable_uncached(name: &str) -> Option<PathBuf> {
         }
     }
 
+    // macOS 从 Finder/Dock 启动的 GUI 进程只继承最小 PATH
+    //（/usr/bin:/bin:/usr/sbin:/sbin），Homebrew、volta、cargo 与 nvm 装的
+    // CLI 都不在其中。补齐常见位置，避免 AI 助手面板误报「未安装」。
+    // 只做静态目录探测，不启动登录 shell：状态面板会周期性调用本函数。
+    #[cfg(target_os = "macos")]
+    {
+        directories.extend(macos_binary_directories());
+    }
+
     preferred.extend(candidate_paths(name, directories));
     select_discovered(preferred)
+}
+
+/// macOS 上 CLI 的常见安装位置（不依赖登录 shell 的 PATH）。
+#[cfg(target_os = "macos")]
+fn macos_binary_directories() -> Vec<PathBuf> {
+    let home = std::env::var_os("HOME").map(PathBuf::from);
+    let mut directories = vec![
+        PathBuf::from("/opt/homebrew/bin"),
+        PathBuf::from("/usr/local/bin"),
+    ];
+    let Some(home) = home else {
+        return directories;
+    };
+    directories.push(home.join(".local").join("bin"));
+    directories.push(home.join(".volta").join("bin"));
+    directories.push(home.join(".cargo").join("bin"));
+    // nvm 把 Node 装在 ~/.nvm/versions/node/<version>/bin，版本目录不在 PATH 中。
+    if let Ok(entries) = std::fs::read_dir(home.join(".nvm").join("versions").join("node")) {
+        let mut versions: Vec<PathBuf> = entries
+            .flatten()
+            .map(|entry| entry.path().join("bin"))
+            .filter(|path| path.is_dir())
+            .collect();
+        versions.sort();
+        versions.reverse();
+        directories.extend(versions.into_iter().take(4));
+    }
+    directories
 }
 
 #[cfg(windows)]

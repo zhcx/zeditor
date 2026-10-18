@@ -2,6 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties } from 'react';
 import { FONT_SIZE_RANGE_THUMB, getRangeMarkerGeometry } from '../../utils/appearanceSettings';
 import { LINE_WIDTH_MAX, LINE_WIDTH_MIN, LINE_WIDTH_STEP, normalizeLineWidth } from '../../utils/editorDisplay';
 import { createLineWidthPreview } from '../../utils/lineWidthPreview';
+import { formatShortcut } from '../../utils/platformShortcuts';
 
 /** 交互值保留在小组件内：滑块跟手，拖动不让整块设置面板或编辑器 React 树重渲染。 */
 export function LineWidthSetting({ value, onCommit }: { value: number; onCommit: (width: number) => void }) {
@@ -36,7 +37,7 @@ export function LineWidthSetting({ value, onCommit }: { value: number; onCommit:
       <div className="setting-range-header">
         <div className="setting-copy">
           <span>行宽</span>
-          <small>文档区域占编辑框宽度的比例，Ctrl + 鼠标滚轮可快速调整</small>
+          <small>{formatShortcut('文档区域占编辑框宽度的比例，Ctrl + 鼠标滚轮可快速调整')}</small>
         </div>
         <output>{draft.width}%</output>
       </div>

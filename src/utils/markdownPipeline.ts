@@ -21,6 +21,8 @@ import {
   type MediaEmbedMatch,
 } from './media.ts';
 import { sanitizeRenderedHtml } from './safeHtml.ts';
+import { parseWikiLink, WIKI_LINK_PATTERN, wikiLinkDisplayText, type WikiLinkParts } from './wikiLinks.ts';
+import { parseFootnoteDefinitions, type FootnoteDefinition } from './footnotes.ts';
 
 export const markdownRenderer = new MarkdownIt({
   html: true,
@@ -77,6 +79,133 @@ markdownRenderer.core.ruler.after('inline', 'image_size_attributes', (state) => 
       if (!next.content) children.splice(index + 1, 1);
     }
   });
+});
+
+/**
+ * Obsidian Wiki 链接：`[[笔记]]` / `[[笔记#标题|别名]]`。
+ *
+ * 解析在 text token 内完成，因此代码块与行内代码天然不受影响；
+ * 输出用无 `href` 的 span（而不是 a），避免被当作外链或本地锚点处理，
+ * 点击行为由预览 / 所见即所得自己的事件处理接管。
+ */
+function wikiLinkHtml(parts: WikiLinkParts): string {
+  const escape = markdownRenderer.utils.escapeHtml;
+  const attributes = [
+    'class="wiki-link"',
+    'role="link"',
+    'tabindex="0"',
+    `data-wiki-target="${escape(parts.target)}"`,
+    parts.anchor ? `data-wiki-anchor="${escape(parts.anchor)}"` : '',
+  ].filter(Boolean).join(' ');
+  return `<span ${attributes}>${escape(wikiLinkDisplayText(parts))}</span>`;
+}
+
+markdownRenderer.core.ruler.after('inline', 'wiki_link_rendering', (state) => {
+  for (const token of state.tokens) {
+    if (token.type !== 'inline' || !token.children) continue;
+    const next: typeof token.children = [];
+    for (const child of token.children) {
+      if (child.type !== 'text' || !child.content.includes('[[')) {
+        next.push(child);
+        continue;
+      }
+      const content = child.content;
+      let cursor = 0;
+      let matched = false;
+      WIKI_LINK_PATTERN.lastIndex = 0;
+      let match: RegExpExecArray | null;
+      while ((match = WIKI_LINK_PATTERN.exec(content)) !== null) {
+        const parts = parseWikiLink(match[0]);
+        if (!parts) continue;
+        matched = true;
+        if (match.index > cursor) {
+          const text = new state.Token('text', '', 0);
+          text.content = content.slice(cursor, match.index);
+          next.push(text);
+        }
+        const link = new state.Token('html_inline', '', 0);
+        link.content = wikiLinkHtml(parts);
+        next.push(link);
+        cursor = match.index + match[0].length;
+      }
+      if (!matched) {
+        next.push(child);
+        continue;
+      }
+      if (cursor < content.length) {
+        const text = new state.Token('text', '', 0);
+        text.content = content.slice(cursor);
+        next.push(text);
+      }
+    }
+    token.children = next;
+  }
+});
+
+/**
+ * 脚注引用：`[^1]` 渲染成上标，定义内容放进 data 属性供悬停浮层读取。
+ *
+ * 定义行自己（行首 `[^name]:`）保持原文，避免把定义也变成引用。
+ * 没有定义的引用仍然渲染，标上 `is-unresolved` 让样式弱化。
+ */
+function footnoteReferenceHtml(name: string, definition?: FootnoteDefinition): string {
+  const escape = markdownRenderer.utils.escapeHtml;
+  const attributes = [
+    `class="footnote-ref${definition ? '' : ' is-unresolved'}"`,
+    'role="doc-noteref"',
+    'tabindex="0"',
+    `data-footnote-name="${escape(name)}"`,
+    definition ? `data-footnote-content="${escape(definition.content)}"` : '',
+  ].filter(Boolean).join(' ');
+  return `<sup ${attributes}>[${escape(name)}]</sup>`;
+}
+
+markdownRenderer.core.ruler.after('inline', 'footnote_references', (state) => {
+  if (!state.src.includes('[^')) return;
+  const definitions = parseFootnoteDefinitions(state.src);
+
+  for (const token of state.tokens) {
+    if (token.type !== 'inline' || !token.children) continue;
+    const next: typeof token.children = [];
+    for (const child of token.children) {
+      if (child.type !== 'text' || !child.content.includes('[^')) {
+        next.push(child);
+        continue;
+      }
+      const content = child.content;
+      const pattern = /\[\^([^\]\r\n]+)\]/g;
+      let cursor = 0;
+      let matched = false;
+      let match: RegExpExecArray | null;
+      while ((match = pattern.exec(content)) !== null) {
+        const prefix = content.slice(0, match.index);
+        const atLineStart = prefix.length === 0 || /(?:^|\n)[ \t]*$/.test(prefix);
+        // 行首且紧跟冒号：这是脚注定义，保持原文。
+        if (atLineStart && content.charAt(match.index + match[0].length) === ':') continue;
+        matched = true;
+        if (match.index > cursor) {
+          const text = new state.Token('text', '', 0);
+          text.content = content.slice(cursor, match.index);
+          next.push(text);
+        }
+        const reference = new state.Token('html_inline', '', 0);
+        const name = match[1].trim();
+        reference.content = footnoteReferenceHtml(name, definitions.get(name));
+        next.push(reference);
+        cursor = match.index + match[0].length;
+      }
+      if (!matched) {
+        next.push(child);
+        continue;
+      }
+      if (cursor < content.length) {
+        const text = new state.Token('text', '', 0);
+        text.content = content.slice(cursor);
+        next.push(text);
+      }
+    }
+    token.children = next;
+  }
 });
 
 /** 代码围栏高亮；特殊围栏保留语言 class，交给预览的二次渲染接管。 */

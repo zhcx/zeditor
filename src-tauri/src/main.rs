@@ -101,7 +101,7 @@ fn take_pending_open_files(state: State<'_, PendingOpenFiles>) -> Vec<String> {
 // Replace any remaining unwrap/expect in hot paths with proper error propagation.
 // clippy::unwrap_used is not enabled globally; this is a targeted hardening.
 
-// 启动耗时写入 %TEMP%\zeditor_crash.log（与 panic 日志同一通道）。
+// 启动耗时写入系统临时目录下的 zeditor_crash.log（与 panic 日志同一通道）。
 // GUI 子系统下 stderr 不可见，落盘是唯一的诊断出口；每次启动仅写一行。
 fn log_startup(message: &str) {
     use std::io::Write;
@@ -218,6 +218,8 @@ fn main() {
             commands::save_file_content,
             commands::read_file_base64,
             commands::reveal_in_file_manager,
+            commands::resolve_wiki_link,
+            commands::find_wiki_backlinks,
             commands::get_recent_files,
             commands::update_recent_file,
             commands::remove_recent_file,

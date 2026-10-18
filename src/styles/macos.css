@@ -21,7 +21,7 @@ html[data-platform='macos'] {
   --font-content: -apple-system, BlinkMacSystemFont, 'SF Pro Text', 'PingFang SC', 'Hiragino Sans GB', 'Helvetica Neue', sans-serif;
 
   /* 标题栏固定 34px：红绿灯不随界面字号缩放，固定高度才能让它们始终
-     与标题栏内容垂直居中（配合 trafficLightPosition.y = 10）。 */
+     与标题栏内容垂直居中（配合 trafficLightPosition.y = 18）。 */
   --ui-titlebar-height: 34px;
   /* 红绿灯安全区：三个按钮 + 间距合计约 60px，另留 18px 呼吸空间。 */
   --macos-traffic-light-inset: 84px;
@@ -274,4 +274,13 @@ html[data-platform='macos'].window-resizing .titlebar,
 html[data-platform='macos'].window-resizing .app-workbench {
   transition: none !important;
   backdrop-filter: none !important;
+}
+
+/* 系统「降低透明度」（辅助功能）开启时去掉毛玻璃：与原生 App 遵循同一开关，
+   同时避免旧款 Intel Mac 在对话框上持续合成模糊层。 */
+@media (prefers-reduced-transparency: reduce) {
+  html[data-platform='macos'] .modal-overlay,
+  html[data-platform='macos'] .settings-overlay {
+    backdrop-filter: none;
+  }
 }

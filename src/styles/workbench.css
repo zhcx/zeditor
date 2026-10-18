@@ -2705,3 +2705,70 @@ body {
   font-size: 12px;
 }
 .status-cloud-settings:hover { color: var(--text-color); background: var(--bg-hover); }
+
+/* ── 反向链接（Obsidian 双向链接） ─────────────────────────────── */
+.backlinks-list {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  padding: 2px 6px 8px;
+}
+
+.backlink-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  width: 100%;
+  padding: 6px 8px;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.backlink-row:hover {
+  background: var(--ui-bg-hover);
+}
+
+.backlink-title {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  overflow: hidden;
+  color: var(--ui-text-primary);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backlink-count {
+  color: var(--ui-text-muted);
+  font-size: 11px;
+}
+
+.backlink-excerpt {
+  overflow: hidden;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.backlink-refresh {
+  align-self: flex-start;
+  margin-top: 4px;
+  padding: 3px 8px;
+  border: 1px solid var(--ui-border-subtle);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--ui-text-muted);
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.backlink-refresh:hover {
+  background: var(--ui-bg-hover);
+  color: var(--ui-text-primary);
+}

@@ -19,6 +19,7 @@ const labels: SystemMenuLabels = {
   copy: '复制',
   paste: '粘贴',
   selectAll: '全选',
+  find: '查找…',
   minimize: '最小化',
   zoom: '缩放',
   bringAllToFront: '前置全部窗口',
@@ -73,6 +74,10 @@ test('native system panels follow the app language', () => {
   const macosConfig = JSON.parse(read('src-tauri/tauri.macos.conf.json'));
 
   assert.equal(macosConfig.bundle.macOS.infoPlist, 'Info.plist');
+  // 没有开发者证书时也必须做完整的 ad-hoc 签名：否则只剩链接器签名，
+  // Info.plist 与资源未封装，codesign --strict / spctl 会判定签名不完整。
+  // CI 的 APPLE_SIGNING_IDENTITY 环境变量会覆盖这里的 "-"。
+  assert.equal(macosConfig.bundle.macOS.signingIdentity, '-');
   assert.match(infoPlist, /<key>CFBundleDevelopmentRegion<\/key>/);
   assert.match(infoPlist, /<string>zh-Hans<\/string>/);
   assert.match(infoPlist, /<key>CFBundleLocalizations<\/key>/);
@@ -171,8 +176,12 @@ test('planMacAppMenu mirrors the in-app model into the system menu bar', () => {
   // 系统标准项由预定义项承担，保证原生行为（撤销/剪贴板/窗口）。
   assert.deepEqual(
     flat(byId.get('menu.edit')?.children ?? []).map((node) => node.predefined),
-    ['Undo', 'Redo', 'Separator', 'Cut', 'Copy', 'Paste', 'Separator', 'SelectAll'],
+    ['Undo', 'Redo', 'Separator', 'Cut', 'Copy', 'Paste', 'Separator', 'SelectAll', 'Separator', undefined],
   );
+  // 「编辑 → 查找」复用窗口内的查找栏实现，加速键是系统惯例的 ⌘F。
+  assert.equal(byId.get('edit.find')?.kind, 'item');
+  assert.equal(byId.get('edit.find')?.accelerator, 'CmdOrCtrl+F');
+  assert.equal(byId.get('edit.find')?.text, '查找…');
   assert.deepEqual(
     flat(byId.get('menu.window')?.children ?? []).map((node) => node.predefined),
     ['Minimize', 'Maximize', 'Separator', 'BringAllToFront'],
@@ -283,4 +292,45 @@ test('macOS window background avoids unpainted flashes while resizing', () => {
   assert.doesNotMatch(mainRs, /setAnimationBehavior|setWantsLayer/);
   assert.doesNotMatch(mainRs, /sync_macos_window_background|mod macos_window/);
   assert.doesNotMatch(read('src-tauri/Cargo.toml'), /objc2\s*=/);
+});
+
+test('macOS gestures and shortcut handling follow system conventions', () => {
+  const platform = read('src/utils/platform.ts');
+  const wheel = read('src/components/Editor/LineWidthWheel.tsx');
+  const editor = read('src/components/Editor/Editor.tsx');
+  const wysiwyg = read('src/components/Wysiwyg/WysiwygEditor.tsx');
+  const menuBar = read('src/components/MenuBar/MenuBar.tsx');
+  const css = read('src/styles/macos.css');
+
+  // 主修饰键按平台取：macOS 用 ⌘，Ctrl+点击保留给系统右键菜单。
+  assert.match(platform, /export function isPrimaryModifier/);
+  assert.match(platform, /return isMacOS\(\) \? event\.metaKey : event\.ctrlKey;/);
+  assert.match(editor, /isPrimaryModifier\(event\.event\)/);
+  assert.match(wysiwyg, /isPrimaryModifier\(event\)/);
+  // ⌘+滚轮调行宽；触控板捏合在 WKWebView 里也带 ctrlKey，必须排除。
+  assert.match(wheel, /event\.metaKey && !event\.ctrlKey/);
+  assert.match(wheel, /event\.key === \(macos \? 'Meta' : 'Control'\)/);
+  // 原生菜单已注册 ⌘N/⌘O/⌘S 等加速键，窗口级监听必须让位，避免保存两次。
+  assert.match(platform, /export function isNativeMenuActive/);
+  assert.match(menuBar, /if \(isNativeMenuActive\(\)\) return;/);
+  // 折叠快捷键与 VS Code 一致：⌘⌥[ / ⌘⌥]，两种编辑方式都可用。
+  assert.match(editor, /monaco\.KeyCode\.BracketLeft, 'editor\.fold'/);
+  assert.match(wysiwyg, /event\.key === '\[' \|\| event\.key === '\]'/);
+  // 系统「降低透明度」开启时去掉毛玻璃。
+  assert.match(css, /@media \(prefers-reduced-transparency: reduce\)/);
+});
+
+test('macOS release metadata and signing hooks are configured', () => {
+  const infoPlist = read('src-tauri/Info.plist');
+  const workflow = read('.github/workflows/build.yml');
+  const commands = read('src-tauri/src/commands.rs');
+
+  assert.match(infoPlist, /<key>LSApplicationCategoryType<\/key>/);
+  assert.match(infoPlist, /<key>NSHumanReadableCopyright<\/key>/);
+  // 签名与公证只在 secrets 存在时启用，未配置时保持未签名流程。
+  assert.match(workflow, /APPLE_CERTIFICATE: \$\{\{ secrets\.APPLE_CERTIFICATE \}\}/);
+  assert.match(workflow, /APPLE_SIGNING_IDENTITY: \$\{\{ secrets\.APPLE_SIGNING_IDENTITY \}\}/);
+  assert.match(workflow, /APPLE_TEAM_ID: \$\{\{ secrets\.APPLE_TEAM_ID \}\}/);
+  // 更新检查同时识别分架构 DMG 与 universal 包。
+  assert.match(commands, /_universal\.dmg/);
 });

@@ -13,6 +13,8 @@ import type { EditorController, EditorDispatchSpec, EditorLine } from '../../typ
 import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../../utils/editorLayout';
 import { resolveEditorDisplay } from '../../utils/editorDisplay';
 import { markdownFoldingRanges } from '../../utils/markdownFolding';
+import { isNativeMenuActive, isPrimaryModifier } from '../../utils/platform';
+import { findFootnoteReferenceAt, parseFootnoteDefinitions, type FootnoteDefinition } from '../../utils/footnotes';
 import { contentFontStack, normalizeTypography } from '../../utils/appearanceSettings';
 import { ensureMonacoTheme } from '../../themes/monaco';
 import { DocumentSessions, sameDocument } from '../../utils/documentSafety';
@@ -52,6 +54,7 @@ import {
   type TableNavigationKey,
 } from '../../utils/markdownTable';
 import { insertImageFromBytes } from '../../services/imageAssets';
+import { openWikiLink } from '../../services/wikiLinks';
 
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
@@ -68,19 +71,77 @@ import { insertImageFromBytes } from '../../services/imageAssets';
  */
 const foldingRangesChanged = new monaco.Emitter<monaco.languages.FoldingRangeProvider>();
 
+/**
+ * 折叠范围按「模型 + 版本 + 两个开关」缓存：Monaco 在滚动、光标移动和
+ * 布局变化时都会重新请求范围，长文档全文扫描不应跟着这些无关操作重跑。
+ * 内容变化会换版本号，切换开关会换签名，两者都会让缓存自动失效。
+ */
+let foldingRangeCache: {
+  model: monaco.editor.ITextModel;
+  version: number;
+  signature: string;
+  ranges: monaco.languages.FoldingRange[];
+} | null = null;
+
 const markdownFoldingProvider: monaco.languages.FoldingRangeProvider = {
   onDidChange: foldingRangesChanged.event,
   provideFoldingRanges: (model) => {
     const display = resolveEditorDisplay(useAppStore.getState().settings.editor);
-    if (!display.foldHeadings && !display.foldIndentation) return [];
-    return markdownFoldingRanges(model.getLinesContent(), {
-      headings: display.foldHeadings,
-      indentation: display.foldIndentation,
-    }).map(range => ({ start: range.start, end: range.end }));
+    const signature = `${display.foldHeadings}|${display.foldIndentation}`;
+    const version = model.getVersionId();
+    if (
+      foldingRangeCache
+      && foldingRangeCache.model === model
+      && foldingRangeCache.version === version
+      && foldingRangeCache.signature === signature
+    ) {
+      return foldingRangeCache.ranges;
+    }
+    const ranges = !display.foldHeadings && !display.foldIndentation
+      ? []
+      : markdownFoldingRanges(model.getLinesContent(), {
+        headings: display.foldHeadings,
+        indentation: display.foldIndentation,
+      }).map(range => ({ start: range.start, end: range.end }));
+    foldingRangeCache = { model, version, signature, ranges };
+    return ranges;
   },
 };
 
 monaco.languages.registerFoldingRangeProvider('markdown', markdownFoldingProvider);
+
+/**
+ * 脚注悬停：源码模式无需跳到文末就能看到定义内容。
+ * 定义按 model 版本缓存，避免每次悬停都重新扫描全文。
+ */
+const footnoteDefinitionCache = new WeakMap<
+  monaco.editor.ITextModel,
+  { version: number; definitions: Map<string, FootnoteDefinition> }
+>();
+
+monaco.languages.registerHoverProvider('markdown', {
+  provideHover(model, position) {
+    const line = model.getLineContent(position.lineNumber);
+    const reference = findFootnoteReferenceAt(line, position.column - 1);
+    if (!reference) return null;
+    let cached = footnoteDefinitionCache.get(model);
+    if (!cached || cached.version !== model.getVersionId()) {
+      cached = { version: model.getVersionId(), definitions: parseFootnoteDefinitions(model.getValue()) };
+      footnoteDefinitionCache.set(model, cached);
+    }
+    const definition = cached.definitions.get(reference.name);
+    return {
+      range: new monaco.Range(position.lineNumber, reference.from + 1, position.lineNumber, reference.to + 1),
+      contents: [
+        {
+          value: definition
+            ? `**脚注 ${reference.name}**\n\n${definition.content}`
+            : `未找到脚注定义：${reference.name}`,
+        },
+      ],
+    };
+  },
+});
 
 /** Markdown 列表普遍按 2 空格缩进：参考线与缩进折叠都按 2 列计算。 */
 function prepareMarkdownModel(model: monaco.editor.ITextModel) {
@@ -517,6 +578,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       hideCursorInOverviewRuler: true,
       wordWrap: 'on',
       wrappingIndent: 'same',
+      // 超长行（粘贴进来的 base64 图片、压缩数据）会拖慢分词与绘制：
+      // 限制分词长度并截断渲染，Markdown 也不需要语义高亮。
+      largeFileOptimizations: true,
+      maxTokenizationLineLength: 20000,
+      stopRenderingLineAfter: 10000,
+      renderValidationDecorations: 'off',
       renderWhitespace: 'selection',
       occurrencesHighlight: 'off',
       renderLineHighlight: 'line',
@@ -548,6 +615,16 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       contextmenu: false,
       unicodeHighlight: EDITOR_UNICODE_HIGHLIGHT_OPTIONS,
     });
+    // 折叠/展开光标处：macOS 用系统惯例 ⌘⌥[ / ⌘⌥]（与 VS Code 一致），
+    // Windows/Linux 落到 Ctrl+Alt+[ / ]。Monaco 默认没有为 Markdown 绑定这两组键。
+    for (const [keyCode, action] of [
+      [monaco.KeyCode.BracketLeft, 'editor.fold'],
+      [monaco.KeyCode.BracketRight, 'editor.unfold'],
+    ] as const) {
+      editor.addCommand(monaco.KeyMod.CtrlCmd | monaco.KeyMod.Alt | keyCode, () => {
+        editor.getAction(action)?.run();
+      });
+    }
     let controller = createController(editor, model, root);
     const initialView = documentViewStates.get(initialTabId);
     if (initialView) editor.restoreViewState(initialView);
@@ -742,8 +819,9 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       if (selection && !selection.isEmpty()) return;
       const target = findInlineTargetAt(model.getValue(), model.getOffsetAt(position));
       if (!target) return;
-      if (event.event.ctrlKey || event.event.metaKey) {
-        // Ctrl+点击 直达：网络链接在浏览器打开，脚注跳到定义。
+      if (isPrimaryModifier(event.event)) {
+        // 主修饰键+点击 直达（macOS ⌘、Windows/Linux Ctrl）：网络链接在浏览器打开，
+        // 脚注跳到定义。macOS 的 Ctrl+点击 保留给系统右键菜单。
         if (target.kind === 'link' && isOpenableUrl(target.url?.text ?? '')) {
           const url = (target.url?.text ?? '').trim();
           if (isTauriRuntime()) void openExternal(url).catch(() => window.open(url, '_blank', 'noopener,noreferrer'));
@@ -751,6 +829,11 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         } else if (target.kind === 'footnote' && target.definition) {
           controller.setSelection(target.definition.from, target.definition.to);
           controller.revealOffset(target.definition.from);
+        } else if (target.kind === 'wikilink') {
+          void openWikiLink(target.raw, { documentPath: useAppStore.getState().currentFile })
+            .then((opened) => {
+              if (!opened) useAIStore.getState().setStatus('error', `未找到笔记：${target.target?.text || target.raw}`);
+            });
         }
         return;
       }
@@ -795,11 +878,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       const selection = controller.getSelection();
       const menuWidth = 336;
       const submenuWidth = 178;
-      const menuHeight = 660;
       const x = Math.max(8, Math.min(event.clientX, window.innerWidth - menuWidth - 8));
       setContextMenu({
         x,
-        y: Math.max(8, Math.min(event.clientY, window.innerHeight - menuHeight - 8)),
+        // 纵向交给菜单渲染后按实测高度夹紧（EditorContextMenu 的 useLayoutEffect）。
+        // 在这里用固定高度估算会把 13" MacBook 上的菜单顶到窗口最上方，远离点击点。
+        y: Math.max(8, event.clientY),
         submenuDirection: x + menuWidth + submenuWidth + 4 <= window.innerWidth ? 'right' : 'left',
         hasSelection: !selection.empty,
         canUndo: model.canUndo(),
@@ -990,7 +1074,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       }
 
       const primaryModifier = browserEvent.ctrlKey || browserEvent.metaKey;
-      if (primaryModifier && browserEvent.shiftKey && !browserEvent.altKey) {
+      // macOS 原生菜单同样注册了 ⌘⇧T / ⌘⇧I：让菜单派发，避免插入两个表格/图片。
+      if (primaryModifier && browserEvent.shiftKey && !browserEvent.altKey && !isNativeMenuActive()) {
         if (key.toLowerCase() === 't') {
           event.preventDefault();
           event.stopPropagation();

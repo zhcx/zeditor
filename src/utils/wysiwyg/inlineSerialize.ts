@@ -10,6 +10,7 @@ import {
   type InlineElementNode,
   type InlineNode,
 } from './inlineNodes.ts';
+import { formatWikiLink } from '../wikiLinks.ts';
 
 export interface MarkdownPiece {
   /** 该片段输出的 Markdown 文本。 */
@@ -147,6 +148,26 @@ function emitNode(node: InlineNode, path: number[], options: SerializeOptions, o
 
   if (node.tag === 'span' && node.attrs['data-tex'] !== undefined) {
     out.push({ text: `$${node.attrs['data-tex']}$`, path, kind: 'syntax' });
+    return;
+  }
+
+  // Wiki 链接：渲染后的 DOM 只剩显示文字，必须用 data 属性还原成 `[[…]]`。
+  // 显示文字被就地改写时作为别名写回，保证「改别名」也能保存。
+  if (node.tag === 'span' && node.attrs['data-wiki-target'] !== undefined) {
+    let text = formatWikiLink({
+      target: node.attrs['data-wiki-target'],
+      anchor: node.attrs['data-wiki-anchor'] || null,
+      label: null,
+    }, textContentOf(node.children));
+    // 表格单元格里别名分隔符 `|` 必须转义，否则会被当成列分隔符。
+    if (options.escapePipes) text = text.replace(/\|/g, '\\|');
+    out.push({ text, path, kind: 'syntax' });
+    return;
+  }
+
+  // 脚注引用：渲染后是 <sup data-footnote-name>，回写成 `[^name]`。
+  if (node.tag === 'sup' && node.attrs['data-footnote-name'] !== undefined) {
+    out.push({ text: `[^${node.attrs['data-footnote-name']}]`, path, kind: 'syntax' });
     return;
   }
 

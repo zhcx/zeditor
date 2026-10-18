@@ -1,4 +1,163 @@
-# HANDOFF：编辑显示增强（限制行宽 / 折叠 / 缩进参考线 / 视图状态按钮）
+# HANDOFF：feat/editor-display-wheel-block-menu
+
+最后更新：2026-10-18
+版本：0.6.4（未发版）
+基线：`f0795ea`（main），支线最新提交 `096965d`（显示增强）
+状态：**工作区有大量未提交改动**（macOS 适配、性能优化、双向链接、脚注悬停预览）
+
+## 1. 当前状态一览
+
+| 项目 | 状态 |
+| --- | --- |
+| 分支 | `feat/editor-display-wheel-block-menu`，跟踪 `origin` 同名分支 |
+| 已提交 | `096965d feat(editor): improve display controls and block actions` |
+| 未提交 | 40 个修改文件 + 6 个新增文件（约 +1477 / −99，不含新增文件） |
+| 版本号 | 仍为 0.6.4，`CHANGELOG.md` 未补本轮记录 |
+| TypeScript | `npx tsc -b` 通过 |
+| ESLint | `npm run lint` 通过（0 error / 0 warning） |
+| 前端测试 | `npm test`：**652 项全通过** |
+| Rust | `cargo check` 通过；`cargo test wiki_link_tests` 3 项通过；**完整 Rust 套件未跑** |
+| 打包 | 2026-10-18 20:55 完成：`.app` 16 MB、DMG 13 MB、SHA-256 `3d516fb6…8355395d` |
+| 签名 | ad-hoc 完整（`codesign --verify --deep --strict` 通过）；**未公证** |
+| UI 点击自动化 | **未做**（系统未授予 `osascript` 辅助访问权限） |
+| 运行中实例 | 可能仍是 20:46 的旧包；验证新功能前请退出并重新启动 20:55 的产物 |
+
+产物（不入库）：
+- `src-tauri/target/release/bundle/macos/Zeditor.app`
+- `src-tauri/target/release/bundle/dmg/Zeditor_0.6.4_aarch64.dmg`
+
+临时演示目录（不入库）：`/tmp/zeditor-wiki-demo/`，包含 `笔记A.md`、`笔记B.md`、`笔记C.md`，用于验证 wiki 链接、标题跳转与反向链接。
+
+## 2. 未提交文件地图
+
+### 新增
+
+| 文件 | 作用 |
+| --- | --- |
+| `src/utils/wikiLinks.ts` | Wiki 链接解析、显示文本、回写、标题/块锚点匹配、输入闭合匹配 |
+| `src/services/wikiLinks.ts` | 目标解析（已开标签 → Rust）、打开并定位、30s 缓存、批量未解析解析 |
+| `src/components/Sidebar/BacklinksSection.tsx` | 侧栏「反向链接」面板 |
+| `src/utils/footnotes.ts` | 脚注定义解析、引用定位、输入闭合匹配 |
+| `tests/wikiLinks.test.ts` | Wiki 链接纯函数测试 |
+| `tests/footnotes.test.ts` | 脚注解析/匹配测试 |
+
+### 修改（按主题）
+
+| 主题 | 文件 |
+| --- | --- |
+| macOS 手势/快捷键 | `src/utils/platform.ts`、`LineWidthWheel.tsx`、`Editor.tsx`、`WysiwygEditor.tsx`、`WysiwygChrome.tsx`、`StatusBar.tsx`、`LineWidthSetting.tsx` |
+| macOS 菜单 | `src/components/MenuBar/MenuBar.tsx`、`src/utils/nativeMenu.ts`、`src/i18n/index.ts` |
+| macOS 发布/外观 | `src-tauri/Info.plist`、`src-tauri/tauri.macos.conf.json`、`.github/workflows/build.yml`、`src-tauri/src/commands.rs`、`src/styles/macos.css` |
+| macOS Agent | `src-tauri/src/agent/process.rs` |
+| 性能 | `WysiwygChrome.tsx`、`wysiwygSession.ts`、`src/utils/wysiwyg/blocks.ts`、`headingFolds.ts`、`WysiwygEditor.tsx`、`StatusBar.tsx`、`src/stores/appStore.ts`、`Preview.tsx`、`App.tsx`、`Editor.tsx` |
+| 双向链接 | `src/utils/markdownPipeline.ts`、`src/utils/wysiwyg/inlineSerialize.ts`、`wysiwygSession.ts`、`Preview.tsx`、`Editor.tsx`、`WysiwygEditor.tsx`、`markdownEnhancers.tsx`、`Sidebar.tsx`、`src-tauri/src/commands.rs`、`src-tauri/src/main.rs` |
+| 脚注悬停 | `src/utils/footnotes.ts`（新增）、`markdownPipeline.ts`、`inlineSerialize.ts`、`wysiwygSession.ts`、`markdownEnhancers.tsx`、`Editor.tsx`、`src/styles/main.css` |
+| 样式 | `src/styles/main.css`、`workbench.css`、`wysiwyg.css`、`macos.css` |
+| 文档 | `docs/reference/shortcuts.md`、`docs/reference/faq.md`、`docs/guide/editing.md`、`docs/usage-guide.md` |
+| 测试 | `tests/macosAdaptation.test.ts`、`editorDisplayWiring.test.ts`、`wysiwygBlocks.test.ts`、`wysiwygInline.test.ts`、`markdownPipeline.test.ts`、`chatHistoryAndContextMenu.test.ts` |
+
+## 3. macOS 适配
+
+- **手势与主修饰键**：`isPrimaryModifier()` 在 macOS 只认 ⌘，Ctrl 留给系统右键；`isNativeMenuActive()` 判断原生菜单是否接管快捷键。
+- **行宽滚轮**：`LineWidthWheel` 在 macOS 用 ⌘+滚轮，并排除触控板捏合（WKWebView 捏合也带 `ctrlKey`）；keyup 监听 Meta。
+- **链接点击**：预览单击 wiki 链接；源码/所见即所得用 ⌘+点击（Windows/Linux Ctrl+点击）。macOS Ctrl+点击不再触发打开链接。
+- **原生菜单**：新增「编辑 → 查找…」⌘F；文件快捷键、⌘⇧T / ⌘⇧I 在原生菜单生效时让位，避免一次按键执行两次。
+- **折叠快捷键**：⌘⌥[ / ⌘⌥]（Windows/Linux Ctrl+Alt+[ / ]），Monaco 与所见即所得都可用。
+- **小屏菜单**：右键菜单纵向由实测高度夹紧，不再用固定 660px 估算把 13" MacBook 的菜单顶到窗口上方。
+- **辅助功能**：`prefers-reduced-transparency` 下关闭 `backdrop-filter`。
+- **发布**：`tauri.macos.conf.json` 显式 `signingIdentity: "-"`，无证书时也生成完整 ad-hoc 签名；CI 的 `APPLE_*` secrets 存在时自动签名并公证。
+- **Info.plist**：补 `LSApplicationCategoryType`、`NSHumanReadableCopyright`。
+- **更新检查**：识别 `_universal.dmg`；更新弹窗区分 DMG / AppImage / deb，并给出 macOS 安装说明。
+- **Agent CLI**：macOS GUI 进程补 `/opt/homebrew/bin`、`/usr/local/bin`、volta/cargo/nvm 路径。
+
+## 4. 性能优化
+
+1. **所见即所得每次按键**
+   - `WysiwygChrome.refresh` 在「光标折叠 + 非表格 + 块内无 `/`」时直接返回，不再读 `getBoundingClientRect`，也不再调用 `getSelectionOffsets()` / `getVisibleSource()`（两者各会整块 DOM → Markdown 序列化）。
+   - `wysiwygSession.renderInlineMarker` 先用 `CharacterData.data` + 光标前一个字符快速失败，避免每次按键复制整段文本；wiki / 脚注仍走完整匹配。
+2. **每 250ms 写回**
+   - `replaceBlockSource` 先用单块解析判断结构是否稳定；稳定时只更新该块并平移后续偏移/行号，跳过全文 `markdown-it` 解析与重新分块。类型、可编辑性、覆盖范围变化时自动退回全文解析。
+3. **折叠**
+   - `findHeadingFoldSections` 改为栈扫描 + 预计算 lastNonBlank，消除 O(标题数²)。
+   - 所见即所得用 `hidden: Set` / `collapsedSections` 缓存隐藏判定与自动展开，DOM 访问器不再每次 `sections.some()`。
+   - Monaco folding provider 按「model + version + 开关签名」缓存。
+4. **React / store**
+   - `StatusBar` 不再订阅 `content`；摘要/大纲改为点击时从 store 取值。
+   - `setContent` 的字数统计改为 160ms 防抖（`scheduleWordCount`），其它入口仍立即刷新。
+   - `Preview` 的 `isEmpty` 改为无分配字符测试；图片列表只在图片弹窗/菜单打开时扫描。
+   - 分屏滚动同步 effect 不再依赖 `previewRenderVersion`，改为 ref 触发 80ms 防抖重建，避免每次预览渲染拆装滚动监听与 3 个 ResizeObserver。
+5. **Monaco**：`largeFileOptimizations`、`maxTokenizationLineLength: 20000`、`stopRenderingLineAfter: 10000`、`renderValidationDecorations: 'off'`。
+
+> 未重新运行浏览器帧率脚本（`scripts/verify-editor-display.mjs` 需要外部 Playwright），因此不声明实测 P95 收益。
+
+## 5. Obsidian 双向链接
+
+- **语法**：`[[笔记]]`、`[[笔记|别名]]`、`[[笔记#标题]]`、`[[笔记#标题|别名]]`、`[[#本文标题]]`、`[[#^块id]]`；`![[嵌入]]` 未实现。
+- **渲染**：`markdownPipeline` 的 `wiki_link_rendering` core rule 把 text token 拆成 `.wiki-link` span（`data-wiki-target` / `data-wiki-anchor`），代码块与行内代码不受影响。
+- **点击**：预览单击打开目标笔记；源码/所见即所得 ⌘/Ctrl+点击打开；普通点击在源码/所见即所得中仍打开原有编辑弹窗。
+- **定位**：`#标题` 先按原文、再按 `createHeadingAnchorBase` 归一化匹配；`#^id` 查行尾块 id。
+- **未解析**：`markdownEnhancers` 批量调用解析服务并加 `is-unresolved`（虚线），点击失败在状态栏提示。
+- **反向链接**：`find_wiki_backlinks` 扫描工作区根 + 文档目录（最多 2000 文件、单文件 2MB、忽略 `.git`/`node_modules`/`.obsidian` 等），返回文件、首次命中行、摘录与次数；侧栏「大纲」下方显示。
+- **解析缓存**：前端 30s TTL，输入期间同一目标不反复扫盘；已打开的标签优先，重名时只有唯一 basename 才采用。
+- **所见即所得回写**：`inlineSerialize` 识别 `span[data-wiki-target]` 还原 `[[…]]`；表格内 `|` 转义；显示文字被改写时作为别名写回。
+- **输入即渲染**：`matchWikiLinkAt` 在 `]]` 闭合时把文本换成链接元素，避免方括号被转义。
+
+## 6. 脚注悬停预览
+
+- **解析**：`footnotes.ts` 解析 `[^name]: 内容`、4 空格/Tab 续行、空行、围栏代码内忽略、同名取第一个。
+- **渲染**：`footnote_references` core rule 把正文 `[^name]` 渲染为 `<sup class="footnote-ref" data-footnote-name data-footnote-content>`；定义行保持原文；无定义加 `is-unresolved`。
+- **浮层**：`markdownEnhancers` 给引用绑定 pointerenter/leave 与 focus/blur，在 body 上创建 `.footnote-popover`，内容用 `renderMarkdownToHtml` 净化渲染；支持上下翻转、鼠标移入浮层、滚动/缩放收起。
+- **源码模式**：Monaco hover provider 在 `[^name]` 上显示定义内容；定义按 model 版本缓存。
+- **回写**：`inlineSerialize` 识别 `sup[data-footnote-name]` 输出 `[^name]`；所见即所得输入 `[^name]` 闭合时即时换成 sup（行首 `[^name]:` 保持文本，避免定义行被破坏）。
+
+## 7. 回归红线（改动前先看测试）
+
+- `tests/macosAdaptation.test.ts`：原生菜单结构、`edit.find` 加速键、`signingIdentity === '-'`、macOS 窗口配置与权限、`⌘` 文案。**改原生菜单项必须同步 `predefined` 数组断言。**
+- `tests/editorDisplayWiring.test.ts`：`findHeadingFoldSections(blockDocument.blocks)`、`showFoldingControls: folding ? ...`、`markdownFoldingRanges(model.getLinesContent(`、`guides: { indentation: display.indentGuides` 等源码接线断言。
+- `tests/wysiwygBlocks.test.ts`：局部更新必须与全文重新分块逐字段一致；结构变化必须回退。
+- `tests/wysiwygInline.test.ts`：普通文本转义（`[`/`]`）、wiki 链接、脚注引用回写。
+- `tests/markdownPipeline.test.ts`：wiki 链接 span、脚注 sup 与定义行不转换、代码内不转换。
+- `tests/chatHistoryAndContextMenu.test.ts`：右键菜单不再断言 `const menuHeight = 660`，改为按实测高度夹紧。
+
+## 8. 已知限制与风险
+
+- 未提交、未发版；版本号 0.6.4，`CHANGELOG.md` 未补。
+- 未跑完整 Rust 测试套件；未在 Intel（x86_64）macOS 上验证；未配置 Apple 证书，DMG 未公证。
+- 反向链接不是实时索引：只在展开面板、切换文档或手动刷新时扫描；工作区很大时首次扫描会慢，预算外的文件不纳入。
+- 双向链接：无 `![[嵌入]]`、无自动补全、无法写字面 `[[…]]`、重名取文档目录/工作区第一个匹配、导出 PDF/HTML 中不可跳转。
+- 脚注：定义行在预览中仍是普通文本，没有文末脚注列表排版；悬停浮层不支持点击固定。
+- macOS：滚动条仍是 8px 常显（非 overlay）；无原生 vibrancy；macOS 更新只能下载 DMG 手动安装。
+
+## 9. 后续待办（优先级）
+
+1. **P0**：整理提交/PR；补 `CHANGELOG` 与版本号（建议 0.6.5）；跑完整 `cargo test`；CI 双架构构建。
+2. **P1**：反向链接增加保存后自动刷新（或轻量索引）；wiki 重名候选选择器；wiki 自动补全与 `![[嵌入]]`；脚注文末列表与定义行隐藏；脚本化浏览器回归（wiki/脚注/输入性能）。
+3. **P2**：配置 `APPLE_*` secrets 与公证；产出 universal 包；macOS overlay 滚动条 / 原生 vibrancy；macOS 自动更新体验。
+
+## 10. 常用命令
+
+```bash
+# 本机 node 可能被 bun 代理，使用真实 Node 的 PATH
+export PATH="/Users/zhcx/.nvm/versions/node/v24.15.0/bin:$PATH"
+
+npm test                 # 前端 652 项
+npx tsc -b               # 类型检查
+npm run lint             # ESLint
+cd src-tauri && cargo test
+npm run tauri build      # 前端 + Rust release + .app/DMG
+
+# 产物校验
+codesign --verify --deep --strict src-tauri/target/release/bundle/macos/Zeditor.app
+hdiutil verify src-tauri/target/release/bundle/dmg/Zeditor_0.6.4_aarch64.dmg
+```
+
+快速接手：先 `git status` 看清未提交范围 → 读 `src/utils/wikiLinks.ts`、`footnotes.ts`、`markdownPipeline.ts` → 跑 `npm test` → 退出旧实例并重启 20:55 的打包产物验证界面。
+
+---
+
+## 历史记录：编辑显示增强（已提交 096965d）
+
+> 以下为上一轮交接原文，保留用于追溯。其中「未提交 Git」「版本号 0.6.4」等表述已过时；当前交付状态以本文上半部分为准。
 
 ## Git 分支交付（2026-10-18）
 
