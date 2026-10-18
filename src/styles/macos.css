@@ -209,7 +209,7 @@ html[data-platform='macos'] *::-webkit-scrollbar-button { display: none; }
 
 /* ── 控件：系统焦点环与系统强调色 ───────────────────────────────── */
 
-html[data-platform='macos'] .app :is(button, input, select, textarea, [role='tab']):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):not(.titlebar-search-input):focus-visible {
+html[data-platform='macos'] .app :is(button, input, select, textarea, [role='tab']):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):not(.titlebar-search-input):not(.settings-range):focus-visible {
   outline: none;
   box-shadow: var(--macos-focus-ring);
 }

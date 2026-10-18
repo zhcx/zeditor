@@ -4,15 +4,12 @@
  * 「在下方插入」「转换为」用与右键菜单同一套子菜单组件，交互与样式保持一致。
  */
 import { AppIcon } from '../Icons/AppIcon';
-import type { IconName } from '../Icons/iconGeometry';
 import { ContextSubmenu } from '../Editor/EditorContextMenu';
 import { useEffect, useRef, useState } from 'react';
-
-/** 「转换为」的目标块类型（与 blockOps.retypeBlock 的取值一致）。 */
-export type BlockRetypeTarget = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bullet' | 'ordered' | 'quote';
-
-/** 「在下方插入」的块模板。 */
-export type BlockInsertKind = 'paragraph' | 'table' | 'code' | 'quote' | 'divider';
+import { BLOCK_INSERT_ITEMS, BLOCK_RETYPE_ITEMS, type BlockInsertKind } from '../../utils/wysiwyg/blockMenu';
+import type { BlockRetypeTarget } from '../../utils/wysiwyg/blockOps';
+export type { BlockInsertKind } from '../../utils/wysiwyg/blockMenu';
+export type { BlockRetypeTarget } from '../../utils/wysiwyg/blockOps';
 
 export interface BlockActionsProps {
   index: number;
@@ -26,24 +23,6 @@ export interface BlockActionsProps {
   onRetype: (index: number, target: BlockRetypeTarget) => void;
   count: number;
 }
-
-const RETYPE_ITEMS: { target: BlockRetypeTarget; label: string }[] = [
-  { target: 'paragraph', label: '正文' },
-  { target: 'heading1', label: '1 级标题' },
-  { target: 'heading2', label: '2 级标题' },
-  { target: 'heading3', label: '3 级标题' },
-  { target: 'bullet', label: '无序列表' },
-  { target: 'ordered', label: '有序列表' },
-  { target: 'quote', label: '引用' },
-];
-
-const INSERT_ITEMS: { kind: BlockInsertKind; label: string; icon: IconName }[] = [
-  { kind: 'paragraph', label: '段落', icon: 'plus' },
-  { kind: 'table', label: '表格', icon: 'table' },
-  { kind: 'code', label: '代码块', icon: 'code' },
-  { kind: 'quote', label: '引用', icon: 'quote' },
-  { kind: 'divider', label: '分隔线', icon: 'divider' },
-];
 
 export function BlockActions({ index, kind, editable, onEditSource, onDelete, onInsertAfter, onMove, onDuplicate, onRetype, count }: BlockActionsProps) {
   // 只有承载文本、可以安全改写行首前缀的块才能转换（表格 / 代码块 / HTML 等自带结构）。
@@ -80,16 +59,16 @@ export function BlockActions({ index, kind, editable, onEditSource, onDelete, on
     <div ref={rootRef} className={`wysiwyg-block-actions${open ? ' is-open' : ''}`} contentEditable={false} onMouseDown={event => event.preventDefault()}>
       <button className="wysiwyg-block-handle" type="button" aria-label={`第 ${index + 1} 块操作`} aria-expanded={open} title="块操作：插入、转换、移动、复制和删除" onClick={() => setOpen(value => !value)}><AppIcon name="grip" size={18} /></button>
       {open && <div className="wysiwyg-block-menu" role="menu" aria-label="块操作">
-        <ContextSubmenu label="在下方插入" icon="insert" direction="right" {...submenuHandlers('insert')}>
-          {INSERT_ITEMS.map(item => (
-            <button key={item.kind} type="button" role="menuitem" onClick={() => run(() => onInsertAfter(index, item.kind))}>
-              <AppIcon name={item.icon} size={14} />{item.label}
+        <ContextSubmenu label="转换为" icon="heading" direction="right" disabled={!canRetype} {...submenuHandlers('retype')}>
+          {BLOCK_RETYPE_ITEMS.map(item => (
+            <button key={item.target} type="button" role="menuitem" onClick={() => run(() => onRetype(index, item.target))}>
+              <span>{item.label}</span>
             </button>
           ))}
         </ContextSubmenu>
-        <ContextSubmenu label="转换为" icon="heading" direction="right" disabled={!canRetype} {...submenuHandlers('retype')}>
-          {RETYPE_ITEMS.map(item => (
-            <button key={item.target} type="button" role="menuitem" onClick={() => run(() => onRetype(index, item.target))}>
+        <ContextSubmenu label="在下方插入" icon="insert" direction="right" {...submenuHandlers('insert')}>
+          {BLOCK_INSERT_ITEMS.map(item => (
+            <button key={item.kind} type="button" role="menuitem" onClick={() => run(() => onInsertAfter(index, item.kind))}>
               <span>{item.label}</span>
             </button>
           ))}

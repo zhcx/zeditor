@@ -56,7 +56,7 @@ function ToolbarGlyph({ name }: { name: ToolbarIconName }) {
   return <AppIcon name={ToolbarGlyphNames[name]} />;
 }
 
-export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; onInsert: (url: string, alt?: string) => void }) {
+export function ImageOptionsModal({ onClose, onInsert, onInsertLocal }: { onClose: () => void; onInsert: (url: string, alt?: string) => void; onInsertLocal?: (path: string, alt?: string) => Promise<void> }) {
   const [mode, setMode] = useState<'link' | 'upload' | 'local' | null>(null);
   const [imageUrl, setImageUrl] = useState('');
   const [altText, setAltText] = useState('');
@@ -101,7 +101,8 @@ export function ImageOptionsModal({ onClose, onInsert }: { onClose: () => void; 
       if (!selected) return;
       setMode('local');
       // 复制到文档同级的 .assets 目录，文档移动后素材不会失效，也不依赖图床配置。
-      await insertImageFromPath(selected, altText.trim() || undefined);
+      if (onInsertLocal) await onInsertLocal(selected, altText.trim() || undefined);
+      else await insertImageFromPath(selected, altText.trim() || undefined);
       onClose();
     } catch (error) {
       setUploadStatus('error', 0, String(error));

@@ -12,16 +12,17 @@ export interface BlockSourceEditorProps {
   source: string;
   onApply: (source: string) => void;
   onClose: () => void;
+  initialSelection?: { from: number; to: number } | null;
 }
 
-export function BlockSourceEditor({ title, source, onApply, onClose }: BlockSourceEditorProps) {
+export function BlockSourceEditor({ title, source, onApply, onClose, initialSelection }: BlockSourceEditorProps) {
   const [draft, setDraft] = useState(source);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
   useEffect(() => {
     textareaRef.current?.focus();
-    textareaRef.current?.setSelectionRange(0, 0);
-  }, []);
+    textareaRef.current?.setSelectionRange(initialSelection?.from ?? 0, initialSelection?.to ?? 0);
+  }, [initialSelection]);
 
   return (
     <div className="wysiwyg-source-layer" contentEditable={false}>

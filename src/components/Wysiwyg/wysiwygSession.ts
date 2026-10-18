@@ -66,6 +66,10 @@ export interface WysiwygSessionOptions {
 export interface WysiwygSessionAccessors {
   getSurface: () => HTMLElement | null;
   getBlockElement: (index: number) => HTMLElement | null;
+  /** 折叠块与尚未渲染的块不同：方向键只跳过明确隐藏的块。 */
+  isBlockHidden?: (index: number) => boolean;
+  /** 编辑/外部定位需要目标可见；返回 true 表示已请求展开并等待下一次渲染。 */
+  revealBlock?: (index: number) => boolean;
 }
 
 const NO_ACCESSORS: WysiwygSessionAccessors = {
@@ -591,7 +595,7 @@ export class WysiwygSession {
   private adjacentEditableBlock(index: number, step: 1 | -1): number | null {
     const blocks = this.document.blocks;
     for (let cursor = index + step; cursor >= 0 && cursor < blocks.length; cursor += step) {
-      if (blocks[cursor].editable) return cursor;
+      if (blocks[cursor].editable && !this.accessors.isBlockHidden?.(cursor)) return cursor;
     }
     return null;
   }
@@ -669,7 +673,7 @@ export class WysiwygSession {
   }
 
   /** 在指定块之后插入一段 Markdown 并落光标（块菜单「在下方插入」）。空模板退化为插入段落。 */
-  insertBlockAfter(index: number, markdown: string): boolean {
+  insertBlockAfter(index: number, markdown: string, selectionStart = 0, selectionEnd = selectionStart): boolean {
     if (markdown.length === 0) return this.insertParagraphAfter(index);
     this.flushWriteBack();
     const block = this.document.blocks[index];
@@ -677,11 +681,16 @@ export class WysiwygSession {
     this.pushUndo({ coalesce: false });
     const insertAt = block.offset + block.length;
     const gap = `${this.document.eol}${this.document.eol}`;
-    const text = `${gap}${markdown}`;
-    return this.applySource(
+    const normalized = markdown.replace(/\r\n|\n|\r/g, this.document.eol);
+    const text = `${gap}${normalized}${gap}`;
+    const normalizeOffset = (offset: number) => markdown.slice(0, offset).replace(/\r\n|\n|\r/g, this.document.eol).length;
+    const from = insertAt + gap.length + normalizeOffset(selectionStart);
+    const applied = this.applySource(
       this.document.source.slice(0, insertAt) + text + this.document.source.slice(insertAt),
-      insertAt + gap.length,
+      from,
     );
+    if (selectionEnd !== selectionStart) this.setSelectionOffsets(from, insertAt + gap.length + normalizeOffset(selectionEnd));
+    return applied;
   }
 
   /** 用新的块源码替换（块源码就地编辑保存）。 */
@@ -813,6 +822,11 @@ export class WysiwygSession {
     this.lastCaret = from;
     this.pendingCaret = from;
     this.pendingSelectionEnd = to;
+    const startIndex = this.blockIndexAtOffset(from);
+    const endIndex = this.blockIndexAtOffset(to);
+    const revealedStart = startIndex !== null && this.accessors.revealBlock?.(startIndex);
+    const revealedEnd = endIndex !== null && this.accessors.revealBlock?.(endIndex);
+    if (revealedStart || revealedEnd) { this.awaitingRender = true; return; }
     if (!this.awaitingRender) this.applySelection(from, to);
   }
 
@@ -847,6 +861,11 @@ export class WysiwygSession {
     if (this.pendingCaret === null) { this.awaitingRender = false; return; }
     const startIndex = this.blockIndexAtOffset(this.pendingCaret);
     const endIndex = this.blockIndexAtOffset(this.pendingSelectionEnd ?? this.pendingCaret);
+    if (this.restoreFocus) {
+      const revealedStart = startIndex !== null && this.accessors.revealBlock?.(startIndex);
+      const revealedEnd = endIndex !== null && this.accessors.revealBlock?.(endIndex);
+      if (revealedStart || revealedEnd) { this.awaitingRender = true; return; }
+    }
     if (this.restoreFocus && this.accessors.getSurface()
       && ((startIndex !== null && !this.accessors.getBlockElement(startIndex))
         || (endIndex !== null && !this.accessors.getBlockElement(endIndex)))) {
@@ -890,6 +909,7 @@ export class WysiwygSession {
   /** 控制器用：块索引 → 元素（滚动定位）。 */
   locateElementOfOffset(offset: number): HTMLElement | null {
     const index = this.blockIndexAtOffset(offset);
+    if (index !== null) this.accessors.revealBlock?.(index);
     return index === null ? null : this.accessors.getBlockElement(index);
   }
 

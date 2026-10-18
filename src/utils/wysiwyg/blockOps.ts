@@ -173,20 +173,26 @@ export function setHeadingLevel(
   return { source: `${'#'.repeat(clamped)} ${stripped}`, caret: clamped + 1 };
 }
 
-export type BlockRetypeTarget = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'bullet' | 'ordered' | 'quote';
+export type BlockRetypeTarget = 'paragraph' | 'heading1' | 'heading2' | 'heading3' | 'heading4' | 'heading5' | 'heading6' | 'bullet' | 'ordered' | 'task' | 'quote' | 'code' | 'math';
 
 const RETYPE_PREFIX: Record<BlockRetypeTarget, string> = {
   paragraph: '',
   heading1: '# ',
   heading2: '## ',
   heading3: '### ',
+  heading4: '#### ',
+  heading5: '##### ',
+  heading6: '###### ',
   bullet: '- ',
   ordered: '1. ',
+  task: '- [ ] ',
   quote: '> ',
+  code: '',
+  math: '',
 };
 
 /** 行首的块前缀（引用 / 列表 / 标题），转换时逐行剥掉。 */
-const LINE_BLOCK_PREFIX = /^[ \t]*(?:[-*+][ \t]+|\d+[.)][ \t]+|>[ \t]*|#{1,6}[ \t]+)?/;
+const LINE_BLOCK_PREFIX = /^[ \t]*(?:(?:[-*+]|\d+[.)])[ \t]+(?:\[[ xX]\][ \t]+)?|>[ \t]*|#{1,6}[ \t]+)?/;
 
 /**
  * 块菜单「转换为」：把块源码换成另一种文本块。
@@ -199,9 +205,16 @@ export function retypeBlock(source: string, target: BlockRetypeTarget): { source
   const prefix = RETYPE_PREFIX[target];
   const eol = source.includes('\r\n') ? '\r\n' : '\n';
   const lines = source.split(/\r\n|\n|\r/).map(line => {
+    if (target === 'task' && /^[ \t]*[-*+][ \t]+\[[ xX]\][ \t]+/.test(line)) return line;
     const content = line.replace(LINE_BLOCK_PREFIX, '');
     return content.length === 0 ? '' : `${prefix}${content}`;
   });
+  if (target === 'code') {
+    const body = lines.join(eol);
+    const fence = '`'.repeat(Math.max(3, ...Array.from(body.matchAll(/`+/g), match => match[0].length + 1)));
+    return { source: `${fence}${eol}${body}${eol}${fence}`, caret: fence.length + eol.length };
+  }
+  if (target === 'math') return { source: `$$${eol}${lines.join(eol)}${eol}$$`, caret: 2 + eol.length };
   return { source: lines.join(eol), caret: lines[0]?.length ? prefix.length : 0 };
 }
 

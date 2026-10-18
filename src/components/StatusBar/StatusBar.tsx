@@ -3,11 +3,25 @@ import type { IconName } from '../Icons/iconGeometry';
 import { useShallow } from 'zustand/react/shallow';
 import { useEffect, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { useAppStore, type Settings } from '../../stores/appStore';
+import { useAppStore, type Settings, type WorkspaceMode } from '../../stores/appStore';
 import { useAIStore, type AIEditMode } from '../../stores/aiStore';
 import { WebDavStatusItem } from '../WebDav/WebDavStatusItem';
 import { encodingLabel } from '../../utils/textEncoding';
 import { formatShortcut } from '../../utils/platformShortcuts';
+import { resolveEditorDisplay } from '../../utils/editorDisplay';
+
+/**
+ * 视图状态：状态栏按钮只在两种持久编辑方式之间切换。
+ * 沉浸阅读 / 写作会隐藏整个状态栏（.immersive-mode-active .statusbar{display:none}），
+ * 若从按钮切进去就没有切回来的入口，因此它们仍有活动栏、功能菜单与 Esc 三个出口，
+ * 不进入这里的循环。
+ */
+const VIEW_STATES: Record<WorkspaceMode, { label: string; icon: IconName }> = {
+  split: { label: '源码对照', icon: 'code' },
+  wysiwyg: { label: '所见即所得', icon: 'eye' },
+  immersive: { label: '沉浸阅读', icon: 'book' },
+  zen: { label: '沉浸写作', icon: 'pen' },
+};
 
 type WritingStyle = Settings['ai']['writing_style'];
 
@@ -61,6 +75,23 @@ export function StatusBar() {
   const hasSelection = Boolean(selection && !selection.empty);
   const companionEnabled = settings.ai.enabled && settings.ai.auto_suggest;
   const companionStyleLabel = WRITING_STYLES.find(({ value }) => value === settings.ai.writing_style)?.label || '正式';
+  // 视图状态按钮可在「设置 → 编辑器 → 显示」中关闭；关闭后只保留文字标签。
+  const showViewStateButton = resolveEditorDisplay(settings.editor).showViewStateButton;
+  const viewState = VIEW_STATES[mode] ?? VIEW_STATES.split;
+  // 保存状态放在状态栏最前面：圆点颜色 + 文案，悬停给出这一状态的含义。
+  const saveState = isSaving
+    ? { key: 'saving', label: '保存中...', hint: '正在把当前内容写入磁盘' }
+    : modified
+      ? { key: 'modified', label: '未保存修改', hint: '内容已改动但还没写入磁盘：自动保存会在设定的间隔后触发，也可以按 Ctrl+S 立即保存' }
+      : currentFile
+        ? { key: 'saved', label: '已保存', hint: `当前标签没有未保存的修改，最后写入：${currentFile.split(/[\\/]/).pop()}` }
+        : { key: 'ready', label: '已就绪', hint: '当前标签没有未保存的修改，也还没有绑定磁盘文件（另存为后才会写入磁盘）' };
+  // 源码对照 ↔ 所见即所得；意外处在沉浸态时退回用户持久化的编辑方式。
+  const toggleViewMode: WorkspaceMode = mode === 'split'
+    ? 'wysiwyg'
+    : mode === 'wysiwyg'
+      ? 'split'
+      : (settings.editor.mode === 'wysiwyg' ? 'wysiwyg' : 'split');
   const [mcpRunning, setMcpRunning] = useState(false);
   const [mcpConnected, setMcpConnected] = useState(0);
 
@@ -221,16 +252,29 @@ export function StatusBar() {
   return (
     <div className="statusbar">
       <div className="statusbar-left">
-        <button
-          type="button"
-          className="status-item status-mode-label status-mode-button"
-          title="切换源码对照 / 所见即所得（Ctrl+Alt+M）"
-          onClick={() => setMode(mode === 'wysiwyg' ? 'split' : 'wysiwyg')}
+        <span
+          className="status-item status-save-state"
+          data-state={saveState.key}
+          title={saveState.hint}
+          aria-live="polite"
         >
-          {mode === 'split' ? '源码对照' : mode === 'wysiwyg' ? '所见即所得' : mode === 'zen' ? '沉浸写作' : '沉浸阅读'}
-        </button>
+          <span className="status-save-dot" aria-hidden="true" />{saveState.label}
+        </span>
         <span className="status-divider" aria-hidden="true" />
-        <span className="status-item status-save-state" data-state={isSaving ? 'saving' : modified ? 'modified' : 'ready'} aria-live="polite"><span className="status-save-dot" aria-hidden="true" />{isSaving ? '保存中...' : modified ? '未保存修改' : currentFile ? '已保存' : '已就绪'}</span>
+        {showViewStateButton ? (
+          <button
+            type="button"
+            className="status-item status-button status-view-state"
+            data-view-state={mode}
+            title={`视图状态：${viewState.label} · 点击切换到${VIEW_STATES[toggleViewMode].label}（Ctrl+Alt+M）`}
+            onClick={() => setMode(toggleViewMode)}
+          >
+            <AppIcon name={viewState.icon} size={14} />
+            <span>{viewState.label}</span>
+          </button>
+        ) : (
+          <span className="status-item status-mode-label">{viewState.label}</span>
+        )}
         <span className="status-divider" aria-hidden="true" />
         <div className="status-ai-control" ref={aiMenuRef}>
           <button

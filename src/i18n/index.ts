@@ -31,8 +31,22 @@ export function normalizeLanguage(value: unknown, fallback = detectSystemLanguag
 type Translation = { 'zh-CN': string; 'zh-TW': string; en: string };
 
 const entries: Record<string, Translation> = {
+  '文档区域占编辑框宽度的比例，Ctrl + 鼠标滚轮可快速调整': { 'zh-CN': '文档区域占编辑框宽度的比例，Ctrl + 鼠标滚轮可快速调整', 'zh-TW': '文件區域佔編輯框寬度的比例，Ctrl + 滑鼠滾輪可快速調整', en: 'Document width as a percentage of each pane; Ctrl + mouse wheel to adjust' },
+  '4 级标题': { 'zh-CN': '4 级标题', 'zh-TW': '4 級標題', en: 'Heading 4' },
+  '5 级标题': { 'zh-CN': '5 级标题', 'zh-TW': '5 級標題', en: 'Heading 5' },
+  '6 级标题': { 'zh-CN': '6 级标题', 'zh-TW': '6 級標題', en: 'Heading 6' },
   '菜单、侧栏、标签与设置面板；与正文大小独立': { 'zh-CN': '菜单、侧栏、标签与设置面板；与正文大小独立', 'zh-TW': '選單、側欄、分頁與設定面板；與內文大小獨立', en: 'Menus, sidebar, tabs and settings; independent of content size' },
   '界面、编辑器、预览与 AI 正文，默认 0.6 px': { 'zh-CN': '界面、编辑器、预览与 AI 正文，默认 0.6 px', 'zh-TW': '介面、編輯器、預覽與 AI 內文，預設 0.6 px', en: 'Interface, editor, preview and AI content; default 0.6 px' },
+  '显示设置': { 'zh-CN': '显示设置', 'zh-TW': '顯示設定', en: 'Display' },
+  '限制行宽': { 'zh-CN': '限制行宽', 'zh-TW': '限制行寬', en: 'Readable line length' },
+  '行宽': { 'zh-CN': '行宽', 'zh-TW': '行寬', en: 'Line width' },
+  '文档区域占编辑框宽度的比例': { 'zh-CN': '文档区域占编辑框宽度的比例', 'zh-TW': '文件區域佔編輯框寬度的比例', en: 'Document width as a percentage of each editor pane' },
+  '按编辑框宽度的比例居中显示文档；源码对照、所见即所得与预览同步生效': { 'zh-CN': '按编辑框宽度的比例居中显示文档；源码对照、所见即所得与预览同步生效', 'zh-TW': '按編輯框寬度的比例置中顯示文件；原始碼、所見即所得與預覽同步生效', en: 'Center documents at a percentage of each pane in source, WYSIWYG and preview modes' },
+  '折叠标题': { 'zh-CN': '折叠标题', 'zh-TW': '折疊標題', en: 'Fold headings' },
+  '折叠缩进': { 'zh-CN': '折叠缩进', 'zh-TW': '折疊縮排', en: 'Fold indentation' },
+  '缩进参考线': { 'zh-CN': '缩进参考线', 'zh-TW': '縮排參考線', en: 'Indent guides' },
+  '视图状态按钮': { 'zh-CN': '视图状态按钮', 'zh-TW': '檢視狀態按鈕', en: 'View state button' },
+  '在状态栏显示当前标签页的视图状态按钮，点击按钮可切换当前标签页视图状态': { 'zh-CN': '在状态栏显示当前标签页的视图状态按钮，点击按钮可切换当前标签页视图状态', 'zh-TW': '在狀態列顯示目前分頁的檢視狀態按鈕，點擊按鈕可切換目前分頁檢視狀態', en: 'Show the current tab view state in the status bar; click it to switch views' },
   '请先保存修改，再重新打开': { 'zh-CN': '请先保存修改，再重新打开', 'zh-TW': '請先儲存修改，再重新開啟', en: 'Save your changes before reopening' },
   '从磁盘重新读取，不改写文件': { 'zh-CN': '从磁盘重新读取，不改写文件', 'zh-TW': '從磁碟重新讀取，不改寫檔案', en: 'Read from disk without rewriting the file' },
   '编码会在下次保存时使用，当前内容保持不变。': { 'zh-CN': '编码会在下次保存时使用，当前内容保持不变。', 'zh-TW': '編碼會在下次儲存時使用，目前內容保持不變。', en: 'This encoding will be used on the next save. Current content is preserved.' },

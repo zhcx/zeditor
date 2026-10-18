@@ -11,6 +11,8 @@ import { formatShortcut } from '../../utils/platformShortcuts';
 import { useAIStore, type ProofreadResult } from '../../stores/aiStore';
 import type { EditorController, EditorDispatchSpec, EditorLine } from '../../types/editor';
 import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../../utils/editorLayout';
+import { resolveEditorDisplay } from '../../utils/editorDisplay';
+import { markdownFoldingRanges } from '../../utils/markdownFolding';
 import { contentFontStack, normalizeTypography } from '../../utils/appearanceSettings';
 import { ensureMonacoTheme } from '../../themes/monaco';
 import { DocumentSessions, sameDocument } from '../../utils/documentSafety';
@@ -54,6 +56,36 @@ import { insertImageFromBytes } from '../../services/imageAssets';
 (self as typeof self & { MonacoEnvironment: { getWorker: () => Worker } }).MonacoEnvironment = {
   getWorker: () => new EditorWorker(),
 };
+
+/**
+ * Markdown 折叠范围统一由本模块提供：
+ * - 折叠标题：标题行到下一个同级或更高级标题之前；
+ * - 折叠缩进：每个缩进块的各行（含更深层缩进）。
+ *
+ * Monaco 给语言注册 provider 后就只使用 provider 的范围（不再回退到缩进推断），
+ * 因此两个开关可以各自独立生效；provider 在请求时读取最新设置，切换开关时用
+ * `foldingRangesChanged` 通知 Monaco 重算。
+ */
+const foldingRangesChanged = new monaco.Emitter<monaco.languages.FoldingRangeProvider>();
+
+const markdownFoldingProvider: monaco.languages.FoldingRangeProvider = {
+  onDidChange: foldingRangesChanged.event,
+  provideFoldingRanges: (model) => {
+    const display = resolveEditorDisplay(useAppStore.getState().settings.editor);
+    if (!display.foldHeadings && !display.foldIndentation) return [];
+    return markdownFoldingRanges(model.getLinesContent(), {
+      headings: display.foldHeadings,
+      indentation: display.foldIndentation,
+    }).map(range => ({ start: range.start, end: range.end }));
+  },
+};
+
+monaco.languages.registerFoldingRangeProvider('markdown', markdownFoldingProvider);
+
+/** Markdown 列表普遍按 2 空格缩进：参考线与缩进折叠都按 2 列计算。 */
+function prepareMarkdownModel(model: monaco.editor.ITextModel) {
+  model.updateOptions({ tabSize: 2, indentSize: 2 });
+}
 
 interface EditorProps {
   className?: string;
@@ -460,6 +492,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     let switchingModel = false;
     let model = documentModels.get(initialTabId, () => monaco.editor.createModel(tab.content, 'markdown'));
     if (model.getValue() !== tab.content) model.setValue(tab.content);
+    prepareMarkdownModel(model);
+    const initialDisplay = resolveEditorDisplay(useAppStore.getState().settings.editor);
     // 使用内置 vs / vs-dark：文字与行号颜色历经充分验证，保证任何主题下
     // 可读。编辑区背景、当前行、光标由 main.css 的 .monaco-host 规则按
     // CSS 变量精确控制，与外围工作区零色差，无需自定义 Monaco 主题。
@@ -475,6 +509,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       letterSpacing: normalizeTypography(useAppStore.getState().settings.appearance).letterSpacing,
       lineHeight: Math.round(useAppStore.getState().settings.appearance.font_size * useAppStore.getState().settings.appearance.line_height),
       lineNumbers: 'on',
+      // 不按文档内容推断缩进：Markdown 一律按 2 空格缩进（见 prepareMarkdownModel）。
+      detectIndentation: false,
       minimap: { enabled: false },
       overviewRulerLanes: 0,
       overviewRulerBorder: false,
@@ -487,6 +523,13 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       renderLineHighlightOnlyWhenFocus: false,
       scrollBeyondLastLine: false,
       stickyScroll: { enabled: false },
+      // 折叠标题 / 折叠缩进：范围来自模块内的 Markdown provider。
+      folding: initialDisplay.foldHeadings || initialDisplay.foldIndentation,
+      foldingHighlight: true,
+      showFoldingControls: initialDisplay.foldHeadings || initialDisplay.foldIndentation ? 'mouseover' : 'never',
+      unfoldOnClickAfterEndOfLine: false,
+      // 缩进参考线：列表的 2 空格缩进由模型的 tabSize 决定（见 prepareMarkdownModel）。
+      guides: { indentation: initialDisplay.indentGuides, bracketPairs: false },
       ...EDITOR_OVERFLOW_OPTIONS,
       smoothScrolling: false,
       padding: { top: 24, bottom: 40 },
@@ -1210,6 +1253,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         currentTabId = id;
         model = documentModels.get(id, () => monaco.editor.createModel(nextTab.content, 'markdown'));
         if (model.getValue() !== nextTab.content) model.setValue(nextTab.content);
+        prepareMarkdownModel(model);
         modelRef.current = model;
         editor.setModel(model);
         controller = createController(editor, model, root);
@@ -1284,6 +1328,26 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       editContext: settings.editor.input_engine !== 'textarea',
     });
   }, [settings.editor.input_engine]);
+
+  // 折叠标题 / 折叠缩进 / 缩进参考线：即时同步到现有实例，并让 Monaco 重算折叠范围。
+  const { fold_headings: foldHeadings, fold_indentation: foldIndentation, indent_guides: indentGuides } = settings.editor;
+  useEffect(() => {
+    const editor = monacoRef.current;
+    if (!editor) return;
+    const display = resolveEditorDisplay({
+      fold_headings: foldHeadings,
+      fold_indentation: foldIndentation,
+      indent_guides: indentGuides,
+    });
+    const folding = display.foldHeadings || display.foldIndentation;
+    editor.updateOptions({
+      folding,
+      showFoldingControls: folding ? 'mouseover' : 'never',
+      guides: { indentation: display.indentGuides, bracketPairs: false },
+    });
+    if (!folding) editor.trigger('zeditor-display', 'editor.unfoldAll', null);
+    foldingRangesChanged.fire(markdownFoldingProvider);
+  }, [foldHeadings, foldIndentation, indentGuides]);
 
   useEffect(() => {
     monacoRef.current?.updateOptions({

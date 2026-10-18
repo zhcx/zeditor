@@ -55,11 +55,14 @@ import './styles/comfort.css';
 import './styles/icons.css';
 import './styles/typography.css';
 import './styles/wysiwyg.css';
+import './styles/reading-view.css';
 import './styles/onboarding.css';
 // macOS 原生外观层：以 html[data-platform='macos'] 作用域，其他平台不受影响。
 // 必须最后加载，才能在既有工作台样式之后覆盖标题栏与控件度量。
 import './styles/macos.css';
 import { contentFontStack, typographyCssVariables } from './utils/appearanceSettings';
+import { resolveEditorDisplay } from './utils/editorDisplay';
+import { LineWidthWheel } from './components/Editor/LineWidthWheel';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
 import { isMacOS } from './utils/platform';
 
@@ -697,6 +700,28 @@ function App() {
     settings.appearance.letter_spacing,
   ]);
 
+  // 显示增强：限制行宽写到 CSS 变量，折叠与参考线的开关写成 <html> 上的 data-* 标记，
+  // 由 reading-view.css / wysiwyg.css 消费；源码模式的折叠与参考线走 Monaco 选项。
+  const {
+    readable_line_length: readableLineWidth,
+    line_width: lineWidth,
+    indent_guides: indentGuides,
+    fold_indentation: foldIndentation,
+  } = settings.editor;
+  useEffect(() => {
+    const root = document.documentElement;
+    const display = resolveEditorDisplay({
+      readable_line_length: readableLineWidth,
+      line_width: lineWidth,
+      indent_guides: indentGuides,
+      fold_indentation: foldIndentation,
+    });
+    root.style.setProperty('--content-width', `${display.lineWidth}%`);
+    root.dataset.readableLineWidth = display.readableLineLength ? 'on' : 'off';
+    root.dataset.indentGuides = display.indentGuides ? 'on' : 'off';
+    root.dataset.foldIndentation = display.foldIndentation ? 'on' : 'off';
+  }, [foldIndentation, indentGuides, lineWidth, readableLineWidth]);
+
   useEffect(() => {
     const preference = settings.appearance.theme;
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)');
@@ -1327,6 +1352,7 @@ function App() {
         </div>
       </div>
       <StatusBar />
+      <LineWidthWheel />
       {showModeChooser && (
         <Suspense fallback={null}>
           <ModeChooserDialog busy={modeChoiceSaving} onChoose={(choice) => { void chooseMode(choice); }} />

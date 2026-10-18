@@ -17,6 +17,7 @@ interface FakeText {
 function navigationFixture(source: string) {
   const blocks = splitMarkdownDocument(source).blocks;
   const elements = new Map<number, HTMLElement>();
+  const hidden = new Set<number>();
   const texts = new Map<number, FakeText>();
   const caret = { index: 0, offset: 0 };
   const placed: Array<{ index: number; offset: number }> = [];
@@ -73,11 +74,23 @@ function navigationFixture(source: string) {
     onSourceChange: () => {},
     insertClipboardImage: async () => false,
   });
-  session.setAccessors({ getSurface: () => surface, getBlockElement: index => elements.get(index) ?? null });
+  const revealed: number[] = [];
+  session.setAccessors({
+    getSurface: () => surface,
+    getBlockElement: index => hidden.has(index) ? null : elements.get(index) ?? null,
+    isBlockHidden: index => hidden.has(index),
+    revealBlock: index => {
+      if (!hidden.delete(index)) return false;
+      revealed.push(index);
+      return true;
+    },
+  });
 
   return {
     session,
     placed,
+    hideBlock: (index: number) => hidden.add(index),
+    revealed,
     kindAt: (index: number) => blocks[index]?.kind,
     setCaret: (index: number, offset: number) => {
       caret.index = index;
@@ -90,6 +103,27 @@ it('moves the caret into the next block when the down arrow leaves a block', () 
   const fixture = navigationFixture('前段甲\n\n后段乙');
   fixture.setCaret(0, 3);
   assert.equal(fixture.session.handleArrow(0, 'down'), true);
+  assert.deepEqual(fixture.placed, [{ index: 1, offset: 0 }]);
+});
+
+it('arrow navigation crosses omitted folded blocks in either direction', () => {
+  const fixture = navigationFixture('前段甲\n\n隐藏正文\n\n后段乙');
+  fixture.hideBlock(1);
+  fixture.setCaret(0, 3);
+  assert.equal(fixture.session.handleArrow(0, 'down'), true);
+  assert.deepEqual(fixture.placed, [{ index: 2, offset: 0 }]);
+  fixture.setCaret(2, 0);
+  assert.equal(fixture.session.handleArrow(2, 'up'), true);
+  assert.deepEqual(fixture.placed.at(-1), { index: 0, offset: 3 });
+});
+
+it('programmatic selection reveals folded targets before restoring the caret', () => {
+  const fixture = navigationFixture('前段甲\n\n隐藏正文\n\n后段乙');
+  fixture.hideBlock(1);
+  fixture.session.setSelectionOffsets(5);
+  assert.deepEqual(fixture.revealed, [1]);
+  assert.deepEqual(fixture.placed, []);
+  fixture.session.restoreCaretAfterRender();
   assert.deepEqual(fixture.placed, [{ index: 1, offset: 0 }]);
 });
 

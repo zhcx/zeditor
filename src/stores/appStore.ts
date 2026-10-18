@@ -57,6 +57,18 @@ export interface Settings {
     inline_popups?: boolean;
     /** Keep the command bar visible above the editor instead of selection-only. */
     pin_toolbar?: boolean;
+    /** 限制行宽：文档按各自编辑框的比例居中。 */
+    readable_line_length?: boolean;
+    /** 文档宽度占编辑框的百分比（40–100）；缺省 80。旧像素值回退为 80%。 */
+    line_width?: number;
+    /** 折叠标题：把正文内容折叠到标题行（源码与所见即所得模式同时生效）。 */
+    fold_headings?: boolean;
+    /** 折叠缩进：把缩进内容（如列表）折叠起来。 */
+    fold_indentation?: boolean;
+    /** 缩进参考线：在缩进的行之间显示参考线。 */
+    indent_guides?: boolean;
+    /** 在状态栏显示当前标签页的视图状态按钮，点击可切换视图状态。 */
+    show_view_state_button?: boolean;
     favorite_emojis: string[];
     /**
      * Monaco 输入引擎路径：
@@ -376,6 +388,13 @@ const defaultSettings: Settings = {
     pin_toolbar: false,
     inline_popups: true,
     check_local_links: true,
+    // 显示类默认值与 Obsidian 保持一致：限制行宽、折叠与参考线都默认开启。
+    readable_line_length: true,
+    line_width: 80,
+    fold_headings: true,
+    fold_indentation: true,
+    indent_guides: true,
+    show_view_state_button: true,
     favorite_emojis: ['😀', '👍', '❤️', '🎉', '✅', '⚠️', '💡', '🚀'],
     input_engine: 'editContext',
   },

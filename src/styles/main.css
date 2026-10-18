@@ -9271,7 +9271,14 @@ html[data-theme] .preview-container,
     0 2px 7px rgb(0 0 0 / 38%);
 }
 
-.settings-main .settings-range:focus-visible { outline: none; }
+/* 滑轨本身已有进度配色：不要再叠 .setting-item input:focus 的 3px 光晕，
+   否则整条滑轨会套上一圈蓝色描边。 */
+.settings-main .settings-range:focus,
+.settings-main .settings-range:focus-visible {
+  outline: none;
+  border-color: transparent;
+  box-shadow: none;
+}
 .settings-main .settings-range:focus-visible::-webkit-slider-thumb {
   box-shadow: 0 0 0 4px var(--accent-soft), 0 2px 7px rgb(0 0 0 / 38%);
 }

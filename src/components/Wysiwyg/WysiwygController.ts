@@ -117,6 +117,10 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
     revealOffset: (offset) => {
       const element = session.locateElementOfOffset(offset);
       if (element) revealElement(element, deps.getScrollDOM());
+      else if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => {
+        const revealed = session.locateElementOfOffset(offset);
+        if (revealed) revealElement(revealed, deps.getScrollDOM());
+      });
     },
   };
 

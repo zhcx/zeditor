@@ -1,4 +1,4 @@
-import { memo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { useShallow } from 'zustand/react/shallow';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { useAppStore } from '../../stores/appStore';
@@ -6,10 +6,12 @@ import { renderMarkdownSource } from '../../utils/markdownPipeline';
 import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { enhanceRenderedMarkdown } from '../../utils/markdownEnhancers';
 import type { WysiwygBlockKind, WysiwygDocument } from '../../utils/wysiwyg/blocks';
+import { findHeadingFoldSections, foldedBlockIndexes, type HeadingFoldSection } from '../../utils/wysiwyg/headingFolds';
+import { resolveEditorDisplay } from '../../utils/editorDisplay';
+import { blockInsertion } from '../../utils/wysiwyg/blockMenu';
 import { createBlockHtmlRenderer } from '../../utils/wysiwyg/blockHtml';
 import { nextBlockRenderBudget } from '../../utils/wysiwyg/renderBudget';
 import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
-import { insertTable } from '../../utils/markdownTable';
 import { hasTrailingEmptyQuoteLine } from '../../utils/wysiwyg/blockOps';
 import { findInlineTargetAt, type InlineTarget } from '../../utils/inlineTargets';
 import type { ImageSpec } from '../../utils/imageSyntax';
@@ -30,6 +32,8 @@ import { formatShortcut } from '../../utils/platformShortcuts';
 
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
 const renderBlockHtml = createBlockHtmlRenderer(source => sanitizeRenderedHtml(renderMarkdownSource(source)));
+/** 标签切换会重新挂载编辑器，折叠状态随标签保留到本次应用会话结束。 */
+const headingFoldsByTab = new Map<string, ReadonlySet<string>>();
 
 function sourceEditorTitle(kind: WysiwygBlockKind): string {
   if (kind === 'table') return '编辑表格源码';
@@ -50,6 +54,12 @@ interface WysiwygBlockViewProps {
   workflowViewerEnabled: boolean;
   scrollRoot: HTMLElement | null;
   theme: string;
+  /** 标题折叠：存在可折叠分节时给出折叠键。 */
+  foldKey: string | null;
+  folded: boolean;
+  /** 折叠缩进：点击列表标记区可折叠子项。 */
+  foldIndentation: boolean;
+  onToggleFold: (key: string) => void;
   registerElement: (index: number, element: HTMLElement | null) => void;
   onInput: (index: number) => void;
   onKeyDown: (event: React.KeyboardEvent<HTMLElement>, index: number) => void;
@@ -113,16 +123,28 @@ function observeHandleMeasure(target: Element, measure: () => void) {
 
 const WysiwygBlockView = memo(function WysiwygBlockView({
   index, kind, source, startLine, editable, skipRender, renderRevision, documentPath, workflowViewerEnabled,
-  scrollRoot, theme, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
+  scrollRoot, theme, foldKey, folded, foldIndentation, onToggleFold, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
   onCommitCode, onInlineClick, onApplyBlockSource, onEndSourceEditing, onDeleteBlock, onInsertAfter, onMove, onDuplicate, onRetype, count,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
+  /** 有子列表的列表项缓存：折叠缩进的点击命中测试用，输入时失效。 */
+  const foldCacheRef = useRef<{ key: string; items: HTMLLIElement[] }>({ key: '', items: [] });
   const renderedSourceRef = useRef<string | null>(null);
   const renderedRevisionRef = useRef<number | null>(null);
   const [codeEditing, setCodeEditing] = useState(kind === 'fence' && extractFenceCode(source).length === 0);
   const [codeSelection, setCodeSelection] = useState<{ from: number; to: number; preserveFocus?: boolean } | null>(null);
   // 非文本块（表格 / 图表 / 公式 / HTML 等）的就地源码编辑开关。
   const [sourceEditing, setSourceEditing] = useState(false);
+  const [sourceSelection, setSourceSelection] = useState<{ from: number; to: number } | null>(null);
+  useLayoutEffect(() => {
+    const host = hostRef.current;
+    const editSource = (event: Event) => {
+      setSourceSelection((event as CustomEvent<{ from: number; to: number }>).detail ?? null);
+      setSourceEditing(true);
+    };
+    host?.addEventListener('zeditor-edit-block-source', editSource);
+    return () => host?.removeEventListener('zeditor-edit-block-source', editSource);
+  }, []);
 
   // 注册与内容渲染都必须放在 useLayoutEffect：React 先跑子节点的 layout effect、再跑父节点，
   // 而父节点正是在 layout effect 里恢复光标——用 useEffect（被动效应）会晚于光标恢复执行，
@@ -198,6 +220,14 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
       if (quote && hasTrailingEmptyQuoteLine(source) && !alreadyEmpty) quote.appendChild(host.ownerDocument.createElement('p'));
     }
     if (editable || kind === 'table') {
+      // task-lists 在复选框后生成排版空格；Markdown 前缀已包含这一个空格。
+      // 先统一 DOM，避免选区映射把该空格算进正文而漏选占位文字的最后一字。
+      host.querySelectorAll('li input[type="checkbox"]').forEach(checkbox => {
+        const text = checkbox.nextSibling;
+        if (text?.nodeType === Node.TEXT_NODE && /^[ \t]+/.test(text.textContent ?? '')) {
+          text.textContent = text.textContent!.replace(/^[ \t]+/, '');
+        }
+      });
       // 空列表项需要真正的光标占位；只有 CSS 高度时 Chromium 会把输入移到前一项。
       host.querySelectorAll('li:empty, p:empty, h1:empty, h2:empty, h3:empty, h4:empty, h5:empty, h6:empty, th:empty, td:empty').forEach(container => {
         const placeholder = host.ownerDocument.createElement('br');
@@ -246,11 +276,60 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
     };
   }, [documentPath, editable, kind, renderRevision, scrollRoot, skipRender, source, theme, workflowViewerEnabled]);
 
+  /**
+   * 折叠缩进：点击列表项的标记区（项目符号左侧的缩进空白）折叠 / 展开其子项。
+   * 标记不进入「DOM → 源码」的序列化范围，点击只切换 DOM 上的类，源码保持原样。
+   */
+  const toggleListFoldAt = (event: React.MouseEvent<HTMLElement>): boolean => {
+    const host = hostRef.current;
+    if (!host || !foldIndentation || kind !== 'list') return false;
+    // 只保留「有子列表」的项，并按渲染轮次缓存：每次点击都全量查询 + 读布局
+    // 在长列表里会明显卡顿。
+    const cacheKey = `${renderRevision}\u0000${source.length}`;
+    if (foldCacheRef.current.key !== cacheKey) {
+      foldCacheRef.current = {
+        key: cacheKey,
+        items: Array.from(host.querySelectorAll<HTMLLIElement>('li'))
+          .filter(item => item.querySelector(':scope > ul, :scope > ol')),
+      };
+    }
+    for (const item of foldCacheRef.current.items) {
+      if (!host.contains(item)) continue;
+      const rect = item.getBoundingClientRect();
+      // 已折叠项的隐藏子项高度为 0，不能参与命中测试。
+      if (rect.height === 0) continue;
+      const lineHeight = Number.parseFloat(window.getComputedStyle(item).lineHeight) || 24;
+      if (event.clientY < rect.top || event.clientY > rect.top + lineHeight) continue;
+      // 标记落在列表项内容盒左侧的 padding 里（ul 的 1.6em 缩进）。
+      if (event.clientX > rect.left + 2 || event.clientX < rect.left - 34) continue;
+      event.preventDefault();
+      event.stopPropagation();
+      item.classList.toggle('is-folded');
+      item.dataset.folded = item.classList.contains('is-folded') ? 'true' : 'false';
+      return true;
+    }
+    return false;
+  };
+
   return (
-    <div className={`wysiwyg-block-shell${kind === 'fence' ? ' has-code' : ''}`}>
+    <div className={`wysiwyg-block-shell${kind === 'fence' ? ' has-code' : ''}${foldKey ? ' has-fold' : ''}${folded ? ' is-folded-heading' : ''}`}>
+      {foldKey && (
+        <button
+          type="button"
+          className="wysiwyg-fold-toggle"
+          contentEditable={false}
+          aria-expanded={!folded}
+          title={folded ? '展开标题下的内容' : '折叠标题下的内容'}
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => onToggleFold(foldKey)}
+        >
+          <AppIcon name={folded ? 'chevronRight' : 'chevronDown'} size={14} />
+        </button>
+      )}
       {kind === 'fence' && <WysiwygCodeBlock index={index} code={extractFenceCode(source)} language={extractFenceLanguage(source)} onCommit={(position, code, language) => { onCommitCode(position, code, language); if (!codeEditing) onBlurBlock(index, null); }} editing={codeEditing} selection={codeSelection} onEditingChange={editing => { setCodeEditing(editing); if (!editing) onBlurBlock(index, null); }} />}
       {sourceEditing && (
         <BlockSourceEditor
+          initialSelection={sourceSelection}
           title={sourceEditorTitle(kind)}
           source={source}
           onApply={(next) => { setSourceEditing(false); onApplyBlockSource(index, next); }}
@@ -266,13 +345,14 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         contentEditable={editable}
         suppressContentEditableWarning
         spellCheck={false}
-        onInput={() => onInput(index)}
+        onInput={() => { foldCacheRef.current = { key: '', items: [] }; onInput(index); }}
         onFocus={(event) => { if (kind === 'table' && (event.target as Element).closest('td,th')) onInput(index); }}
         onKeyDown={(event) => onKeyDown(event, index)}
         onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onBlurBlock(index, event.relatedTarget as Node | null); }}
         onCompositionStart={() => onCompositionChange(true, index)}
         onCompositionEnd={() => onCompositionChange(false, index)}
         onClick={(event) => {
+          if (toggleListFoldAt(event)) return;
           if (kind === 'fence') { setCodeEditing(true); return; }
           const handled = onInlineClick(event);
           // 没有其他交互面的只读块（HTML 块、解析不出结构的块）：点击直接就地编辑源码，
@@ -373,10 +453,18 @@ export function WysiwygEditor() {
     });
   });
   const [snapshot, setSnapshot] = useState<WysiwygSessionSnapshot>(() => session.getSnapshot());
+  /** 已折叠的标题分节键（见 utils/wysiwyg/headingFolds）。 */
+  const [collapsedHeadings, setCollapsedHeadings] = useState<ReadonlySet<string>>(() => headingFoldsByTab.get(activeTabId ?? '') ?? new Set<string>());
+  const foldStateRef = useRef<{ sections: HeadingFoldSection[]; collapsed: ReadonlySet<string> }>({ sections: [], collapsed: new Set() });
+  useEffect(() => {
+    const openIds = new Set(useAppStore.getState().tabs.map(tab => tab.id));
+    for (const id of headingFoldsByTab.keys()) if (!openIds.has(id)) headingFoldsByTab.delete(id);
+  }, [activeTabId]);
   const [imageTarget, setImageTarget] = useState<{ target: InlineTarget; spec: ImageSpec } | null>(null);
   const [inlineTarget, setInlineTarget] = useState<{ target: InlineTarget; anchor: { left: number; top: number }; autoFocus?: boolean } | null>(null);
   const [contextMenu, setContextMenu] = useState<EditorContextMenuState | null>(null);
   const [imageInsertOpen, setImageInsertOpen] = useState(false);
+  const imageInsertAfterRef = useRef<number | null>(null);
 
   // 打开大文档时先渲染首屏附近的块，其余按帧补齐：首屏绘制时间与总块数解耦，
   // 打开看起来更快，补齐在随后的几帧内完成。预算跟着标签走——切到别的文档时
@@ -401,12 +489,30 @@ export function WysiwygEditor() {
     else blockElementsRef.current.delete(index);
   }, []);
 
+  const display = resolveEditorDisplay(settings.editor);
+
   // DOM 访问器与变更监听都在挂载后注入：渲染期读 ref 会触发 react-hooks/refs。
   useLayoutEffect(() => {
     setScrollRoot(surfaceRef.current);
     session.setAccessors({
       getSurface: () => surfaceRef.current,
       getBlockElement: (index) => blockElementsRef.current.get(index) ?? null,
+      isBlockHidden: index => {
+        const { sections, collapsed } = foldStateRef.current;
+        return sections.some(section => collapsed.has(section.key) && index > section.index && index <= section.lastIndex);
+      },
+      revealBlock: index => {
+        const { sections, collapsed } = foldStateRef.current;
+        const containing = sections.filter(section => collapsed.has(section.key) && index > section.index && index <= section.lastIndex);
+        if (!containing.length) return false;
+        const next = new Set(collapsed);
+        containing.forEach(section => next.delete(section.key));
+        foldStateRef.current = { sections, collapsed: next };
+        const tabId = useAppStore.getState().activeTabId;
+        if (tabId) headingFoldsByTab.set(tabId, next);
+        setCollapsedHeadings(next);
+        return true;
+      },
     });
     session.setChangeListener(() => setSnapshot(session.getSnapshot()));
     return () => {
@@ -444,11 +550,6 @@ export function WysiwygEditor() {
   useEffect(() => {
     session.syncExternalSource(content);
   }, [content, session]);
-
-  // 结构变化后恢复光标；子节点的 layout effect 先跑，此时 DOM 已是新内容。
-  useLayoutEffect(() => {
-    session.restoreCaretAfterRender();
-  }, [session, snapshot?.version, renderBudget]);
 
   // 卸载前落盘，避免丢失最后一次输入。
   useEffect(() => () => session.flushWriteBack(), [session]);
@@ -584,25 +685,85 @@ export function WysiwygEditor() {
   const handleCompositionChange = useCallback((composing: boolean, index: number) => session.markComposing(composing, index), [session]);
   const handleCommitCode = useCallback((index: number, code: string, language?: string) => { session.writeCodeBlock(index, code, language); }, [session]);
   const handleDeleteBlock = useCallback((index: number) => { session.deleteBlock(index); }, [session]);
-  const handleInsertAfter = useCallback((index: number, kind: BlockInsertKind) => {
-    const template = kind === 'table' ? insertTable(3, 3).text
-      : kind === 'code' ? '```\n```'
-      : kind === 'quote' ? '> '
-      : kind === 'divider' ? '---'
-      : '';
-    session.insertBlockAfter(index, template);
-    session.focus();
+  const editInsertedSource = useCallback(() => {
+    const selection = session.getSelectionOffsets();
+    const index = session.blockIndexAtOffset(selection.from);
+    const block = index === null ? null : session.getBlocks()[index];
+    if (!block || block.editable || block.kind === 'fence') return;
+    requestAnimationFrame(() => {
+      session.locateElementOfOffset(selection.from)?.dispatchEvent(new CustomEvent('zeditor-edit-block-source', {
+        detail: { from: selection.from - block.offset, to: selection.to - block.offset },
+      }));
+    });
   }, [session]);
+  const handleInsertAfter = useCallback((index: number, kind: BlockInsertKind) => {
+    if (kind === 'image') {
+      imageInsertAfterRef.current = index;
+      setImageInsertOpen(true);
+      return;
+    }
+    const insertion = blockInsertion(kind);
+    session.insertBlockAfter(index, insertion.text, insertion.selectionStart, insertion.selectionEnd);
+    session.focus();
+    editInsertedSource();
+  }, [editInsertedSource, session]);
 
   const handleRetypeBlock = useCallback((index: number, target: BlockRetypeTarget) => {
     session.setBlockKind(index, target);
     session.focus();
-  }, [session]);
+    if (target === 'math') editInsertedSource();
+  }, [editInsertedSource, session]);
   const handleMoveBlock = useCallback((from: number, to: number) => { session.moveBlock(from, to); }, [session]);
   const handleDuplicateBlock = useCallback((index: number) => { session.duplicateBlock(index); }, [session]);
 
   const blockDocument: WysiwygDocument = snapshot.document;
   const emptyDocument = blockDocument.source.trim().length === 0;
+
+  // 折叠标题：分节范围由块模型算出，折叠状态按标题签名保存，因此改动正文不会漂移。
+  const headingSections = useMemo(
+    () => (display.foldHeadings ? findHeadingFoldSections(blockDocument.blocks) : []),
+    [blockDocument.blocks, display.foldHeadings],
+  );
+  const hiddenBlocks = useMemo(
+    () => foldedBlockIndexes(headingSections, collapsedHeadings),
+    [collapsedHeadings, headingSections],
+  );
+  const headingSectionByIndex = useMemo(
+    () => new Map(headingSections.map(section => [section.index, section])),
+    [headingSections],
+  );
+
+  // 折叠回调必须是稳定引用（否则每次输入都会让所有块视图重新渲染），
+  // 而折叠判断又要用到最新的分节与折叠状态，因此经 ref 读取。
+  useLayoutEffect(() => {
+    foldStateRef.current = { sections: headingSections, collapsed: collapsedHeadings };
+  }, [collapsedHeadings, headingSections]);
+
+  // 先更新当前分节，再恢复光标；新段落/撤销/外部定位落入折叠区时自动展开后再落选区。
+  useLayoutEffect(() => {
+    session.restoreCaretAfterRender();
+  }, [session, snapshot.version, renderBudget, collapsedHeadings]);
+
+  const toggleHeadingFold = useCallback((key: string) => {
+    const { sections, collapsed } = foldStateRef.current;
+    const section = sections.find(item => item.key === key);
+    const willCollapse = !collapsed.has(key);
+    const next = new Set(collapsed);
+    if (willCollapse) next.add(key);
+    else next.delete(key);
+    const tabId = useAppStore.getState().activeTabId;
+    if (tabId) headingFoldsByTab.set(tabId, next);
+    setCollapsedHeadings(next);
+    if (!willCollapse || !section) return;
+    // 光标落在将被隐藏的块里时带回标题行首：否则选区停在已卸载的节点上，继续输入没有反应。
+    const caret = session.getSelectionOffsets().to;
+    const caretBlock = session.blockIndexAtOffset(caret);
+    if (caretBlock === null || caretBlock <= section.index || caretBlock > section.lastIndex) return;
+    const heading = session.getBlocks()[section.index];
+    if (!heading) return;
+    session.setSelectionOffsets(heading.offset);
+    session.focus();
+  }, [session]);
 
   return (
     <div
@@ -670,37 +831,46 @@ export function WysiwygEditor() {
       style={{ fontFamily: settings.appearance.font_family }}
     >
       <article className="wysiwyg-document preview-document markdown-body">
-        {blockDocument.blocks.slice(0, renderBudget).map((block, index) => (
-          <WysiwygBlockView
-            key={`${index}:${block.kind}`}
-            index={index}
-            kind={block.kind}
-            source={block.source}
-            startLine={block.startLine}
-            editable={block.editable}
-            skipRender={snapshot.skipRenderIndex === index}
-            renderRevision={snapshot.blockRenderRevisions.get(index) ?? 0}
-            count={blockDocument.blocks.length}
-            documentPath={currentFile}
-            workflowViewerEnabled={settings.workflow?.render_in_preview !== false}
-            scrollRoot={scrollRoot}
-            theme={theme}
-            registerElement={registerElement}
-            onInput={handleInput}
-            onKeyDown={handleBlockKeyDown}
-            onBlurBlock={handleBlurBlock}
-            onCompositionChange={handleCompositionChange}
-            onCommitCode={handleCommitCode}
-            onInlineClick={handleInlineClick}
-            onApplyBlockSource={handleApplyBlockSource}
-            onEndSourceEditing={handleEndSourceEditing}
-            onDeleteBlock={handleDeleteBlock}
-            onInsertAfter={handleInsertAfter}
-            onMove={handleMoveBlock}
-            onDuplicate={handleDuplicateBlock}
-            onRetype={handleRetypeBlock}
-          />
-        ))}
+        {blockDocument.blocks.slice(0, renderBudget).map((block, index) => {
+          // 折叠的标题分节不渲染（内容仍在源码里，展开后原样回来）。
+          if (hiddenBlocks.has(index)) return null;
+          const section = headingSectionByIndex.get(index);
+          return (
+            <WysiwygBlockView
+              key={`${index}:${block.kind}`}
+              index={index}
+              kind={block.kind}
+              source={block.source}
+              startLine={block.startLine}
+              editable={block.editable}
+              skipRender={snapshot.skipRenderIndex === index}
+              renderRevision={snapshot.blockRenderRevisions.get(index) ?? 0}
+              count={blockDocument.blocks.length}
+              documentPath={currentFile}
+              workflowViewerEnabled={settings.workflow?.render_in_preview !== false}
+              scrollRoot={scrollRoot}
+              theme={theme}
+              foldKey={section?.key ?? null}
+              folded={Boolean(section && collapsedHeadings.has(section.key))}
+              foldIndentation={display.foldIndentation}
+              onToggleFold={toggleHeadingFold}
+              registerElement={registerElement}
+              onInput={handleInput}
+              onKeyDown={handleBlockKeyDown}
+              onBlurBlock={handleBlurBlock}
+              onCompositionChange={handleCompositionChange}
+              onCommitCode={handleCommitCode}
+              onInlineClick={handleInlineClick}
+              onApplyBlockSource={handleApplyBlockSource}
+              onEndSourceEditing={handleEndSourceEditing}
+              onDeleteBlock={handleDeleteBlock}
+              onInsertAfter={handleInsertAfter}
+              onMove={handleMoveBlock}
+              onDuplicate={handleDuplicateBlock}
+              onRetype={handleRetypeBlock}
+            />
+          );
+        })}
       </article>
       {emptyDocument && (
         <div className="editor-empty-guide" aria-hidden="true">
@@ -721,9 +891,28 @@ export function WysiwygEditor() {
       )}
       {imageInsertOpen && (
         <ImageOptionsModal
-          onClose={() => setImageInsertOpen(false)}
+          onInsertLocal={async (path, alt) => {
+            const after = imageInsertAfterRef.current;
+            const { importImageAsset, imageMarkdownForAsset, insertImageFromPath } = await import('../../services/imageAssets');
+            if (after === null) { await insertImageFromPath(path, alt); return; }
+            const asset = await importImageAsset(path);
+            const { invalidateResolvedSource } = await import('../../services/mediaAssets');
+            invalidateResolvedSource(useAppStore.getState().currentFile, asset.relativePath);
+            session.insertBlockAfter(after, imageMarkdownForAsset(asset, alt));
+            imageInsertAfterRef.current = null;
+            session.focus();
+            useAppStore.getState().setUploadStatus('success', 100, '图片已导入并插入');
+          }}
+          onClose={() => { imageInsertAfterRef.current = null; setImageInsertOpen(false); }}
           onInsert={(url, alt) => {
             setImageInsertOpen(false);
+            const after = imageInsertAfterRef.current;
+            imageInsertAfterRef.current = null;
+            if (after !== null) {
+              session.insertBlockAfter(after, `![${alt ?? '图片'}](${url})`);
+              session.focus();
+              return;
+            }
             const editor = useAppStore.getState().editorView;
             const selection = editor?.getSelection();
             if (!editor || !selection) return;

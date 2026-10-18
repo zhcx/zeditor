@@ -114,8 +114,9 @@ body {
 }
 
 /* 编辑器（Monaco）自带控件与标题栏搜索框沿用自身样式：不套全局 focus 描边
-   （标题栏那一栏由容器画外圈蓝色描边，输入框本身再画一圈会变成双层框）。 */
-.app :is(button, input, select, textarea, [role="tab"]):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):not(.titlebar-search-input):focus-visible {
+   （标题栏那一栏由容器画外圈蓝色描边，输入框本身再画一圈会变成双层框）。
+   滑块的焦点反馈由滑轨与滑块自身表达，整条滑轨再套一圈外框只会显得脏。 */
+.app :is(button, input, select, textarea, [role="tab"]):not(.inputarea):not(.ime-text-area):not(.monaco-editor *):not(.titlebar-search-input):not(.settings-range):focus-visible {
   outline: 2px solid color-mix(in srgb, var(--ui-accent) 62%, transparent);
   outline-offset: 1px;
 }

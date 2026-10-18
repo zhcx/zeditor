@@ -1,0 +1,157 @@
+/*
+ * 阅读与编辑的显示增强：限制行宽、折叠标题、折叠缩进、缩进参考线、状态栏视图状态按钮。
+ *
+ * 开关统一由 App 写在 <html> 的 data-* 标记上（见 App.tsx 的显示设置 effect），
+ * 组件不拼接内联样式；源码模式的折叠与参考线由 Monaco 自己的选项负责，
+ * 这里只处理所见即所得与预览。
+ */
+
+:root {
+  --content-width: 80%;
+  /* 留白不随屏幕像素上限扩张，窄编辑框仍给折叠箭头、块手柄留出空间。 */
+  --wysiwyg-gutter: clamp(52px, 5vw, 96px);
+}
+
+.line-width-hint {
+  position: fixed;
+  right: 24px;
+  bottom: 38px;
+  z-index: 100;
+  padding: 7px 12px;
+  border: 1px solid var(--border-color);
+  border-radius: 6px;
+  color: var(--text-color);
+  background: var(--bg-elevated);
+  box-shadow: var(--shadow-card);
+  font-variant-numeric: tabular-nums;
+  pointer-events: none;
+}
+
+/* ── 限制行宽 ─────────────────────────────────────────────────── */
+
+/* 源码模式：整张文档卡片收窄并居中，行号栏与滚动条随正文一起移动，
+   两侧留白露出工作区底色，与 Obsidian 的「限制行宽」观感一致。 */
+[data-readable-line-width="on"] .monaco-editor-container .monaco-document-card,
+[data-readable-line-width="on"] .zen-editor-pane .editor-document-card {
+  flex: 0 1 var(--content-width);
+  width: var(--content-width);
+  max-width: 100%;
+  margin-inline: auto;
+}
+
+[data-readable-line-width="on"] .preview-pane .preview-document,
+[data-readable-line-width="on"] .immersive-preview .preview-document,
+[data-readable-line-width="on"] .wysiwyg-surface > .wysiwyg-document {
+  width: var(--content-width);
+  max-width: 100%;
+  box-sizing: border-box;
+  margin-inline: auto;
+}
+
+/* 关闭限制时明确恢复全宽，避免更早样式中的 760/820px 上限继续生效。 */
+[data-readable-line-width="off"] :is(.preview-pane, .immersive-preview) .preview-document,
+[data-readable-line-width="off"] .wysiwyg-surface > .wysiwyg-document {
+  width: 100%;
+  max-width: 100%;
+}
+
+/* 拖动时不反复对重排中的长文档做背景模糊。 */
+[data-line-width-dragging] .app .settings-overlay {
+  backdrop-filter: none;
+}
+
+/* 调宽时只重排屏内段落；长文档屏外文本的逐字换行成本与总字数相关。
+   松手/取消后移除该标记，恢复完整的编辑、选区和滚动定位几何。 */
+[data-line-width-dragging] :is(.wysiwyg-block-shell, .preview-document > *) {
+  content-visibility: auto;
+  contain-intrinsic-block-size: auto 80px;
+}
+
+.wysiwyg-surface {
+  scrollbar-gutter: stable;
+  overscroll-behavior-y: contain;
+}
+
+/* ── 所见即所得的左侧留白 ────────────────────────────────────── */
+
+/* 折叠箭头与块手柄各占一列，都要落在正文左侧的留白里；
+   最小留白取 52px，窄窗口也不至于把控件挤到内容上。 */
+.wysiwyg-surface > .wysiwyg-document {
+  padding-inline: min(var(--wysiwyg-gutter), 12%);
+}
+
+/* 可折叠的块（标题）把手柄再向左让出一列给折叠箭头。 */
+.wysiwyg-block-shell.has-fold > .wysiwyg-block-actions { left: -50px; }
+.wysiwyg-block-shell.has-fold::before { width: 52px; }
+
+.wysiwyg-fold-toggle {
+  position: absolute;
+  top: 0;
+  left: -24px;
+  width: 18px;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: var(--wysiwyg-first-line, 1.62em);
+  padding: 0;
+  border: 0;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--text-muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity .12s ease, background .12s ease;
+}
+
+.wysiwyg-fold-toggle:hover { background: var(--bg-hover); color: var(--text-secondary); }
+.wysiwyg-fold-toggle:focus-visible { opacity: 1; outline: 2px solid var(--accent-color); outline-offset: -2px; }
+
+/* 折叠状态下箭头常驻：否则内容被收起后找不到展开入口。 */
+.wysiwyg-block-shell:hover > .wysiwyg-fold-toggle,
+.wysiwyg-block-shell:focus-within > .wysiwyg-fold-toggle,
+.wysiwyg-block-shell.is-folded-heading > .wysiwyg-fold-toggle { opacity: 1; }
+
+.wysiwyg-block-shell.is-folded-heading > .wysiwyg-block {
+  background: color-mix(in srgb, var(--accent-color) 6%, transparent);
+  border-radius: 4px;
+}
+
+/* ── 折叠缩进（列表） ───────────────────────────────────────── */
+
+/* 有子列表的项用 ▾ / ▸ 顶替默认项目符号：标记本身就是折叠开关，
+   点击标记左侧的缩进空白即可切换（见 WysiwygEditor 的 toggleListFoldAt）。 */
+[data-fold-indentation="on"] .wysiwyg-block[data-block-kind="list"] ul > li:has(> ul, > ol)::marker {
+  content: '▾  ';
+  color: var(--text-muted);
+}
+
+[data-fold-indentation="on"] .wysiwyg-block[data-block-kind="list"] ul > li.is-folded::marker {
+  content: '▸  ';
+  color: var(--accent-color);
+}
+
+[data-fold-indentation="on"] .wysiwyg-block li.is-folded > :is(ul, ol) { display: none; }
+[data-fold-indentation="on"] .wysiwyg-block li.is-folded::after { content: ' …'; color: var(--text-muted); }
+
+/* ── 缩进参考线 ─────────────────────────────────────────────── */
+
+/* 嵌套列表左缘画一条竖线：位置正好与父级列表项的文字起始对齐。
+   边框占 1px，缩进宽度相应减 1px，层级间距保持不变。 */
+[data-indent-guides="on"] .wysiwyg-document :is(ul, ol) :is(ul, ol) {
+  border-left: 1px solid var(--border-soft, var(--border-color));
+  padding-left: calc(1.6em - 1px);
+}
+
+/* ── 状态栏视图状态按钮 ─────────────────────────────────────── */
+
+.statusbar .status-view-state {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  cursor: pointer;
+  color: var(--text-secondary);
+}
+
+.statusbar .status-view-state:hover { color: var(--text-color); }
+.statusbar .status-view-state[data-view-state="wysiwyg"] { color: var(--accent-color); }

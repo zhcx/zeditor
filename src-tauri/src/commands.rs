@@ -270,6 +270,24 @@ pub struct EditorSettings {
     /// 用户选择的编辑方式："split" 或 "wysiwyg"；缺省表示尚未选择（首次启动会引导选择）。
     #[serde(default)]
     pub mode: Option<String>,
+    /// 限制行宽：文档按各自编辑框的比例居中。
+    #[serde(default = "default_true")]
+    pub readable_line_length: bool,
+    /// 文档宽度占编辑框的百分比（40–100）；前端将旧像素值迁移为默认比例。
+    #[serde(default = "default_line_width")]
+    pub line_width: u32,
+    /// 折叠标题。
+    #[serde(default = "default_true")]
+    pub fold_headings: bool,
+    /// 折叠缩进。
+    #[serde(default = "default_true")]
+    pub fold_indentation: bool,
+    /// 缩进参考线。
+    #[serde(default = "default_true")]
+    pub indent_guides: bool,
+    /// 状态栏视图状态按钮。
+    #[serde(default = "default_true")]
+    pub show_view_state_button: bool,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -297,6 +315,10 @@ pub struct ExportSettings {
 
 fn default_true() -> bool {
     true
+}
+
+fn default_line_width() -> u32 {
+    80
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -391,6 +413,12 @@ impl Default for Settings {
                 check_local_links: default_check_local_links(),
                 inline_popups: true,
                 mode: None,
+                readable_line_length: true,
+                line_width: default_line_width(),
+                fold_headings: true,
+                fold_indentation: true,
+                indent_guides: true,
+                show_view_state_button: true,
             },
             image_hosting: ImageHostingSettings {
                 active_service: "local".into(),
@@ -2610,6 +2638,36 @@ mod update_tests {
         assert_eq!(std::fs::read_dir(&root).unwrap().count(), 1);
         assert_eq!(root.parent(), Some(temp.as_path()));
         tokio::fs::remove_dir_all(root).await.unwrap();
+    }
+
+    #[test]
+    fn display_settings_round_trip_and_legacy_defaults() {
+        let mut value = serde_json::to_value(Settings::default()).unwrap();
+        let display_switches = [
+            "readable_line_length",
+            "fold_headings",
+            "fold_indentation",
+            "indent_guides",
+            "show_view_state_button",
+        ];
+        let editor = value["editor"].as_object_mut().unwrap();
+        editor.remove("line_width");
+        for name in display_switches {
+            editor.remove(name);
+        }
+        let restored: Settings = serde_json::from_value(value).unwrap();
+        let mut saved = serde_json::to_value(restored).unwrap();
+        assert_eq!(saved["editor"]["line_width"], 80);
+        for name in display_switches {
+            assert_eq!(saved["editor"][name], true);
+            saved["editor"][name] = serde_json::json!(false);
+        }
+        saved["editor"]["line_width"] = serde_json::json!(65);
+        let saved = serde_json::to_value(serde_json::from_value::<Settings>(saved).unwrap()).unwrap();
+        assert_eq!(saved["editor"]["line_width"], 65);
+        for name in display_switches {
+            assert_eq!(saved["editor"][name], false);
+        }
     }
 
     #[test]

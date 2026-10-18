@@ -1,12 +1,13 @@
 import { AppIcon } from '../Icons/AppIcon';
 import type { IconName } from '../Icons/iconGeometry';
 import { useShallow } from 'zustand/react/shallow';
-import { useCallback, useEffect, useState, type CSSProperties } from 'react';
+import { useCallback, useEffect, useRef, useState, type CSSProperties } from 'react';
 import { AI_PROVIDER_DEFINITIONS, providerNeedsKey, useAppStore, type AIProviderId, type ConverterModuleStatus, type SettingsTab, type Settings } from '../../stores/appStore';
 import { invoke } from '@tauri-apps/api/core';
 import { open } from '@tauri-apps/plugin-dialog';
 import { FontFamilyPicker } from './FontFamilyPicker';
 import { SettingsSelect } from './SettingsSelect';
+import { LineWidthSetting } from './LineWidthSetting';
 import {
   DEFAULT_FONT_SIZE,
   FONT_SIZE_MAX,
@@ -21,6 +22,7 @@ import {
 } from '../../utils/appearanceSettings';
 import { LANGUAGE_OPTIONS, normalizeLanguage } from '../../i18n';
 import { formatShortcut } from '../../utils/platformShortcuts';
+import { resolveEditorDisplay } from '../../utils/editorDisplay';
 import { THEMES } from '../../themes/apply';
 import type { AgentBackendId, AgentBackendStatus } from '../../types/agent';
 import { parseAIProviderProfiles } from '../../utils/aiProviderProfiles';
@@ -361,11 +363,41 @@ export function SettingsPanel() {
     window.dispatchEvent(new CustomEvent('zeditor-typography-preview', { detail: normalizeTypography(appearance) }));
   };
 
+  const editorDisplay = resolveEditorDisplay(localSettings.editor);
+
+  /**
+   * 显示类开关（行宽、折叠、参考线、视图状态按钮）是纯视图设置：改动后立刻写入
+   * 设置并生效，不必等「保存」，否则拖动行宽看不到任何变化。
+   */
+  const applyEditorDisplay = (patch: Partial<Settings['editor']>) => {
+    const latest = useAppStore.getState().settings;
+    setLocalSettings(previous => ({ ...previous, editor: { ...previous.editor, ...patch } }));
+    void saveSettings({ ...latest, editor: { ...latest.editor, ...patch } });
+  };
+
   const handleCancel = () => {
     previewContentFontSize(settings.appearance.font_size, settings.appearance.font_family);
     previewTypography(settings.appearance);
     setSettingsOpen(false);
   };
+
+  // Esc 关闭设置面板（等价于「取消」，同时撤回字号 / 行宽等预览）。
+  // 面板内的下拉、字体选择与同步历史对话框会先处理自己的 Esc（preventDefault 或仍打开），
+  // 这时不关闭面板。
+  const cancelRef = useRef(handleCancel);
+  useEffect(() => {
+    cancelRef.current = handleCancel;
+  });
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || event.isComposing || event.defaultPrevented) return;
+      if (document.querySelector('.webdav-history-dialog')) return;
+      event.preventDefault();
+      cancelRef.current();
+    };
+    window.addEventListener('keydown', onKeyDown);
+    return () => window.removeEventListener('keydown', onKeyDown);
+  }, []);
 
   const loadLocalFonts = async () => {
     const queryLocalFonts = (window as LocalFontAccessWindow).queryLocalFonts;
@@ -687,6 +719,42 @@ export function SettingsPanel() {
                   }}
                 />
               </div>
+              <div className="settings-subsection-divider" />
+              <div className="settings-section-title">显示设置</div>
+              <SettingToggle
+                label="限制行宽"
+                description="按编辑框宽度的比例居中显示文档；源码对照、所见即所得与预览同步生效"
+                checked={editorDisplay.readableLineLength}
+                onChange={(checked) => applyEditorDisplay({ readable_line_length: checked })}
+              />
+              {editorDisplay.readableLineLength && (
+                <LineWidthSetting value={editorDisplay.lineWidth} onCommit={width => applyEditorDisplay({ line_width: width })} />
+              )}
+              <SettingToggle
+                label="折叠标题"
+                description="开启后可以将正文内容折叠到标题行：所见即所得模式在标题左侧显示折叠箭头，源码模式在行号栏显示折叠标记"
+                checked={editorDisplay.foldHeadings}
+                onChange={(checked) => applyEditorDisplay({ fold_headings: checked })}
+              />
+              <SettingToggle
+                label="折叠缩进"
+                description="开启后可以将缩进内容（如列表）折叠起来：所见即所得模式点击列表标记即可折叠子项"
+                checked={editorDisplay.foldIndentation}
+                onChange={(checked) => applyEditorDisplay({ fold_indentation: checked })}
+              />
+              <SettingToggle
+                label="缩进参考线"
+                description="在缩进的行之间显示参考线，层级结构更清晰"
+                checked={editorDisplay.indentGuides}
+                onChange={(checked) => applyEditorDisplay({ indent_guides: checked })}
+              />
+              <SettingToggle
+                label="视图状态按钮"
+                description="在状态栏显示当前标签页的视图状态按钮，点击按钮可切换当前标签页视图状态"
+                checked={editorDisplay.showViewStateButton}
+                onChange={(checked) => applyEditorDisplay({ show_view_state_button: checked })}
+              />
+              <div className="settings-subsection-divider" />
               <div className="setting-item">
                 <label>自动保存间隔 (ms)</label>
                 <input
