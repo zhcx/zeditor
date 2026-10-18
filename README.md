@@ -181,49 +181,41 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.6.4 更新
+## v0.6.5 更新
 
 ### 更新日志
 
-- **新增「所见即所得」编辑模式**：整篇文档按最终排版渲染，直接在渲染结果上写作，不需要认识 Markdown 标记。支持段落、标题、引用、嵌套列表、表格单元格、代码块的就地编辑，行首快捷输入（`# ` / `- ` / `> ` / ```` ``` ````）、块级菜单（移动 / 复制 / 插入 / 删除 / 编辑源码）、内容级撤销栈与输入法安全写回；首次安装可选择默认编辑方式，随时用 `Ctrl+Alt+M`（macOS `⌥⌘M`）切换。
-- **macOS 原生体验回归**：原生红绿灯与叠层标题栏、系统菜单栏（应用 / 文件 / 编辑 / 功能 / 窗口 / 帮助）、macOS 惯例快捷键（`⌘S`、`⇧⌘S`、`⇧⌘Z`、`⌃⌘F`、`⌘,`）、`⌘W` 隐藏窗口而 `⌘Q` 退出、Finder 双击 `.md` 打开、Dock 点击恢复窗口、系统「打开 / 保存」面板跟随界面语言。
-- **编辑器打磨**：修复段落行高跳变与段间距递增、块手柄对齐、有序列表续号、代码块尾部空行、方向键跨块、`Delete` 合并段落、大纲误识别 Setext 标题等问题；表格按内容宽度渲染并对齐预览。
-- **性能**：规范化只重建脏块，普通编辑不再刷新整篇块 DOM；稳定块组件回调与 HTML 缓存按最近使用淘汰。
-- **空文档引导**：源码对照的编辑区与预览区空状态分别垂直居中于各自面板，两侧提示保持同一水平线；所见即所得补上「从一个想法开始」引导，空文档时提示 `/` 插入内容、`Ctrl P` 切换文档。
+- **行宽与折叠**：行宽改为按各编辑框自身宽度的比例（40%–100%，默认 80%，步长 1%），源码对照、阅读预览与所见即所得各自计算；`Ctrl+滚轮`（macOS `⌘+滚轮`）即可即时调宽。新增折叠标题、折叠缩进与缩进参考线：源码对照走 Monaco 折叠范围，所见即所得在标题左侧箭头、列表标记处折叠，阅读时不再被无关章节淹没。
+- **双向链接**：支持 Obsidian 风格 `[[笔记]]`、`[[笔记|别名]]`、`[[笔记#标题]]`、`[[#本文标题]]`、`[[#^块id]]`；预览单击打开并定位，源码 / 所见即所得 `⌘`/`Ctrl`+点击；未解析目标显示虚线；侧栏新增「反向链接」面板，列出引用当前文档的文件、行号与摘录。
+- **脚注悬停预览**：正文 `[^name]` 渲染为上标，悬停即看定义；源码模式悬停同样可用，定义行保持原文，多行续行与转义不会丢内容，所见即所得输入闭合即转换。
+- **块菜单扩展**：前两项改为「转换为 → 在下方插入」，转换覆盖正文 / 1–6 级标题 / 列表 / 引用 / 代码 / 公式，插入覆盖表格、媒体、折叠内容、目录、注释与各类图表；只读块插入后自动打开块源码编辑。
+- **状态栏**：新增视图状态按钮（源码对照 ↔ 所见即所得，可关闭），保存状态移到最左并补充三色圆点与悬停说明。
+- **macOS**：`⌘+滚轮` 调行宽、`⌘+点击` 打开链接、原生菜单补 `⌘F` 查找、`⌘⌥[ ]` 折叠、小屏右键菜单按实测高度定位、`prefers-reduced-transparency` 下关闭模糊；签名改为按 CI 实际配置的 Apple 凭证决定，未配置时仍为未签名包。
+- **性能**：所见即所得按键跳过不必要的序列化与布局、250ms 写回改为单块解析、折叠计算线性化并缓存、状态栏与字数统计防抖、Monaco 启用大文件优化。
+- **稳定性**：修复增量分块边界、脚注定义被当作链接、Wiki 同名抢占与异步导航串台、反向链接误把代码示例算作引用、空标题折叠误伤上一节、macOS 菜单动作过期与 CLI 子进程 PATH 等一批边界问题。
 
-### v0.6.4 平台安装包对照
+### v0.6.5 平台安装包对照
 
-> 以下链接指向 v0.6.4 Release 资产；安装包由 GitHub Actions 依据 v0.6.4 标签源码构建，并于 2026-10-17 重新构建（旧资产已清空，请重新下载覆盖安装）。Windows 安装包未签名，首次运行可能出现 SmartScreen 提示；macOS 安装包未签名、未公证，首次打开需右键「打开」放行。
+> 以下链接指向 v0.6.5 Release 资产，安装包由 GitHub Actions 依据 `v0.6.5` 标签源码构建。Windows 安装包未签名，首次运行可能出现 SmartScreen 提示；macOS 安装包未签名、未公证，首次打开需右键「打开」放行；Linux AppImage 需要 WebKitGTK 4.1。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor-0.6.4-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.4/Zeditor_0.6.4_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_0.6.5_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_0.6.5_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_0.6.5_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_0.6.5_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_0.6.5_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor-0.6.5-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.5/Zeditor_0.6.5_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.4.md`](docs/releases/v0.6.4.md)。
+完整更新说明、转换模块下载与安装提示见 [`docs/releases/v0.6.5.md`](docs/releases/v0.6.5.md)。
 
 ## Contributors
 
 - CodeX
 - Claude Code
-
-### 下载安装
-
-从 [Releases](https://github.com/zhcx/zeditor/releases) 页面下载适合您系统的安装包：
-
-| 平台 | 架构 | 推荐下载 | 安装包格式 |
-|------|------|----------|-----------|
-| Windows | x86_64 | `.exe` (NSIS) | `.msi` / `.exe` |
-| macOS Intel | x86_64 | `.dmg` | `.dmg` / `.app.tar.gz` |
-| macOS Apple Silicon | arm64 | `.dmg` | `.dmg` / `.app.tar.gz` |
-| Linux | x86_64 | `.AppImage` | `.deb` / `.rpm` / `.AppImage` |
 
 ### 本地构建
 

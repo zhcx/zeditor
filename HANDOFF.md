@@ -1,9 +1,10 @@
 # HANDOFF：feat/editor-display-wheel-block-menu
 
-## 当前接续状态（2026-10-18 稳定性审查后）
+## 当前接续状态（2026-10-18 v0.6.5 发布）
 
-- 当前基线为 `c2c6ef4`，已同步 `origin/feat/editor-display-wheel-block-menu`。版本仍为 0.6.4。
-- 本轮审查修复保留在本地工作区，**未提交、未推送、未发版**。
+- 版本号已升到 **0.6.5**，稳定性审查修复已提交，合并到 `main` 并推送 GitHub。
+- 发布说明见 `docs/releases/v0.6.5.md`（CI 依据 `v0.6.5` 标签构建 Windows / macOS Apple Silicon / macOS Intel / Linux 安装包）。
+- 以下「本轮审查修复保留在本地工作区」为审查当时的记录，已过时。
 - 已修复增量分块边界、Wiki/脚注光标与 Enter 完整性、脚注定义/悬停、空标题折叠、Wiki 路径/反向链接/异步导航，以及 macOS 菜单、CLI 子进程环境和签名配置问题。
 - 完整验证：TypeScript、ESLint、构建、Rust fmt/严格 Clippy 通过；前端 687 项通过；Rust 182 项通过、3 项原有忽略项；隔离 Edge 浏览器 44 个场景通过。
 - 300 段落拖动 P95 约 16.8 ms，但仍有少量长任务；真实 macOS 原生行为、签名公证和安装运行尚需对应环境复测。本轮没有重新打安装包。
