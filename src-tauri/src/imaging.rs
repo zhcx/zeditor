@@ -7,6 +7,34 @@ use std::path::{Path, PathBuf};
 
 use base64::Engine;
 
+fn unescape_image_attribute(source: &str) -> std::borrow::Cow<'_, str> {
+    static REFERENCES: std::sync::LazyLock<regex::Regex> = std::sync::LazyLock::new(|| {
+        regex::Regex::new(r"&(?:amp|quot|apos|lt|gt|#[xX][0-9a-fA-F]+|#[0-9]+);").unwrap()
+    });
+    REFERENCES.replace_all(source, |capture: &regex::Captures<'_>| {
+        let entity = &capture[0];
+        match entity {
+            "&amp;" => "&".into(),
+            "&quot;" => "\"".into(),
+            "&apos;" => "'".into(),
+            "&lt;" => "<".into(),
+            "&gt;" => ">".into(),
+            _ => {
+                let digits = &entity[2..entity.len() - 1];
+                let code = if digits.starts_with(['x', 'X']) {
+                    u32::from_str_radix(&digits[1..], 16)
+                } else {
+                    digits.parse()
+                };
+                code.ok()
+                    .and_then(char::from_u32)
+                    .map(|value| value.to_string())
+                    .unwrap_or_else(|| entity.to_owned())
+            }
+        }
+    })
+}
+
 /// 将 HTML 中引用的本地图片替换为 base64 data URL。
 pub(crate) fn embed_images(html: &str, md_file_path: Option<&str>) -> String {
     let mut result = String::with_capacity(html.len());
@@ -80,7 +108,13 @@ fn resolve_image_src(
         return None;
     }
 
-    let p = std::path::Path::new(src);
+    let source = unescape_image_attribute(src);
+    let path = source.split(['?', '#']).next()?;
+    let decoded = urlencoding::decode(path).ok()?;
+    if decoded.starts_with(['\\']) || decoded.starts_with("//") || decoded.contains("://") {
+        return None;
+    }
+    let p = std::path::Path::new(decoded.as_ref());
     let resolved = if p.is_absolute() {
         p.to_path_buf()
     } else {
@@ -194,5 +228,31 @@ mod tests {
         let output = embed_images(html, None);
 
         assert_eq!(output, html);
+    }
+
+    #[test]
+    fn embeds_uri_encoded_cjk_and_html_escaped_local_image_paths() {
+        let root =
+            std::env::temp_dir().join(format!("zeditor-encoded-export-{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(root.join(".assets")).unwrap();
+        std::fs::write(root.join(".assets/中文 图# &.png"), [0_u8, 1, 2, 3]).unwrap();
+        let document = root.join("note.md");
+        let html =
+            r#"<img src=".assets/%E4%B8%AD%E6%96%87%20%E5%9B%BE%23%20&amp;.png?v=1#preview">"#;
+        let output = embed_images(html, Some(&document.to_string_lossy()));
+        assert!(
+            output.contains("data:image/png;base64,AAECAw=="),
+            "{output}"
+        );
+        std::fs::write(root.join(".assets/literal&#35;.png"), [4_u8, 5]).unwrap();
+        let literal = embed_images(
+            r#"<img src=".assets/literal&amp;%2335;.png">"#,
+            Some(&document.to_string_lossy()),
+        );
+        assert!(
+            literal.contains("data:image/png;base64,BAU="),
+            "HTML and URI references must each decode once: {literal}"
+        );
+        std::fs::remove_dir_all(root).unwrap();
     }
 }

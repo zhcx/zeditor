@@ -16,6 +16,7 @@ import { resolveSaveBaseName } from '../../utils/saveName';
 import { formatShortcut } from '../../utils/platformShortcuts';
 import { isMacOS, isNativeMenuActive } from '../../utils/platform';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
+import { captureExportSnapshot, type ExportSnapshot } from '../../utils/exportSnapshot';
 import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
 import { createMenuDispatcher, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
@@ -462,7 +463,6 @@ https://github.com/zhcx/zeditor
 
 export function MenuBar() {
   const {
-    content,
     settings,
     setSettings,
     setSettingsOpen,
@@ -471,7 +471,7 @@ export function MenuBar() {
     convertDocument,
     saveTab,
     getActiveTab
-  } = useAppStore(useShallow(state => ({ content: state.content, settings: state.settings, setSettings: state.setSettings, setSettingsOpen: state.setSettingsOpen, addTab: state.addTab, openFile: state.openFile, convertDocument: state.convertDocument, saveTab: state.saveTab, getActiveTab: state.getActiveTab })));
+  } = useAppStore(useShallow(state => ({ activeTabId: state.activeTabId, settings: state.settings, setSettings: state.setSettings, setSettingsOpen: state.setSettingsOpen, addTab: state.addTab, openFile: state.openFile, convertDocument: state.convertDocument, saveTab: state.saveTab, getActiveTab: state.getActiveTab })));
   const mode = useAppStore((state) => state.mode);
   // 主题偏好解析与 themes/apply 的 resolveThemePreference 同规则，用于菜单当前态勾选。
   const resolvedTheme = resolveThemePreference(settings.appearance.theme);
@@ -504,6 +504,7 @@ export function MenuBar() {
   const [pdfExportOpen, setPdfExportOpen] = useState(false);
   const [imageExportOpen, setImageExportOpen] = useState(false);
   const [weChatExportOpen, setWeChatExportOpen] = useState(false);
+  const [exportSnapshot, setExportSnapshot] = useState<ExportSnapshot | null>(null);
   const [downloadProgress, setDownloadProgress] = useState<DownloadProgress | null>(null);
   const [downloadDone, setDownloadDone] = useState(false);
   const [downloadError, setDownloadError] = useState<string | null>(null);
@@ -721,47 +722,46 @@ export function MenuBar() {
     dropdown.classList.toggle('submenu-up', overflowBelow && fitsAbove);
   };
 
-  const getExportFilename = (format: string) => {
-    const activeTab = getActiveTab();
-    if (activeTab) {
-      const title = activeTab.path
-        ? activeTab.path.split(/[\\/]/).pop()?.replace(/\.md$/i, '') || activeTab.title
-        : activeTab.title;
-      return title + '.' + format;
-    }
-    return 'document.' + format;
-  };
-
   const renderMarkdown = (text: string): string => {
     return renderMarkdownToHtml(text);
   };
 
+  const openExportDialog = (format: 'pdf' | 'image' | 'wechat') => {
+    setExportSnapshot(captureExportSnapshot(useAppStore.getState));
+    if (format === 'pdf') setPdfExportOpen(true);
+    else if (format === 'image') setImageExportOpen(true);
+    else setWeChatExportOpen(true);
+    setActiveMenu(null);
+    setMenuOpen(false);
+  };
+
   const handleExport = async (format: 'pdf' | 'html' | 'word') => {
     try {
-      const activeTab = getActiveTab();
-      const filePath = activeTab?.path || null;
+      const snapshot = captureExportSnapshot(useAppStore.getState);
+      const filePath = snapshot.path;
 
       // Reuse the preview pipeline so the exported source HTML includes the same
       // formulas, footnotes, task lists, media placeholders, and wiki-link syntax.
-      const documentTitle = getActiveTab()?.title?.replace(/\.md$/i, '') || 'document';
-      const htmlBody = format === 'word' ? '' : applyExportTemplate(renderMarkdown(content), documentTitle, loadExportTemplate());
+      const documentTitle = snapshot.title;
+      const template = loadExportTemplate();
+      const renderBody = () => applyExportTemplate(renderMarkdown(snapshot.content), documentTitle, template);
 
       if (format === 'html') {
-        const defaultFilename = getExportFilename('html');
+        const defaultFilename = `${documentTitle}.html`;
         const selected = await save({
           filters: [{ name: 'HTML', extensions: ['html'] }],
           defaultPath: defaultFilename,
         });
         if (selected) {
           const fullHtml = await invoke<string>('export_html', {
-            htmlBody,
+            htmlBody: renderBody(),
             settings: settings.export,
             filePath
           });
           await invoke('save_file_content', { path: selected, content: fullHtml });
         }
       } else if (format === 'word') {
-        const defaultFilename = getExportFilename('docx');
+        const defaultFilename = `${documentTitle}.docx`;
         const selected = await save({
           filters: [{ name: 'Word 文档（.docx）', extensions: ['docx'] }],
           defaultPath: defaultFilename,
@@ -771,8 +771,8 @@ export function MenuBar() {
           const [{ createDocx }, { loadDocxImage }] = await Promise.all([
             import('../../utils/docxExport'), import('../../utils/docxImages'),
           ]);
-          const wordDocument = await createDocx(content, {
-            ...loadExportTemplate(), title: documentTitle,
+          const wordDocument = await createDocx(snapshot.content, {
+            ...template, title: documentTitle,
             loadImage: source => loadDocxImage(source, filePath),
           });
           await invoke('save_file_bytes', { path: selected, dataBase64: wordDocument.base64 });
@@ -780,14 +780,14 @@ export function MenuBar() {
         }
       } else if (format === 'pdf') {
         // 使用新的直接 PDF 导出功能
-        const defaultFilename = getExportFilename('pdf');
+        const defaultFilename = `${documentTitle}.pdf`;
         const selected = await save({
           filters: [{ name: 'PDF', extensions: ['pdf'] }],
           defaultPath: defaultFilename,
         });
         if (selected) {
           await invoke<string>('export_pdf_direct', {
-            htmlBody,
+            htmlBody: renderBody(),
             outputPath: selected,
             settings: settings.export,
             options: null,
@@ -882,12 +882,12 @@ export function MenuBar() {
           label: t('导出', language),
           children: [
             { label: t('导出为 HTML', language), action: () => handleExport('html') },
-            { label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); setMenuOpen(false); } },
+            { label: t('导出为 PDF...', language), action: () => openExportDialog('pdf') },
             { label: t('导出为 Word', language), action: () => handleExport('word') },
           ],
         },
         { label: t('导出为 HTML', language), action: () => handleExport('html') },
-        { label: t('导出为 PDF...', language), action: () => { setPdfExportOpen(true); setActiveMenu(null); } },
+        { label: t('导出为 PDF...', language), action: () => openExportDialog('pdf') },
       ],
     },
     {
@@ -959,8 +959,8 @@ export function MenuBar() {
 
   const fileMenu = menus[1];
   const exportMenu = fileMenu.items.find((item) => item.children)?.children;
-  exportMenu?.push({ label: '导出公众号排版 HTML...', action: () => { setWeChatExportOpen(true); setActiveMenu(null); setMenuOpen(false); } });
-  exportMenu?.push({ label: '导出为图片...', action: () => { setImageExportOpen(true); setActiveMenu(null); setMenuOpen(false); } });
+  exportMenu?.push({ label: '导出公众号排版 HTML...', action: () => openExportDialog('wechat') });
+  exportMenu?.push({ label: '导出为图片...', action: () => openExportDialog('image') });
 
   useEffect(() => {
     const handleClickOutside = (event: MouseEvent) => {
@@ -1200,23 +1200,23 @@ export function MenuBar() {
         />
       )}
       {downloadError && helpModal === 'update' && <div className="update-toast-error" role="alert">{downloadError}</div>}
-      {pdfExportOpen && (
+      {pdfExportOpen && exportSnapshot && (
         <Suspense fallback={null}>
           <PdfExportDialog
-            content={content}
-            filePath={getActiveTab()?.path || null}
-            onClose={() => setPdfExportOpen(false)}
+            content={exportSnapshot.content}
+            filePath={exportSnapshot.path}
+            onClose={() => { setPdfExportOpen(false); setExportSnapshot(null); }}
           />
         </Suspense>
       )}
-      {imageExportOpen && (
+      {imageExportOpen && exportSnapshot && (
         <Suspense fallback={null}>
-          <ImageExportDialog content={content} onClose={() => setImageExportOpen(false)} />
+          <ImageExportDialog content={exportSnapshot.content} onClose={() => { setImageExportOpen(false); setExportSnapshot(null); }} />
         </Suspense>
       )}
-      {weChatExportOpen && (
+      {weChatExportOpen && exportSnapshot && (
         <Suspense fallback={null}>
-          <WeChatExportDialog content={content} title={getActiveTab()?.title?.replace(/\.md$/i, '') || 'Zeditor 文章'} onClose={() => setWeChatExportOpen(false)} />
+          <WeChatExportDialog content={exportSnapshot.content} title={exportSnapshot.title} onClose={() => { setWeChatExportOpen(false); setExportSnapshot(null); }} />
         </Suspense>
       )}
     </>

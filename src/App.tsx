@@ -64,7 +64,7 @@ import './styles/onboarding.css';
 import './styles/macos.css';
 import { contentFontStack, typographyCssVariables } from './utils/appearanceSettings';
 import { resolveEditorDisplay } from './utils/editorDisplay';
-import { createRecoverySnapshot } from './utils/recovery';
+import { changedRecoveryTabs, createRecoverySnapshot } from './utils/recovery';
 import { LineWidthWheel } from './components/Editor/LineWidthWheel';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
 import { isMacOS, isNativeMenuActive } from './utils/platform';
@@ -553,17 +553,34 @@ function App() {
   // 每次输入停顿 900ms 后写入 app config 下的独立恢复快照；Rust 侧负责限额与原子替换。
   useEffect(() => {
     let timer: number | null = null;
+    const pendingTabIds = new Set<string>();
+    const knownRecoveryIds = new Set(useAppStore.getState().recoverySnapshots.map(snapshot => snapshot.id));
     const unsubscribe = useAppStore.subscribe((state, previous) => {
-      if (!state.recoveryLoaded || state.tabs === previous.tabs) return;
+      if (!state.recoveryLoaded) return;
+      for (const snapshot of state.recoverySnapshots) knownRecoveryIds.add(snapshot.id);
+      const changed = previous.recoveryLoaded ? changedRecoveryTabs(state.tabs, previous.tabs) : state.tabs;
+      if (changed.length === 0) return;
+      for (const tab of changed) pendingTabIds.add(tab.id);
       if (timer !== null) window.clearTimeout(timer);
       timer = window.setTimeout(() => {
         timer = null;
         const latest = useAppStore.getState();
-        const pending = latest.tabs.map(tab => {
+        const ids = [...pendingTabIds];
+        pendingTabIds.clear();
+        const pending = ids.map(id => {
+          const tab = latest.tabs.find(item => item.id === id);
+          if (!tab) return Promise.resolve();
           const snapshot = createRecoverySnapshot(tab);
-          if (snapshot) return persistRecoverySnapshot(snapshot);
-          if (tab.recoveryId || latest.recoverySnapshots.some(item => item.id === tab.id)) {
-            return deleteRecoverySnapshot(tab.recoveryId || tab.id);
+          const snapshotId = tab.recoveryId || tab.id;
+          if (snapshot) {
+            knownRecoveryIds.add(snapshotId);
+            return persistRecoverySnapshot(snapshot).catch(error => {
+              pendingTabIds.add(id);
+              throw error;
+            });
+          }
+          if (knownRecoveryIds.has(snapshotId) || tab.recoveryId) {
+            return deleteRecoverySnapshot(snapshotId).then(() => { knownRecoveryIds.delete(snapshotId); });
           }
           return Promise.resolve();
         });

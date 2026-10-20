@@ -821,6 +821,40 @@ pub(crate) async fn write_file_bytes_atomic_if_unchanged(
     write_file_bytes_atomic_inner(path, content, Some(expected)).await
 }
 
+// Keep compare-and-replace ordered for writers in this process. Weak entries avoid
+// retaining a lock for every document ever saved; unrelated documents stay parallel.
+type DocumentSaveLock = std::sync::Arc<tokio::sync::Mutex<()>>;
+static DOCUMENT_SAVE_LOCKS: std::sync::OnceLock<
+    Mutex<std::collections::HashMap<PathBuf, std::sync::Weak<tokio::sync::Mutex<()>>>>,
+> = std::sync::OnceLock::new();
+
+async fn document_save_lock(target: &Path, exists: bool) -> std::io::Result<DocumentSaveLock> {
+    let key = if exists {
+        tokio::fs::canonicalize(target).await
+    } else {
+        let parent = target
+            .parent()
+            .filter(|parent| !parent.as_os_str().is_empty())
+            .unwrap_or_else(|| Path::new("."));
+        tokio::fs::canonicalize(parent)
+            .await
+            .map(|parent| parent.join(target.file_name().unwrap_or_default()))
+    }?;
+    #[cfg(windows)]
+    let key = PathBuf::from(key.to_string_lossy().to_lowercase());
+    let mut locks = DOCUMENT_SAVE_LOCKS
+        .get_or_init(|| Mutex::new(std::collections::HashMap::new()))
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    locks.retain(|_, lock| lock.strong_count() > 0);
+    if let Some(lock) = locks.get(&key).and_then(std::sync::Weak::upgrade) {
+        return Ok(lock);
+    }
+    let lock = std::sync::Arc::new(tokio::sync::Mutex::new(()));
+    locks.insert(key, std::sync::Arc::downgrade(&lock));
+    Ok(lock)
+}
+
 async fn write_file_bytes_atomic_inner(
     path: &str,
     content: &[u8],
@@ -855,6 +889,14 @@ async fn write_file_bytes_atomic_inner(
     if expected.is_some() && metadata.is_none() {
         return Ok(false);
     }
+    let save_lock = match document_save_lock(&target, metadata.is_some()).await {
+        Ok(lock) => lock,
+        Err(error) if expected.is_some() && error.kind() == std::io::ErrorKind::NotFound => {
+            return Ok(false);
+        }
+        Err(error) => return Err(error.to_string()),
+    };
+    let _save_guard = save_lock.lock().await;
     // 同目录的临时文件确保最终重命名位于同一文件系统；写入失败保留原文档。
     let temporary = target.with_file_name(format!(".zeditor-save-{}.tmp", uuid::Uuid::new_v4()));
     let result = async {
@@ -891,6 +933,10 @@ async fn write_file_bytes_atomic_inner(
     }
     result.map_err(|error| error.to_string())
 }
+
+#[cfg(test)]
+#[path = "document_io_probe.rs"]
+mod document_io_probe;
 
 #[tauri::command]
 pub async fn get_file_content(path: String) -> Result<String, String> {
@@ -1593,6 +1639,7 @@ pub async fn import_media_asset(
 pub async fn resolve_media_sources(
     document_path: String,
     sources: Vec<String>,
+    url_encoded: Option<bool>,
 ) -> Result<Vec<Option<String>>, String> {
     let document_dir = document_dir_of(&document_path);
     let mut resolved = Vec::with_capacity(sources.len());
@@ -1600,6 +1647,32 @@ pub async fn resolve_media_sources(
     for source in sources {
         let trimmed = source.trim();
         if trimmed.is_empty() || is_remote_media_source(trimmed) {
+            resolved.push(None);
+            continue;
+        }
+        // Custom media directives store literal filenames. Only DOM image URLs
+        // undergo URI decoding, otherwise '#' and '%20' change the target file.
+        let absolute = Path::new(trimmed).is_absolute();
+        let decoded = if !url_encoded.unwrap_or(false) {
+            std::borrow::Cow::Borrowed(trimmed)
+        } else {
+            let path = trimmed.split(['?', '#']).next().unwrap_or(trimmed);
+            match urlencoding::decode(path) {
+                Ok(value) => value,
+                Err(_) => {
+                    resolved.push(None);
+                    continue;
+                }
+            }
+        };
+        let trimmed = decoded.as_ref();
+        if !absolute
+            && (trimmed.is_empty()
+                || is_remote_media_source(trimmed)
+                || is_unc_path(trimmed)
+                || is_drive_relative_path(trimmed)
+                || Path::new(trimmed).is_absolute())
+        {
             resolved.push(None);
             continue;
         }

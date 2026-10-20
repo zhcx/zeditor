@@ -35,7 +35,8 @@ test('checked saves compare the disk version before replacing file bytes', async
   const app = await read('../src/App.tsx');
   assert.match(commands, /pub async fn save_file_content_checked/);
   assert.match(commands, /write_file_bytes_atomic_if_unchanged/);
-  assert.match(versions, /if !expected\.matches_bytes\(&current\)/);
+  assert.match(commands, /if !expected\.matches_bytes\(&current\)/);
+  assert.match(commands, /let _save_guard = save_lock\.lock\(\)\.await/);
   assert.match(versions, /write_file_bytes_atomic_if_unchanged\(path, bytes, expected\)/);
   assert.match(store, /invoke<CheckedSaveResult>\('save_file_content_checked'/);
   assert.match(store, /if \(outcome\.status === 'conflict'\)/);

@@ -136,6 +136,12 @@ impl S3Client {
         let host = parsed
             .host_str()
             .ok_or_else(|| "S3 request URL has no host".to_string())?;
+        // Sign the same authority reqwest transmits in Host. Url::port()
+        // excludes default ports and retains custom NAS/MinIO ports.
+        let host = match parsed.port() {
+            Some(port) => format!("{host}:{port}"),
+            None => host.to_string(),
+        };
         let uri = if parsed.path().is_empty() {
             "/".to_string()
         } else {
@@ -410,6 +416,35 @@ mod tests {
         assert!(request
             .authorization
             .contains("SignedHeaders=host;x-amz-content-sha256;x-amz-date"));
+    }
+
+    #[tokio::test]
+    async fn signature_matches_actual_host_header_on_custom_port() {
+        let server = crate::webdav::client::test_support::TestDavServer::success().await;
+        let settings = settings_for(&server.url);
+        let client = S3Client::new(&settings).unwrap();
+        client.put("/中文 #.md", b"exact payload").await.unwrap();
+        let requests = server.requests().await;
+        let request = &requests[0];
+        let timestamp = &request.headers["x-amz-date"];
+        let hash = payload_hash(&request.body);
+        let canonical_headers = format!(
+            "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
+            request.headers["host"], hash, timestamp
+        );
+        let expected = authorization(&SigningContext {
+            method: &request.method,
+            uri: &request.path,
+            canonical_headers: &canonical_headers,
+            signed_headers: SIGNED_HEADERS,
+            payload_hash: &hash,
+            access_key: &settings.access_key,
+            secret_key: &settings.secret_key,
+            region: &settings.region,
+            timestamp,
+            date: &timestamp[..8],
+        });
+        assert_eq!(request.authorization, expected);
     }
 
     #[tokio::test]

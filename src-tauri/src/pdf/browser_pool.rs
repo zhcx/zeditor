@@ -1,6 +1,7 @@
 use headless_chrome::browser::LaunchOptionsBuilder;
 use headless_chrome::Browser;
 use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::error::{PdfError, PdfResult};
@@ -11,6 +12,7 @@ use super::error::{PdfError, PdfResult};
 /// 2. Chrome 崩溃后可通过 `invalidate_browser()` 清空槽位并重建，
 ///    之前 OnceLock 一旦写入便永远无法恢复。
 static BROWSER_SLOT: Mutex<Option<Arc<Browser>>> = Mutex::new(None);
+static SHUTTING_DOWN: AtomicBool = AtomicBool::new(false);
 
 fn lock_slot() -> std::sync::MutexGuard<'static, Option<Arc<Browser>>> {
     BROWSER_SLOT
@@ -20,6 +22,9 @@ fn lock_slot() -> std::sync::MutexGuard<'static, Option<Arc<Browser>>> {
 
 pub fn get_browser() -> PdfResult<Arc<Browser>> {
     let mut slot = lock_slot();
+    if SHUTTING_DOWN.load(Ordering::SeqCst) {
+        return Err(PdfError::ChromeInit("应用正在退出".into()));
+    }
     if let Some(browser) = slot.as_ref() {
         return Ok(browser.clone());
     }
@@ -32,6 +37,47 @@ pub fn get_browser() -> PdfResult<Arc<Browser>> {
 /// 下次 `get_browser` 将重新启动浏览器。
 pub fn invalidate_browser() {
     *lock_slot() = None;
+}
+
+/// Active exports also hold an Arc, so dropping the pool alone cannot stop
+/// Chrome at exit. Explicitly close the owned browser and prevent restart.
+pub fn shutdown_browser() {
+    let browser = {
+        let mut slot = lock_slot();
+        SHUTTING_DOWN.store(true, Ordering::SeqCst);
+        slot.take()
+    };
+    if let Some(browser) = browser {
+        request_browser_shutdown(&browser).ok();
+    }
+}
+
+/// Use the browser endpoint, not a tab: the first export may not have created
+/// one yet. Bound the local handshake so shutdown cannot wait indefinitely.
+fn request_browser_shutdown(browser: &Browser) -> Result<(), Box<dyn std::error::Error>> {
+    use std::{
+        net::{Ipv4Addr, SocketAddr, TcpStream},
+        time::Duration,
+    };
+    use tokio_tungstenite::tungstenite::{client, Message};
+
+    let websocket_url = browser.get_ws_url();
+    let endpoint = reqwest::Url::parse(&websocket_url)?;
+    if endpoint.scheme() != "ws" || !matches!(endpoint.host_str(), Some("127.0.0.1" | "localhost"))
+    {
+        return Err("PDF browser endpoint must be local".into());
+    }
+    let address = SocketAddr::from((
+        Ipv4Addr::LOCALHOST,
+        endpoint.port().ok_or("missing PDF browser port")?,
+    ));
+    let timeout = Duration::from_secs(1);
+    let stream = TcpStream::connect_timeout(&address, timeout)?;
+    stream.set_read_timeout(Some(timeout))?;
+    stream.set_write_timeout(Some(timeout))?;
+    let (mut socket, _) = client(websocket_url.as_str(), stream)?;
+    socket.send(Message::Text(r#"{"id":1,"method":"Browser.close"}"#.into()))?;
+    Ok(())
 }
 
 fn launch_browser() -> PdfResult<Browser> {
@@ -96,5 +142,31 @@ mod tests {
         let listener = TcpListener::bind(("127.0.0.1", port));
 
         assert!(listener.is_ok());
+    }
+
+    #[test]
+    #[ignore = "manual owned Chrome lifecycle test; run in its own test process"]
+    fn native_shutdown_closes_browser_without_tabs_while_an_export_holds_an_arc() {
+        let browser = get_browser().unwrap();
+        let tabs = browser.get_tabs().lock().unwrap().clone();
+        for tab in tabs {
+            tab.close(false).unwrap();
+        }
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while !browser.get_tabs().lock().unwrap().is_empty() && std::time::Instant::now() < deadline
+        {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        assert!(browser.get_tabs().lock().unwrap().is_empty());
+        shutdown_browser();
+        std::thread::sleep(std::time::Duration::from_millis(200));
+        assert!(
+            browser.new_tab().is_err(),
+            "outstanding Arc kept a tabless browser alive"
+        );
+        assert!(
+            get_browser().is_err(),
+            "shutdown must prevent a late export restart"
+        );
     }
 }

@@ -23,6 +23,7 @@ import { fileVersionsMatch, type FileVersion } from '../utils/fileVersion';
 let pendingSaves = 0;
 let fileOpenSequence = 0;
 const pendingFileReads = new Map<string, Promise<TextDocument>>();
+const pendingVersionChecks = new Map<string, Promise<void>>();
 const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
   const browserSettingsKey = 'zeditor.browser.settings';
 let settingsMutationVersion = 0;
@@ -1071,23 +1072,30 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   checkFileVersion: async (tabId) => {
     if (!isTauriRuntime()) return;
+    const pending = pendingVersionChecks.get(tabId);
+    if (pending) return pending;
+    if (get().activeTabId === tabId) get().editorView?.flushPendingEdits?.();
     const tab = get().tabs.find(item => item.id === tabId);
     if (!tab?.path || !tab.fileVersion || tab.externalChangePending || get().fileConflict) return;
-    try {
+    const check = (async () => { try {
       const currentVersion = await invoke<FileVersion | null>('get_file_version', { path: tab.path });
-      const latest = get().tabs.find(item => item.id === tabId);
-      if (!latest || latest.path !== tab.path || !fileVersionsMatch(latest.fileVersion, tab.fileVersion)) return;
       if (!fileVersionsMatch(tab.fileVersion, currentVersion)) {
         const current = currentVersion
           ? await invoke<TextDocument>('read_text_document', { path: tab.path, encoding: tab.encoding || null }).catch(() => null)
           : null;
+        if (get().activeTabId === tabId) get().editorView?.flushPendingEdits?.();
+        const latest = get().tabs.find(item => item.id === tabId);
+        if (!latest || latest.path !== tab.path || !fileVersionsMatch(latest.fileVersion, tab.fileVersion)) return;
+        if (get().fileConflict && get().fileConflict?.tabId !== tabId) return;
+        const diskVersion = current?.fileVersion ?? currentVersion;
+        if (fileVersionsMatch(tab.fileVersion, diskVersion)) return;
         set(state => ({ fileConflict: {
           tabId,
           title: latest.title,
           path: tab.path,
           localContent: latest.content,
           diskContent: current?.content ?? null,
-          diskFileVersion: currentVersion,
+          diskFileVersion: diskVersion,
           diskExists: currentVersion !== null,
         }, tabs: state.tabs.map(item => item.id === tabId ? { ...item, externalChangePending: true } : item) }));
       }
@@ -1095,12 +1103,16 @@ export const useAppStore = create<AppState>((set, get) => ({
       // A missing file is also reported by the checked save path; avoid turning
       // transient access errors during focus into a modal or data loss.
       console.warn('Failed to check the active document version:', error);
-    }
+    } })();
+    pendingVersionChecks.set(tabId, check);
+    try { await check; }
+    finally { if (pendingVersionChecks.get(tabId) === check) pendingVersionChecks.delete(tabId); }
   },
 
   reloadExternalFile: async () => {
     const conflict = get().fileConflict;
     if (!conflict) return;
+    if (get().activeTabId === conflict.tabId) get().editorView?.flushPendingEdits?.();
     const latest = get().tabs.find(item => item.id === conflict.tabId);
     if (!latest) { set({ fileConflict: null }); return; }
     if (!conflict.diskExists) {
@@ -1113,15 +1125,29 @@ export const useAppStore = create<AppState>((set, get) => ({
       }));
       return;
     }
-    if (conflict.diskContent === null) return;
+    let current: TextDocument;
+    try {
+      current = await invoke<TextDocument>('read_text_document', { path: conflict.path, encoding: latest.encoding || null });
+    } catch (error) {
+      get().setUploadStatus('error', 0, `重新读取磁盘文件失败，本地修改已保留：${String(error)}`);
+      return;
+    }
+    if (get().activeTabId === conflict.tabId) get().editorView?.flushPendingEdits?.();
+    const afterRead = get().tabs.find(item => item.id === conflict.tabId);
+    if (!afterRead || afterRead.path !== latest.path || get().fileConflict !== conflict) return;
+    if (afterRead.content !== latest.content || afterRead.encoding !== latest.encoding) {
+      set({ fileConflict: { ...conflict, localContent: afterRead.content, diskContent: current.content, diskFileVersion: current.fileVersion || null, diskExists: true } });
+      get().setUploadStatus('error', 0, '读取期间文稿已修改，请重新确认后再载入磁盘版本。');
+      return;
+    }
     if (get().activeTabId === conflict.tabId && get().editorView?.getValue() === latest.content) {
-      get().editorView?.resetValue?.(conflict.diskContent);
+      get().editorView?.resetValue?.(current.content);
     }
     set(state => ({
       fileConflict: null,
-      content: state.activeTabId === conflict.tabId ? conflict.diskContent! : state.content,
+      content: state.activeTabId === conflict.tabId ? current.content : state.content,
       tabs: state.tabs.map(item => item.id === conflict.tabId
-        ? { ...item, content: conflict.diskContent!, modified: false, fileVersion: conflict.diskFileVersion || undefined, externalChangePending: false }
+        ? { ...item, content: current.content, encoding: current.encoding, modified: false, fileVersion: current.fileVersion || undefined, externalChangePending: false }
         : item),
     }));
     get().updateWordCount();
@@ -1237,7 +1263,13 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   updateWordCount: () => {
+    if (wordCountTimer !== null) { clearTimeout(wordCountTimer); wordCountTimer = null; }
     const { content } = get();
+    if (content.length > 64 * 1024) {
+      set({ wordCount: '统计中…' });
+      get().scheduleWordCount();
+      return;
+    }
     set({ wordCount: formatTextStatistics(content) });
   },
 
@@ -1249,7 +1281,7 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (wordCountTimer !== null) clearTimeout(wordCountTimer);
     wordCountTimer = setTimeout(() => {
       wordCountTimer = null;
-      get().updateWordCount();
+      set({ wordCount: formatTextStatistics(get().content) });
     }, WORD_COUNT_DELAY);
   },
 

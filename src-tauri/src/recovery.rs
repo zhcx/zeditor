@@ -481,4 +481,54 @@ mod tests {
 
         assert_eq!(store.list().expect("list snapshots"), vec![latest]);
     }
+
+    #[test]
+    fn interrupted_temp_file_does_not_replace_the_last_durable_snapshot() {
+        let root = test_dir();
+        let path = root.join("recovery-snapshots.json");
+        let store = RecoveryStore::new(path.clone());
+        let now = current_time_millis();
+        let original = snapshot("tab-a", now, "durable 中文 😀");
+        store
+            .upsert(original.clone())
+            .expect("save durable snapshot");
+        let temporary = sibling_temporary_path(&path);
+        fs::write(&temporary, b"[{\"id\":\"tab-a\",\"content\":\"interrupted")
+            .expect("simulate interrupted temp write");
+
+        let restarted = RecoveryStore::new(path);
+        assert_eq!(restarted.list().expect("reopen store"), vec![original]);
+        assert!(
+            temporary.exists(),
+            "uncommitted data is not adopted as a valid store"
+        );
+        fs::remove_dir_all(root).expect("remove disposable fixture");
+    }
+
+    #[test]
+    fn expired_upsert_cannot_replace_existing_recoverable_content() {
+        let root = test_dir();
+        let path = root.join("recovery-snapshots.json");
+        let store = RecoveryStore::new(path.clone());
+        let now = current_time_millis();
+        let current = snapshot("tab-a", now, "keep current");
+        store.upsert(current.clone()).expect("save current");
+        let durable_bytes = fs::read(&path).expect("read durable store");
+        assert!(store
+            .upsert(snapshot(
+                "tab-a",
+                now - MAX_SNAPSHOT_AGE_MILLIS - 1,
+                "expired"
+            ))
+            .is_err());
+        assert_eq!(
+            fs::read(&path).expect("read unchanged store"),
+            durable_bytes
+        );
+        assert_eq!(
+            store.list().expect("list unchanged snapshots"),
+            vec![current]
+        );
+        fs::remove_dir_all(root).expect("remove disposable fixture");
+    }
 }

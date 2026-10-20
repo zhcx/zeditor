@@ -24,7 +24,7 @@ const resolvedMediaCache = new Map<string, { value: string | null; expiresAt: nu
 const pendingMediaResolutions = new Map<string, Promise<Map<string, string | null>>>();
 const MAX_RESOLVED_SOURCES = 512;
 
-const cacheKey = (documentPath: string, source: string) => `${documentPath}\u0000${source}`;
+const cacheKey = (documentPath: string, source: string, urlEncoded: boolean) => `${documentPath}\u0000${urlEncoded ? 'url' : 'path'}\u0000${source}`;
 
 export function clearResolvedMediaCache(): void {
   resolvedMediaCache.clear();
@@ -33,9 +33,11 @@ export function clearResolvedMediaCache(): void {
 
 /** 同一路径被重新导入或换名后，让预览重新解析，避免继续使用旧结论。 */
 export function invalidateResolvedSource(documentPath: string | null, source: string): void {
-  const key = cacheKey(documentPath || '', source);
-  resolvedMediaCache.delete(key);
-  pendingMediaResolutions.delete(key);
+  for (const urlEncoded of [false, true]) {
+    const key = cacheKey(documentPath || '', source, urlEncoded);
+    resolvedMediaCache.delete(key);
+    pendingMediaResolutions.delete(key);
+  }
 }
 
 /** 绝对路径 → WebView 可播放的 asset 协议地址。 */
@@ -65,6 +67,7 @@ export async function importMediaAsset(sourcePath: string): Promise<MediaAssetIm
 export async function resolveMediaSources(
   documentPath: string | null,
   sources: string[],
+  urlEncoded = false,
 ): Promise<Map<string, string>> {
   const playable = new Map<string, string>();
   if (!isTauriRuntime()) return playable;
@@ -74,17 +77,17 @@ export async function resolveMediaSources(
   const localSources = [...new Set(sources)].filter(source => source && !isRemoteMediaSource(source));
   const now = Date.now();
   const pending = localSources.filter(source => {
-    const key = cacheKey(baseDocument, source);
+    const key = cacheKey(baseDocument, source, urlEncoded);
     const cached = resolvedMediaCache.get(key);
     if (cached && cached.expiresAt <= now) resolvedMediaCache.delete(key);
     return !resolvedMediaCache.has(key) && !pendingMediaResolutions.has(key);
   });
   if (pending.length > 0) {
-    const request = invoke<(string | null)[]>('resolve_media_sources', { documentPath: baseDocument, sources: pending })
+    const request = invoke<(string | null)[]>('resolve_media_sources', { documentPath: baseDocument, sources: pending, urlEncoded })
       .then(values => {
         const resolved = new Map<string, string | null>();
         pending.forEach((source, index) => {
-          const key = cacheKey(baseDocument, source);
+          const key = cacheKey(baseDocument, source, urlEncoded);
           const value = values[index] ?? null;
           resolved.set(source, value);
           // 失效或清空之后，旧请求不得重新污染缓存。
@@ -100,19 +103,19 @@ export async function resolveMediaSources(
       .catch(() => new Map<string, string | null>())
       .finally(() => {
         for (const source of pending) {
-          const key = cacheKey(baseDocument, source);
+          const key = cacheKey(baseDocument, source, urlEncoded);
           if (pendingMediaResolutions.get(key) === request) pendingMediaResolutions.delete(key);
         }
       });
-    for (const source of pending) pendingMediaResolutions.set(cacheKey(baseDocument, source), request);
+    for (const source of pending) pendingMediaResolutions.set(cacheKey(baseDocument, source, urlEncoded), request);
   }
   // 本次请求的结果独立保留：即使缓存淘汰，也不能漏掉大文档中的媒体。
-  const requests = new Set(localSources.map(source => pendingMediaResolutions.get(cacheKey(baseDocument, source))));
+  const requests = new Set(localSources.map(source => pendingMediaResolutions.get(cacheKey(baseDocument, source, urlEncoded))));
   const resolved = new Map((await Promise.all([...requests].filter(request => request !== undefined))).flatMap(values => [...values]));
 
   for (const source of sources) {
     if (!source || isRemoteMediaSource(source)) continue;
-    const cached = resolvedMediaCache.get(cacheKey(baseDocument, source));
+    const cached = resolvedMediaCache.get(cacheKey(baseDocument, source, urlEncoded));
     const absolute = cached ? cached.value : resolved.get(source);
     if (absolute) playable.set(source, toPlayableMediaUrl(absolute));
   }

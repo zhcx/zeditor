@@ -352,6 +352,9 @@ fn main() {
         .expect("error while building tauri application");
 
     app.run(|app_handle, event| match event {
+        // Static pools are not dropped automatically at process exit. Release
+        // the owned PDF browser before leaving, including on Windows.
+        tauri::RunEvent::Exit => pdf::browser_pool::shutdown_browser(),
         // macOS 从 Finder 双击 .md 走 Apple Event，启动参数里没有路径。
         #[cfg(target_os = "macos")]
         tauri::RunEvent::Opened { urls } => {

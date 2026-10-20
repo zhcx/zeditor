@@ -9,7 +9,7 @@ test('HTML, Word and PDF exports begin with the shared Markdown renderer', async
   const wechat = await readFile(new URL('../src/components/Export/WeChatExportDialog.tsx', import.meta.url), 'utf8');
   assert.match(menu, /import \{ renderMarkdownToHtml \} from ['"]\.\.\/\.\.\/utils\/markdownPipeline['"]/);
   assert.match(menu, /const renderMarkdown = \(text: string\): string =>\s*\{\s*return renderMarkdownToHtml\(text\);\s*\}/);
-  assert.match(menu, /applyExportTemplate\(renderMarkdown\(content\)/);
+  assert.match(menu, /applyExportTemplate\(renderMarkdown\(snapshot\.content\)/);
   assert.match(pdf, /renderMarkdownToHtml\(content\)/);
   assert.match(image, /renderMarkdownToHtml\(content \|\| '暂无内容'\)/);
   assert.match(wechat, /renderMarkdownToHtml\(markdown \|\| '暂无内容'\)/);

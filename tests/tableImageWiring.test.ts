@@ -145,7 +145,7 @@ test('preview resolves local images, renders sizes and hosts the image interacti
   const enhancers = await read('../src/utils/markdownEnhancers.tsx');
 
   assert.match(pipeline, /core\.ruler\.after\('inline', 'image_size_attributes'/);
-  assert.match(enhancers, /resolveMediaSources\(options\.documentPath, localImageSources\)/);
+  assert.match(enhancers, /resolveMediaSources\(options\.documentPath, localImageSources, true\)/);
   assert.match(enhancers, /无法读取图片/);
   assert.match(enhancers, /enhanceTables\(root, options\.documentPath\)/);
   assert.match(enhancers, /table-column-handle/);

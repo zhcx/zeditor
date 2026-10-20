@@ -19,3 +19,11 @@ test('heavy table and code documents start with a smaller interactive first batc
   assert.equal(policy.nextBlockRenderBudget?.([{ kind: 'table' }], 0, 1), 1);
   assert.equal(policy.nextBlockRenderBudget?.([], 0), 0);
 });
+
+test('long documents increase follow-up batches while retaining the small first paint and explicit caller limits', () => {
+  const blocks = Array.from({ length: 10_000 }, () => ({ kind: 'paragraph' }));
+  assert.equal(policy.nextBlockRenderBudget?.(blocks, 0, 60), 60);
+  assert.equal(policy.nextBlockRenderBudget?.(blocks, 4000), 4480);
+  assert.equal(policy.nextBlockRenderBudget?.(blocks, 4000, 20), 4020);
+  assert.equal(policy.nextBlockRenderBudget?.(blocks, 9900), 10_000);
+});

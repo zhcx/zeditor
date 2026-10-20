@@ -678,7 +678,7 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
     .filter((source) => source && !isRemoteMediaSource(source)))];
   // 浏览器预览模式没有 asset 协议，相对路径只能保持原样，只有桌面端才解析与提示缺失。
   if (isDesktopRuntime && localImageSources.length > 0) {
-    void resolveMediaSources(options.documentPath, localImageSources).then((resolved) => {
+    void resolveMediaSources(options.documentPath, localImageSources, true).then((resolved) => {
       if (disposed) return;
       images.forEach((img) => {
         const source = img.getAttribute('src') || '';

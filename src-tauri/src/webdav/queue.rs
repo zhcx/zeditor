@@ -50,6 +50,19 @@ impl PendingTaskStore {
         self.write_atomically_unlocked(&tasks)
     }
 
+    /// Complete only the exact durable task this worker started. A newer
+    /// enqueue for the same document must survive an older worker's success.
+    pub fn complete(&self, completed: &PendingBackupTask) -> Result<(), String> {
+        let _guard = self.lock.lock().expect("queue lock");
+        let mut tasks = self.read_unlocked()?;
+        let before = tasks.len();
+        tasks.retain(|task| task != completed);
+        if tasks.len() == before {
+            return Ok(());
+        }
+        self.write_atomically_unlocked(&tasks)
+    }
+
     /// Read without acquiring the lock; callers must hold the lock.
     fn read_unlocked(&self) -> Result<Vec<PendingBackupTask>, String> {
         match fs::read(&self.path) {

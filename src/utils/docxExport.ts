@@ -64,7 +64,38 @@ export async function createDocx(source: string, options: DocxExportOptions): Pr
   const restoreMath = (value: string) => value.replace(new RegExp(`${formulaMarker}(\\d+)END`, 'g'), (_, id) => formulas[Number(id)]);
   const tokens = markdownRenderer.parse(protectMath(source), { zeditorFootnotes: definitions });
   const footnoteIds = new Map([...definitions.keys()].map((key, index) => [key, index + 1]));
-  const imageCache = new Map<string, Promise<DocxImage>>();
+  const footnoteTokens = new Map([...definitions].map(([name, definition]) => [name,
+    markdownRenderer.parse(protectMath(definition.content), { zeditorFootnotes: new Map() }),
+  ]));
+  const imageCache = new Map<string, { image: DocxImage } | { error: unknown }>();
+  const imageSources = new Set<string>();
+  const collectImages = (items: Token[]) => {
+    for (let index = 0; index < items.length; index += 1) {
+      const token = items[index];
+      if (token.meta?.footnoteDefinitionPrefix) {
+        while (index < items.length && items[index].type !== 'paragraph_close') index += 1;
+      } else if (token.type === 'image') {
+        const src = restoreMath(token.attrGet('src') ?? '');
+        if (!mediaKindOfSource(src) && !isPlatformPageUrl(src)) imageSources.add(src);
+      } else if (token.children) collectImages(token.children);
+    }
+  };
+  collectImages(tokens);
+  for (const items of footnoteTokens.values()) collectImages(items);
+  if (options.loadImage) {
+    const sources = [...imageSources];
+    let nextImage = 0;
+    // Settle failures here so an early failed image cannot produce an unhandled
+    // rejection while an earlier token is still loading. OOXML is emitted later
+    // in token order, independent of the order in which the workers finish.
+    await Promise.all(Array.from({ length: Math.min(4, sources.length) }, async () => {
+      while (nextImage < sources.length) {
+        const src = sources[nextImage++];
+        try { imageCache.set(src, { image: await options.loadImage!(src) }); }
+        catch (error) { imageCache.set(src, { error }); }
+      }
+    }));
+  }
   const numbering: { reference: string; levels: { level: number; format: typeof LevelFormat.DECIMAL | typeof LevelFormat.BULLET; text: string; start?: number; alignment: typeof AlignmentType.LEFT; style: { paragraph: { indent: { left: number; hanging: number } } } }[] }[] = [];
   const availableWidth = Math.max(96, (210 - 2 * (options.margin ?? 20)) * 96 / 25.4);
 
@@ -99,13 +130,18 @@ export async function createDocx(source: string, options: DocxExportOptions): Pr
           continue;
         }
         if (!options.loadImage) throw new Error(`无法读取图片“${src}”：未配置图片读取器。`);
-        if (!imageCache.has(src)) imageCache.set(src, options.loadImage(src));
         let image: DocxImage;
-        try { image = await imageCache.get(src)!; }
+        try {
+          const loaded = imageCache.get(src)!;
+          if ('error' in loaded) throw loaded.error;
+          image = loaded.image;
+        }
         catch (error) { throw new Error(`无法导出图片“${src}”：${error instanceof Error ? error.message : String(error)}`, { cause: error }); }
         if (!image.data.length || !Number.isFinite(image.width) || image.width <= 0 || !Number.isFinite(image.height) || image.height <= 0) throw new Error(`图片“${src}”的内容或尺寸无效。`);
-        const requestedWidth = Number(token.attrGet('width')) || image.width;
-        const requestedHeight = Number(token.attrGet('height')) || image.height * requestedWidth / image.width;
+        const width = Number(token.attrGet('width'));
+        const height = Number(token.attrGet('height'));
+        const requestedWidth = width || (height ? image.width * height / image.height : image.width);
+        const requestedHeight = height || image.height * requestedWidth / image.width;
         const scale = Math.min(1, availableWidth / requestedWidth, 850 / requestedHeight);
         result.push(new ImageRun({ type: image.type, data: image.data,
           transformation: { width: requestedWidth * scale, height: requestedHeight * scale },
@@ -213,7 +249,7 @@ export async function createDocx(source: string, options: DocxExportOptions): Pr
         while (end < items.length && items[end].type !== 'table_close') {
           const next = items[end];
           if (next.type === 'tr_open') cells = [];
-          else if (next.type === 'tr_close') rows.push(new TableRow({ children: cells, tableHeader: items.slice(cursor + 1, end).filter(t => t.type === 'tr_close').length === 0 }));
+          else if (next.type === 'tr_close') rows.push(new TableRow({ children: cells, tableHeader: rows.length === 0 }));
           else if (next.type === 'th_open' || next.type === 'td_open') {
             const content = items[end + 1];
             const align = next.attrGet('style') || '';
@@ -244,8 +280,7 @@ export async function createDocx(source: string, options: DocxExportOptions): Pr
   const footnotes: Record<string, { children: Paragraph[] }> = {};
   for (const [name, definition] of definitions) {
     // Native footnotes accept paragraphs; a table is represented as readable text.
-    const parsed = markdownRenderer.parse(protectMath(definition.content), { zeditorFootnotes: new Map() });
-    const parts = await blocks(parsed, true);
+    const parts = await blocks(footnoteTokens.get(name)!, true);
     if (parts.some(part => part instanceof Table)) warnings.add('脚注内的表格保留为原始文字。');
     footnotes[footnoteIds.get(name)!] = { children: parts.some(part => part instanceof Table) ? [new Paragraph(definition.content)] : parts as Paragraph[] };
   }

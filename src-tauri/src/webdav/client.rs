@@ -452,6 +452,7 @@ pub(crate) mod test_support {
         pub authorization: String,
         pub depth: String,
         pub body: Vec<u8>,
+        pub headers: HashMap<String, String>,
     }
 
     pub(crate) struct TestDavServer {
@@ -635,6 +636,7 @@ pub(crate) mod test_support {
         let mut authorization = String::new();
         let mut content_length: usize = 0;
         let mut depth = String::new();
+        let mut headers = HashMap::new();
         loop {
             let mut line = String::new();
             if reader.read_line(&mut line).await.is_err() {
@@ -647,6 +649,9 @@ pub(crate) mod test_support {
             // HTTP header names are case-insensitive; hyper/reqwest emit them in
             // lowercase over HTTP/1.1, so match case-insensitively.
             let lower = line.to_ascii_lowercase();
+            if let Some((name, value)) = line.split_once(':') {
+                headers.insert(name.to_ascii_lowercase(), value.trim().to_string());
+            }
             if let Some(rest) = lower.strip_prefix("authorization: ") {
                 // `rest` is a byte slice of `lower`; the original value in `line`
                 // starts at `line.len() - rest.len()` (lower/line share the same
@@ -686,6 +691,7 @@ pub(crate) mod test_support {
                 authorization,
                 depth,
                 body: body.clone(),
+                headers,
             });
         }
 

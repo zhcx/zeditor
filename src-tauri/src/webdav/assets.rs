@@ -188,18 +188,9 @@ pub fn collect_assets(
         return Err("文档和附件超过 512 MiB，备份未完成".into());
     }
     // Use exactly the editor's selected encoding to resolve resource names.
-    let text = match crate::text_encoding::decode_text(document_bytes, encoding) {
-        Ok(decoded) => decoded.content,
-        Err(error) => {
-            let lossy = String::from_utf8_lossy(document_bytes);
-            if lossy.contains(".assets") || encoding.is_some() {
-                return Err(format!(
-                    "无法解析附件引用，请按正确编码重新打开并保存文档：{error}"
-                ));
-            }
-            return Ok(Vec::new());
-        }
-    };
+    let text = crate::text_encoding::decode_text(document_bytes, encoding)
+        .map_err(|error| format!("无法解析附件引用，请按正确编码重新打开并保存文档：{error}"))?
+        .content;
     let paths = referenced_paths(&text)?;
     let parent = Path::new(document_path).parent().ok_or("文档没有父目录")?;
     let base = fs::canonicalize(parent).map_err(|e| format!("无法定位文档目录：{e}"))?;
@@ -346,15 +337,9 @@ pub async fn restore<C: RemoteSyncClient>(
     if let Some(assets) = &version.assets {
         // Hash validation alone cannot detect a valid manifest that accidentally
         // omits an attachment. Compare the document's actual reference set too.
-        let text = match crate::text_encoding::decode_text(&content, version.encoding.as_deref()) {
-            Ok(document) => document.content,
-            Err(error)
-                if !assets.is_empty() || String::from_utf8_lossy(&content).contains(".assets") =>
-            {
-                return Err(format!("无法校验文档附件引用：{error}"))
-            }
-            Err(_) => String::new(),
-        };
+        let text = crate::text_encoding::decode_text(&content, version.encoding.as_deref())
+            .map_err(|error| format!("无法校验文档附件引用：{error}"))?
+            .content;
         let expected: std::collections::BTreeSet<_> =
             referenced_paths(&text)?.into_iter().collect();
         let listed: std::collections::BTreeSet<_> = assets
@@ -559,6 +544,18 @@ mod tests {
         let assets = collect_assets(note.to_str().unwrap(), &bytes, Some("gbk")).unwrap();
         assert_eq!(assets.len(), 1);
         assert_eq!(assets[0].bytes, b"image");
+        fs::remove_dir_all(root).unwrap();
+    }
+
+    #[test]
+    fn undecodable_document_cannot_claim_an_empty_attachment_bundle() {
+        let root = super::super::test_support::test_temp_dir();
+        let note = root.join("note.md");
+        // A legacy queue without an encoding hint can contain UTF-16. Looking
+        // for ASCII `.assets` in undecoded bytes silently misses every resource.
+        let bytes = crate::text_encoding::encode_text("![图](.assets/a.png)", "utf-16le").unwrap();
+        let error = collect_assets(note.to_str().unwrap(), &bytes, None).unwrap_err();
+        assert!(error.contains("编码"));
         fs::remove_dir_all(root).unwrap();
     }
 

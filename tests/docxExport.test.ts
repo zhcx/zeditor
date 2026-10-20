@@ -1,6 +1,8 @@
 import assert from 'node:assert/strict';
 import { mkdir, writeFile } from 'node:fs/promises';
+import { posix } from 'node:path';
 import test from 'node:test';
+import { setTimeout } from 'node:timers/promises';
 import JSZip from 'jszip';
 import { XMLParser, XMLValidator } from 'fast-xml-parser';
 import { createDocx } from '../src/utils/docxExport.ts';
@@ -33,6 +35,25 @@ async function unpack(base64: string) {
   };
   // Validate all XML entries, not just the body being asserted below.
   for (const name of Object.keys(zip.files).filter(name => name.endsWith('.xml') || name.endsWith('.rels'))) await xml(name);
+  for (const name of Object.keys(zip.files).filter(name => name.endsWith('.rels'))) {
+    const root = name === '_rels/.rels' ? '' : posix.dirname(posix.dirname(name));
+    const relationships = find(await xml(name), 'Relationship') as Record<string, string>[];
+    assert.equal(new Set(relationships.map(value => value['@Id'])).size, relationships.length, `duplicate relationship ID in ${name}`);
+    for (const relationship of relationships) {
+      if (relationship['@TargetMode'] === 'External') continue;
+      const target = relationship['@Target'];
+      const path = target.startsWith('/') ? target.slice(1) : posix.normalize(posix.join(root, target));
+      assert.ok(zip.file(path), `unresolved relationship ${name} -> ${target}`);
+    }
+  }
+  for (const name of Object.keys(zip.files).filter(name => name.endsWith('.xml'))) {
+    const part = await xml(name);
+    const references = ['@r:id', '@r:embed', '@r:link'].flatMap(key => find(part, key));
+    if (!references.length) continue;
+    const relName = posix.join(posix.dirname(name), '_rels', `${posix.basename(name)}.rels`);
+    const ids = new Set((find(await xml(relName), 'Relationship') as Record<string, string>[]).map(value => value['@Id']));
+    for (const id of references) assert.ok(ids.has(String(id)), `undefined relationship ID ${id} in ${name}`);
+  }
   return { zip, xml, bytes };
 }
 
@@ -52,6 +73,7 @@ test('native DOCX archive has editable CJK text, styles, lists, tables, links an
   assert.ok(text.includes('☑ ') && text.includes('☐ '));
   assert.equal(find(document, 'w:tbl').length, 1);
   assert.equal(find(document, 'w:tr').length, 2);
+  assert.equal(find(document, 'w:tblHeader').filter(value => !(value as Record<string, string>)['@w:val']).length, 1);
   assert.equal(find(document, 'w:tc').length, 4);
   assert.equal(find(document, 'w:hyperlink').length, 1);
   assert.equal(find(document, 'w:drawing').length, 1);
@@ -120,4 +142,81 @@ test('media promoted from image syntax preserves its address without trying to r
   const { xml } = await unpack(result.base64);
   assert.ok(texts(await xml('word/document.xml')).includes('.assets/demo.mp4'));
   assert.ok(result.warnings.some(value => value.includes('音视频')));
+});
+
+test('height-only image sizing retains aspect ratio and explicit width/height remain supported', async () => {
+  const result = await createDocx('![仅高度](a.png){height=100}\n\n![仅宽度](a.png){width=300}\n\n![指定宽高](a.png){width=200 height=100}', {
+    title: '图片尺寸', loadImage: async () => ({ data: png, type: 'png', width: 600, height: 200 }),
+  });
+  const { xml } = await unpack(result.base64);
+  const extents = find(await xml('word/document.xml'), 'wp:extent') as Record<string, string>[];
+  assert.deepEqual(extents.map(value => [Number(value['@cx']), Number(value['@cy'])]), [
+    [300 * 9525, 100 * 9525], [300 * 9525, 100 * 9525], [200 * 9525, 100 * 9525],
+  ]);
+});
+
+test('distinct images load with at most four workers while archive order and per-export deduplication remain stable', async () => {
+  const source = Array.from({ length: 8 }, (_, index) => `![图${index}](image-${index}.png)`).join('\n\n')
+    + '\n\n![再次引用](image-0.png)\n\n脚注[^图]\n\n[^图]: ![脚注图](footnote.png)';
+  let active = 0;
+  let peak = 0;
+  const loaded: string[] = [];
+  const loadImage = async (source: string) => {
+    loaded.push(source);
+    active += 1;
+    peak = Math.max(peak, active);
+    await setTimeout(source === 'image-0.png' ? 35 : 5);
+    active -= 1;
+    return { data: png, type: 'png' as const, width: 1, height: 1 };
+  };
+  const result = await createDocx(source, { title: '并行图片', loadImage });
+  assert.equal(peak, 4);
+  assert.equal(loaded.length, 9);
+  assert.equal(new Set(loaded).size, 9);
+  const { xml, zip } = await unpack(result.base64);
+  const document = await xml('word/document.xml');
+  const descriptions = find(document, 'wp:docPr') as Record<string, string>[];
+  assert.deepEqual(descriptions.map(value => value['@descr']), [...Array.from({ length: 8 }, (_, index) => `图${index}`), '再次引用']);
+  assert.equal(find(await xml('word/footnotes.xml'), 'w:drawing').length, 1);
+  for (const file of Object.values(zip.files).filter(file => !file.dir && file.name.startsWith('word/media/'))) assert.deepEqual(await file.async('uint8array'), png);
+  await createDocx('![重新导出](image-0.png)', { title: '新读取', loadImage });
+  assert.equal(loaded.filter(value => value === 'image-0.png').length, 2);
+});
+
+test('concurrent image failures reject export without unhandled rejections, including a synchronous loader error', async () => {
+  const unhandled: unknown[] = [];
+  const onUnhandled = (error: unknown) => unhandled.push(error);
+  process.on('unhandledRejection', onUnhandled);
+  try {
+    await assert.rejects(createDocx('![首图](first.png)\n\n![损坏](second.png)\n\n![另一张损坏](third.png)', {
+      title: '失败终止', loadImage: async source => {
+        await setTimeout(source === 'first.png' ? 15 : 1);
+        if (source !== 'first.png') throw new Error('图片损坏');
+        return { data: png, type: 'png', width: 1, height: 1 };
+      },
+    }), /second\.png.*图片损坏/);
+    await assert.rejects(createDocx('![同步失败](sync.png)', {
+      title: '同步失败', loadImage: () => { throw new Error('同步读取失败'); },
+    }), /sync\.png.*同步读取失败/);
+    await setTimeout(20);
+    assert.deepEqual(unhandled, []);
+  } finally { process.removeListener('unhandledRejection', onUnhandled); }
+});
+
+test('CJK escaping, separate nested list numbering and footnote names survive the OOXML package', async () => {
+  const result = await createDocx('中文 & <符号>、"引号"、😀\n\n3. 外层甲\n   1. 内层甲\n   2. 内层乙\n4. 外层乙\n\n引用[^甲&乙]及[^第二]。\n\n[^甲&乙]: 脚注甲 & 😀\n\n[^第二]: 脚注乙 < 2', { title: '中文 & 转义' });
+  const { xml } = await unpack(result.base64);
+  const document = await xml('word/document.xml');
+  // Use the shared Markdown typographer's displayed punctuation.
+  assert.ok(texts(document).includes('中文 & <符号>、“引号”、😀'));
+  const numbered = (find(document, 'w:p') as Record<string, unknown>[]).filter(value => find(value, 'w:numPr').length);
+  assert.deepEqual(numbered.map(value => texts(value)), ['外层甲', '内层甲', '内层乙', '外层乙']);
+  const ids = numbered.map(value => (find(value, 'w:numId')[0] as Record<string, string>)['@w:val']);
+  assert.equal(ids[0], ids[3]);
+  assert.equal(ids[1], ids[2]);
+  assert.notEqual(ids[0], ids[1]);
+  assert.deepEqual(find(document, 'w:footnoteReference').map(value => (value as Record<string, string>)['@w:id']), ['1', '2']);
+  assert.ok(texts(await xml('word/footnotes.xml')).includes('脚注甲 & 😀'));
+  assert.ok(texts(await xml('word/footnotes.xml')).includes('脚注乙 < 2'));
+  assert.ok(!texts(document).includes('脚注甲'));
 });

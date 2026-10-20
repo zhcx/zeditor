@@ -34,7 +34,7 @@ test('media asset service imports files, resolves paths and inserts syntax at th
   const service = await read('../src/services/mediaAssets.ts');
 
   assert.match(service, /invoke<MediaAssetImport>\('import_media_asset',\s*\{\s*sourcePath,\s*documentPath\s*\}\)/);
-  assert.match(service, /invoke<\(string \| null\)\[\]>\('resolve_media_sources',\s*\{\s*documentPath:\s*baseDocument,\s*sources:\s*pending\s*\}\)/);
+  assert.match(service, /invoke<\(string \| null\)\[\]>\('resolve_media_sources',\s*\{\s*documentPath:\s*baseDocument,\s*sources:\s*pending,\s*urlEncoded\s*\}\)/);
   assert.match(service, /convertFileSrc\(absolutePath, 'asset'\)/);
   assert.match(service, /请先保存文档/);
   assert.match(service, /invalidateResolvedSource\(target\.path, asset\.relativePath\)/);

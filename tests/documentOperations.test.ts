@@ -95,6 +95,66 @@ test('focus version checks report external deletion and keep the local draft rec
   assert.equal(tab.modified, true);
 });
 
+test('duplicate focus events share one in-flight version check', async () => {
+  const version = { size: 8, sha256: 'original' };
+  const id = useAppStore.getState().addTab({ title: 'note.md', path: 'C:/note.md', content: '原文', fileVersion: version });
+  const checking = deferred<unknown>();
+  invokeHandler = command => command === 'get_file_version' ? checking.promise : Promise.resolve(undefined);
+  const first = useAppStore.getState().checkFileVersion(id);
+  const second = useAppStore.getState().checkFileVersion(id);
+  checking.resolve(version);
+  await Promise.all([first, second]);
+  assert.equal(calls.filter(call => call.command === 'get_file_version').length, 1);
+});
+
+test('a conflict uses the freshly read disk version and preserves edits made during the read', async () => {
+  const original = { size: 8, sha256: 'original' };
+  const newest = { size: 10, sha256: 'disk-newest' };
+  const id = useAppStore.getState().addTab({ title: 'note.md', path: 'C:/note.md', content: '初始本地修改', modified: true, fileVersion: original });
+  const reading = deferred<unknown>();
+  invokeHandler = async command => command === 'get_file_version' ? { size: 9, sha256: 'disk-before-read' } : command === 'read_text_document' ? reading.promise : undefined;
+  const check = useAppStore.getState().checkFileVersion(id);
+  await Promise.resolve();
+  useAppStore.getState().setContent('读取期间的新修改');
+  reading.resolve({ content: '最新磁盘文字', encoding: 'utf-8', fileVersion: newest });
+  await check;
+  assert.equal(useAppStore.getState().fileConflict?.localContent, '读取期间的新修改');
+  assert.deepEqual(useAppStore.getState().fileConflict?.diskFileVersion, newest);
+});
+
+test('reloading an external conflict reads the latest disk bytes instead of a stale dialog snapshot', async () => {
+  const id = useAppStore.getState().addTab({ title: 'note.md', path: 'C:/note.md', content: '本地修改', modified: true });
+  const newest = { size: 10, sha256: 'newest' };
+  useAppStore.setState({ fileConflict: { tabId: id, title: 'note.md', path: 'C:/note.md', localContent: '本地修改', diskContent: '旧磁盘快照', diskExists: true, diskFileVersion: { size: 8, sha256: 'old' } } });
+  invokeHandler = async command => command === 'read_text_document' ? { content: '最新磁盘版本', encoding: 'utf-8', fileVersion: newest } : undefined;
+  await useAppStore.getState().reloadExternalFile();
+  assert.equal(useAppStore.getState().getActiveTab()?.content, '最新磁盘版本');
+  assert.deepEqual(useAppStore.getState().getActiveTab()?.fileVersion, newest);
+});
+
+test('reloading a conflict never discards new edits made while the disk is being read', async () => {
+  const id = useAppStore.getState().addTab({ title: 'note.md', path: 'C:/note.md', content: '本地修改', modified: true });
+  useAppStore.setState({ fileConflict: { tabId: id, title: 'note.md', path: 'C:/note.md', localContent: '本地修改', diskContent: '旧磁盘快照', diskExists: true, diskFileVersion: { size: 8, sha256: 'old' } } });
+  const reading = deferred<unknown>();
+  invokeHandler = async command => command === 'read_text_document' ? reading.promise : undefined;
+  const reload = useAppStore.getState().reloadExternalFile();
+  useAppStore.getState().setContent('读取期间的新修改');
+  reading.resolve({ content: '磁盘版本', encoding: 'utf-8', fileVersion: { size: 9, sha256: 'disk' } });
+  await reload;
+  assert.equal(useAppStore.getState().getActiveTab()?.content, '读取期间的新修改');
+  assert.equal(useAppStore.getState().getActiveTab()?.modified, true);
+  assert.equal(useAppStore.getState().fileConflict?.localContent, '读取期间的新修改');
+});
+
+test('large document loading defers statistics and computes exact values for the latest active text', async () => {
+  const large = '中文 English 😀\n'.repeat(20_000);
+  useAppStore.getState().addTab({ title: 'large.md', content: large });
+  assert.equal(useAppStore.getState().wordCount, '统计中…');
+  useAppStore.getState().addTab({ title: 'small.md', content: '中文 Hello 😀' });
+  await new Promise(resolve => setTimeout(resolve, 220));
+  assert.equal(useAppStore.getState().wordCount, '3 字, 10 字符');
+});
+
 test('detaching a recycled document keeps its buffer and recovery identity', () => {
   const id = useAppStore.getState().addTab({ title: 'note.md', path: 'C:/note.md', content: '未保存内容', modified: true, recoveryId: 'original-draft', fileVersion: { size: 1, sha256: 'old' } });
   useAppStore.getState().detachDeletedTab(id);
@@ -270,6 +330,18 @@ test('同一批并发媒体解析复用正在执行的请求', async () => {
   assert.equal((await first).get('photo.png'), 'asset://C:/photo.png');
   assert.equal((await second).get('photo.png'), 'asset://C:/photo.png');
   assert.equal(calls.length, 1);
+});
+
+test('原始媒体文件名和渲染器 URL 的解析与缓存相互独立', async () => {
+  invokeHandler = async (_command, args) => args.urlEncoded ? ['C:/clip v1.mp4'] : ['C:/clip%20v1.mp4'];
+  const source = '.assets/clip%20v1.mp4';
+  assert.equal((await resolveMediaSources('C:/a.md', [source])).get(source), 'asset://C:/clip%20v1.mp4');
+  assert.equal((await resolveMediaSources('C:/a.md', [source], true)).get(source), 'asset://C:/clip v1.mp4');
+  assert.equal(calls.length, 2);
+  invalidateResolvedSource('C:/a.md', source);
+  await resolveMediaSources('C:/a.md', [source]);
+  await resolveMediaSources('C:/a.md', [source], true);
+  assert.equal(calls.length, 4);
 });
 
 test('缺失媒体短暂缓存后重新检查，使外部新增文件可见', async t => {

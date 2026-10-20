@@ -1,0 +1,7 @@
+{
+  "productName": "Zeditor Validation",
+  "identifier": "com.zeditor.validation20261020",
+  "build": { "beforeBuildCommand": null },
+  "bundle": { "active": false },
+  "app": { "windows": [{ "label": "main", "title": "Zeditor 临时验证", "width": 1200, "height": 800, "minWidth": 800, "minHeight": 600, "decorations": false, "visible": false, "backgroundColor": "#15171b" }] }
+}

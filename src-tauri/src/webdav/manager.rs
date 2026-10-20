@@ -240,6 +240,9 @@ async fn process_impl(
     client: RemoteClient,
 ) -> Result<(), String> {
     let _guard = inner.worker.lock().await;
+    // sync_task refreshes byte/attachment fingerprints. Completion must still
+    // compare the persisted enqueue identity, not those refreshed fields.
+    let queued_task = task.clone();
 
     emit(
         inner,
@@ -257,7 +260,7 @@ async fn process_impl(
     let result = sync_task(&client, &mut task, &remote_root).await;
     match result {
         Ok(()) => {
-            if let Err(error) = inner.queue.remove(&task.document_id) {
+            if let Err(error) = inner.queue.complete(&queued_task) {
                 emit(
                     inner,
                     WebDavSyncEvent {
@@ -417,10 +420,18 @@ async fn sync_task(
     client.put(&task.current_path, &bytes).await?;
 
     // 9. Clean up snapshot files pruned from the visible manifest.
+    let retained_assets: std::collections::HashSet<_> = manifest
+        .versions
+        .iter()
+        .flat_map(|version| version.assets.as_deref().unwrap_or_default())
+        .map(|asset| asset.snapshot_path.as_str())
+        .collect();
     for version in &pruned {
         let _ = client.delete_optional(&version.snapshot_path).await;
         for asset in version.assets.as_deref().unwrap_or_default() {
-            let _ = client.delete_optional(&asset.snapshot_path).await;
+            if !retained_assets.contains(asset.snapshot_path.as_str()) {
+                let _ = client.delete_optional(&asset.snapshot_path).await;
+            }
         }
     }
 
@@ -542,6 +553,62 @@ mod tests {
             .await
             .expect("retry");
         assert_eq!(fixture.visible_manifest_versions().await, 1);
+    }
+
+    #[tokio::test]
+    async fn older_success_never_removes_a_newer_durable_pending_task() {
+        struct EnqueueDuringSync {
+            queue: PendingTaskStore,
+            newer: PendingBackupTask,
+        }
+        impl WebDavEventSink for EnqueueDuringSync {
+            fn emit(&self, event: &WebDavSyncEvent) -> Result<(), String> {
+                if event.phase == "syncing" {
+                    self.queue.upsert(self.newer.clone())?;
+                }
+                Ok(())
+            }
+        }
+        let fixture = TestDavServer::success().await;
+        let root = test_temp_dir();
+        let task = task_for(&root.join("note.md"), b"version one");
+        let queue_path = root.join("pending.json");
+        let mut newer = task.clone();
+        newer.queued_at = "2026-08-19T14:33:00Z".into();
+        newer.version_id = deterministic_version_id(&newer.queued_at, &newer.sha256);
+        let manager = WebDavSyncManager::new(
+            queue_path.clone(),
+            Arc::new(EnqueueDuringSync {
+                queue: PendingTaskStore::new(queue_path),
+                newer: newer.clone(),
+            }),
+        );
+        manager.inner.queue.upsert(task.clone()).unwrap();
+        manager
+            .process(task, settings_for(&fixture.url))
+            .await
+            .unwrap();
+        // This is the restart boundary: the newer worker has not run yet.
+        assert_eq!(manager.inner.queue.load().unwrap(), vec![newer]);
+    }
+
+    #[tokio::test]
+    async fn refreshed_success_completes_the_original_durable_task() {
+        let fixture = TestDavServer::success().await;
+        let root = test_temp_dir();
+        let manager = manager_for(root.join("pending.json"));
+        let task = task_for(&root.join("note.md"), b"queued bytes");
+        manager.inner.queue.upsert(task.clone()).unwrap();
+        std::fs::write(&task.local_path, b"latest bytes before retry").unwrap();
+        manager
+            .process(task, settings_for(&fixture.url))
+            .await
+            .unwrap();
+        assert!(manager.inner.queue.load().unwrap().is_empty());
+        assert_eq!(
+            fixture.resource("/Zeditor/notes/note.md").await.unwrap(),
+            b"latest bytes before retry"
+        );
     }
 
     #[tokio::test]
@@ -695,6 +762,95 @@ mod tests {
         std::fs::create_dir_all(root.join(".assets")).unwrap();
         std::fs::write(root.join(".assets/中文 图.png"), image).unwrap();
         std::fs::write(root.join(".assets/movie.mp4"), b"movie bytes").unwrap();
+    }
+
+    #[tokio::test]
+    async fn legacy_duplicate_cleanup_preserves_assets_used_by_retained_version() {
+        let server = TestDavServer::success().await;
+        let root = test_temp_dir();
+        let destination = test_temp_dir();
+        fs_assets(&root, b"retained picture");
+        let bytes = "![图](<.assets/中文 图.png>)".as_bytes();
+        let mut task = task_for(&root.join("note.md"), bytes);
+        let client = RemoteClient::WebDav(
+            super::super::WebDavClient::new(&settings_for(&server.url)).unwrap(),
+        );
+        sync_task(&client, &mut task, "/Zeditor").await.unwrap();
+        let mut manifest = parse_manifest(
+            &client
+                .get_optional(&task.manifest_path)
+                .await
+                .unwrap()
+                .unwrap(),
+        )
+        .unwrap();
+        let original = manifest.versions[0].clone();
+        let mut duplicate = original.clone();
+        // Legacy rows may share their version ID and attachment namespace but
+        // name different document snapshots; the existing validator accepts it.
+        duplicate.snapshot_path = format!("{}/{}.markdown", task.versions_dir, duplicate.id);
+        client.put(&duplicate.snapshot_path, bytes).await.unwrap();
+        manifest.versions.push(duplicate.clone());
+        client
+            .put(&task.manifest_path, &serde_json::to_vec(&manifest).unwrap())
+            .await
+            .unwrap();
+
+        std::fs::write(
+            &task.local_path,
+            format!("# Updated\n{}", std::str::from_utf8(bytes).unwrap()),
+        )
+        .unwrap();
+        task.queued_at = "2026-08-19T14:33:00Z".into();
+        sync_task(&client, &mut task, "/Zeditor").await.unwrap();
+        assert!(client
+            .get_optional(&duplicate.snapshot_path)
+            .await
+            .unwrap()
+            .is_none());
+        let restored = super::super::restore_version(
+            &client,
+            "/Zeditor",
+            &task.document_id,
+            &original.id,
+            destination.to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(std::fs::read(restored.path).unwrap(), bytes);
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[tokio::test]
+    async fn undecodable_complete_bundle_cannot_restore_with_unchecked_references() {
+        let server = TestDavServer::success().await;
+        let destination = test_temp_dir();
+        let client = RemoteClient::WebDav(
+            super::super::WebDavClient::new(&settings_for(&server.url)).unwrap(),
+        );
+        let bytes = crate::text_encoding::encode_text("![图](.assets/a.png)", "utf-16le").unwrap();
+        let version = WebDavVersion {
+            id: "a".repeat(24),
+            created_at: "2026-08-19T14:33:00Z".into(),
+            size: bytes.len() as u64,
+            sha256: sha256_hex(&bytes),
+            snapshot_path: "/snapshot.md".into(),
+            assets: Some(Vec::new()),
+            encoding: None,
+        };
+        client.put(&version.snapshot_path, &bytes).await.unwrap();
+        let error = super::super::assets::restore(
+            &client,
+            "note.md",
+            &version,
+            destination.to_str().unwrap(),
+        )
+        .await
+        .unwrap_err();
+        assert!(error.contains("附件引用"));
+        assert_eq!(std::fs::read_dir(&destination).unwrap().count(), 0);
+        std::fs::remove_dir_all(destination).unwrap();
     }
 
     #[tokio::test]

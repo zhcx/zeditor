@@ -168,25 +168,30 @@ impl RecycleStore {
             if uuid::Uuid::parse_str(&id).is_err() {
                 continue;
             }
-            let mut record = self.read_record(&id)?;
+            // An interrupted initial record write or one damaged operation
+            // must not make every other retained payload inaccessible.
+            let Ok(mut record) = self.read_record(&id) else {
+                continue;
+            };
             if record.entry.location == "restored" {
                 continue;
             }
-            if let Some(payload) = &record.payload {
-                record.entry.available = fs::symlink_metadata(payload).is_ok();
-                record.entry.can_restore = record.entry.available;
-                if record.pending
-                    && !record.entry.available
-                    && Path::new(&record.entry.original_path).exists()
-                {
-                    continue;
-                }
+            if record
+                .payload
+                .as_ref()
+                .is_some_and(|payload| fs::symlink_metadata(payload).is_ok())
+            {
+                record.entry.available = true;
+                record.entry.can_restore = true;
             } else if let Some(native_id) = &record.native_id {
                 record.entry.available = native_items
                     .as_ref()
                     .is_none_or(|items| items.iter().any(|item| &item.id == native_id));
                 record.entry.can_restore = record.entry.available && native_items.is_some();
             } else {
+                if record.payload.is_some() {
+                    record.entry.available = false;
+                }
                 record.entry.can_restore = false;
                 if record.pending && Path::new(&record.entry.original_path).exists() {
                     continue;
@@ -219,7 +224,11 @@ impl RecycleStore {
             return Err("原文件夹位置已改变，请先恢复原文件夹；为保护文件，本次恢复已取消".into());
         }
         reject_existing(&target)?;
-        let payload = if let Some(payload) = &record.payload {
+        let payload = if let Some(payload) = record
+            .payload
+            .as_ref()
+            .filter(|payload| fs::symlink_metadata(payload).is_ok())
+        {
             payload.clone()
         } else {
             let native_id = record
@@ -237,8 +246,18 @@ impl RecycleStore {
             let staging = record
                 .canonical_parent
                 .join(format!(".zeditor-restore-{id}"));
-            fs::create_dir(&staging).map_err(|e| format!("无法创建安全恢复暂存目录：{e}"))?;
             let payload = staging.join("payload");
+            // A crash may leave this durable intent before the native item
+            // moves. Reuse only the already recorded, non-link staging dir.
+            if let Err(error) = fs::create_dir(&staging) {
+                let reusable = error.kind() == std::io::ErrorKind::AlreadyExists
+                    && record.payload.as_ref() == Some(&payload)
+                    && fs::symlink_metadata(&staging)
+                        .is_ok_and(|metadata| metadata.is_dir() && !is_link(&metadata));
+                if !reusable {
+                    return Err(format!("无法创建安全恢复暂存目录：{error}"));
+                }
+            }
             record.payload = Some(payload.clone());
             self.write_record(&record)?;
             if let Err(error) = native.restore(&selected.id, &payload) {
@@ -765,6 +784,88 @@ mod tests {
         assert!(!listed[0].available);
         assert!(!listed[0].can_restore);
         assert!(store.restore_with(&entry.id, &native).is_err());
+    }
+    #[test]
+    fn interrupted_native_staging_before_move_remains_restorable() {
+        let fixture = Fixture::new();
+        let native = FakeNative::new(&fixture.root);
+        let store = fixture.store();
+        let original = fixture.root.join("interrupted.md");
+        fs::write(&original, b"retained in native bin").unwrap();
+        let entry = store.recycle_with(&original, &native).unwrap();
+        // Crash after the durable staging intent, before the native move.
+        let mut record = store.read_record(&entry.id).unwrap();
+        let staging = record
+            .canonical_parent
+            .join(format!(".zeditor-restore-{}", entry.id));
+        fs::create_dir(&staging).unwrap();
+        record.payload = Some(staging.join("payload"));
+        store.write_record(&record).unwrap();
+
+        let listed = store.list_with(&native).unwrap();
+        assert!(listed[0].available && listed[0].can_restore);
+        store.restore_with(&entry.id, &native).unwrap();
+        assert_eq!(fs::read(original).unwrap(), b"retained in native bin");
+    }
+    #[test]
+    fn incomplete_or_corrupt_record_does_not_hide_valid_recovery_entries() {
+        let fixture = Fixture::new();
+        let store = fixture.store();
+        let original = fixture.root.join("valid.md");
+        fs::write(&original, b"valid recoverable content").unwrap();
+        let entry = store.recycle_with(&original, &Unavailable).unwrap();
+        // A crash between operation directory creation and its first record,
+        // or an independently damaged record, must not block healthy entries.
+        let incomplete = store.root.join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir(&incomplete).unwrap();
+        let corrupt = store.root.join(uuid::Uuid::new_v4().to_string());
+        fs::create_dir(&corrupt).unwrap();
+        fs::write(corrupt.join("record.json"), b"{partial").unwrap();
+
+        let listed = store.list_with(&Unavailable).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert_eq!(listed[0].id, entry.id);
+        assert!(incomplete.exists() && corrupt.exists());
+        store.restore_with(&entry.id, &Unavailable).unwrap();
+        assert_eq!(fs::read(original).unwrap(), b"valid recoverable content");
+    }
+    #[test]
+    fn native_restore_collision_retains_staged_payload_for_retry() {
+        struct CollisionDuringRestore {
+            inner: FakeNative,
+            original: PathBuf,
+        }
+        impl TrashAdapter for CollisionDuringRestore {
+            fn delete(&self, path: &Path) -> Result<(), String> {
+                self.inner.delete(path)
+            }
+            fn list(&self) -> Result<Vec<NativeItem>, String> {
+                self.inner.list()
+            }
+            fn restore(&self, id: &str, target: &Path) -> Result<(), String> {
+                self.inner.restore(id, target)?;
+                fs::write(&self.original, b"external replacement").map_err(io_error)
+            }
+        }
+        let fixture = Fixture::new();
+        let original = fixture.root.join("collision.md");
+        let native = CollisionDuringRestore {
+            inner: FakeNative::new(&fixture.root),
+            original: original.clone(),
+        };
+        let store = fixture.store();
+        fs::write(&original, b"recoverable original").unwrap();
+        let entry = store.recycle_with(&original, &native).unwrap();
+        assert!(store.restore_with(&entry.id, &native).is_err());
+        assert_eq!(fs::read(&original).unwrap(), b"external replacement");
+        let record = store.read_record(&entry.id).unwrap();
+        let staged = record.payload.unwrap();
+        assert_eq!(fs::read(&staged).unwrap(), b"recoverable original");
+        assert!(store.list_with(&native).unwrap()[0].can_restore);
+        fs::remove_file(&original).unwrap();
+        store.restore_with(&entry.id, &native).unwrap();
+        assert_eq!(fs::read(original).unwrap(), b"recoverable original");
+        assert!(!staged.exists());
     }
     #[test]
     fn exclusive_directory_copy_preserves_conflicting_target_and_entire_source() {

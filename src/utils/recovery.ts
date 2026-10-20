@@ -17,6 +17,18 @@ export type RecoverySourceTab = Pick<Tab, 'id' | 'title' | 'path' | 'content' | 
   recoveryId?: string;
 };
 
+/** Ignore state-only tab updates; only changed recovery data needs another durable write. */
+export function changedRecoveryTabs(tabs: RecoverySourceTab[], previous: RecoverySourceTab[]): RecoverySourceTab[] {
+  const byId = new Map(previous.map(tab => [tab.id, tab]));
+  return tabs.filter(tab => {
+    const before = byId.get(tab.id);
+    return !before || before.content !== tab.content || before.path !== tab.path
+      || before.title !== tab.title || before.encoding !== tab.encoding || before.modified !== tab.modified
+      || before.recoveryId !== tab.recoveryId || before.externalChangePending !== tab.externalChangePending
+      || before.fileVersion?.size !== tab.fileVersion?.size || before.fileVersion?.sha256 !== tab.fileVersion?.sha256;
+  });
+}
+
 export function createRecoverySnapshot(tab: RecoverySourceTab, updatedAt = Date.now()): RecoverySnapshot | null {
   if (tab.path !== null ? !tab.modified : !tab.content) return null;
   return {
@@ -36,7 +48,9 @@ export function restoreRecoverySnapshot(snapshot: RecoverySnapshot, newTabId: st
     id: newTabId,
     recoveryId: snapshot.id,
     title: snapshot.title,
-    path: snapshot.path,
+    // Historical snapshots have no trustworthy save baseline. Detach them so
+    // the first save uses an explicit new-file choice rather than overwriting.
+    path: snapshot.fileVersion ? snapshot.path : null,
     content: snapshot.content,
     encoding: snapshot.encoding,
     modified: true,
