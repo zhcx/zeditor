@@ -13,7 +13,8 @@ export const TEXT_ENCODINGS = [
 ] as const;
 
 export type TextEncoding = typeof TEXT_ENCODINGS[number]['value'];
-export interface TextDocument { content: string; encoding: TextEncoding }
+import type { FileVersion } from './fileVersion.ts';
+export interface TextDocument { content: string; encoding: TextEncoding; fileVersion?: FileVersion | null }
 export interface EncodingDialogRequest { mode: 'open' | 'reopen' | 'save'; path?: string; tabId?: string; dataBase64?: string; title?: string }
 export const encodingLabel = (encoding: TextEncoding = 'utf-8') => TEXT_ENCODINGS.find(item => item.value === encoding)?.label || 'UTF-8';
 export const isTextEncoding = (value: unknown): value is TextEncoding => TEXT_ENCODINGS.some(item => item.value === value);

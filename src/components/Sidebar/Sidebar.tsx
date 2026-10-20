@@ -3,7 +3,7 @@ import type { IconName } from '../Icons/iconGeometry';
 import { useShallow } from 'zustand/react/shallow';
 import { lazy, Suspense, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { confirm as confirmDialog, open } from '@tauri-apps/plugin-dialog';
+import { confirm as confirmDialog, message as showMessage, open } from '@tauri-apps/plugin-dialog';
 import { useAppStore, type TimelineEntry } from '../../stores/appStore';
 import {
   createOutlineDetectionKey,
@@ -26,11 +26,12 @@ import {
   isConvertibleDocumentName,
 } from '../../utils/documentFormats';
 import { refreshWorkspaceFolderTree, replaceNodeChildren, type FileNode } from '../../utils/workspaceTree';
-import { deleteDocument } from '../../utils/documentSafety';
+import { deleteDocument, enqueueDocumentWrite, isPathWithin } from '../../utils/documentSafety';
 import { FileTypeIcon } from './FileTypeIcon';
 import { useTabClose } from '../../hooks/useTabClose';
 
 const UnsavedChangesDialog = lazy(() => import('../UnsavedChangesDialog/UnsavedChangesDialog').then(m => ({ default: m.UnsavedChangesDialog })));
+const RecycleDialog = lazy(() => import('../Recycle/RecycleDialog').then(m => ({ default: m.RecycleDialog })));
 
 interface WorkspaceFolder {
   name: string;
@@ -184,6 +185,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
   const [expandedNodes, setExpandedNodes] = useState<Set<string>>(new Set([OPEN_EDITORS_ID]));
   const [loadedFolders, setLoadedFolders] = useState<Set<string>>(new Set());
   const [contextMenu, setContextMenu] = useState<ContextMenuState>(null);
+  const [recycleOpen, setRecycleOpen] = useState(false);
   const [timelineExpanded, setTimelineExpanded] = useState(false);
   const [timelineHover, setTimelineHover] = useState<TimelineHoverState>(null);
   const [timelineDialog, setTimelineDialog] = useState<TimelineDialogState>(null);
@@ -550,21 +552,30 @@ function ExplorerSidebar({ style }: SidebarProps) {
   const deleteFsItem = async (path: string) => {
     const name = path.split(/[\\/]/).pop() || '项目';
     try {
-      const deleted = await deleteDocument(path, name, useAppStore.getState().tabs, {
+      useAppStore.getState().editorView?.flushPendingEdits?.();
+      const deleted = await enqueueDocumentWrite(() => deleteDocument(path, name, useAppStore.getState().tabs, {
         confirm: message => isTauriRuntime()
           ? confirmDialog(message, { title: '删除资源', kind: 'warning' })
           : window.confirm(message),
         deleteItem: async () => {
-          if (isTauriRuntime()) await invoke('delete_fs_item', { path });
+          useAppStore.getState().editorView?.flushPendingEdits?.();
+          if (!isTauriRuntime()) throw new Error('回收站功能需要桌面应用。');
+          await invoke('delete_fs_item', { path });
         },
         closeTab: tabId => useAppStore.getState().closeTab(tabId),
-      });
+        preserveTab: tabId => useAppStore.getState().detachDeletedTab(tabId),
+        getTabs: () => useAppStore.getState().tabs,
+        flushEdits: () => useAppStore.getState().editorView?.flushPendingEdits?.(),
+      }));
       if (deleted) {
+        workspaceFolders.filter(folder => isPathWithin(folder.path, path)).forEach(folder => removeWorkspaceFolder(folder.path));
         const parentDir = path.replace(/[\\/][^\\/]+$/, '');
         await refreshWorkspaceFolder(parentDir);
       }
     } catch (error) {
       console.error('删除失败:', error);
+      if (isTauriRuntime()) await showMessage(String(error), { title: '无法移入回收站', kind: 'error' });
+      else window.alert(String(error));
     }
     setContextMenu(null);
   };
@@ -869,6 +880,7 @@ function ExplorerSidebar({ style }: SidebarProps) {
         </header>
 
         <div className="vscode-explorer-tree" role="tree" aria-label="资源管理器">
+          {isTauriRuntime() && <button className="explorer-section-heading" onClick={() => setRecycleOpen(true)}><AppIcon name="trash" size={16} /><span>回收站与恢复</span></button>}
           <section className="explorer-section">
             <button className="explorer-section-heading" onClick={() => toggleExpanded(OPEN_EDITORS_ID)}>
               <Chevron expanded={openEditorsExpanded} />
@@ -1242,6 +1254,10 @@ function ExplorerSidebar({ style }: SidebarProps) {
         </div>
       )}
 
+      {recycleOpen && <Suspense fallback={null}><RecycleDialog
+        onClose={() => setRecycleOpen(false)}
+        onRestored={path => { void refreshWorkspaceFolder(path.replace(/[\\/][^\\/]+$/, '')); }}
+      /></Suspense>}
       {pendingCloseTab && (
         <Suspense fallback={null}>
           <UnsavedChangesDialog

@@ -1,3 +1,5 @@
+import type { FileVersion } from './fileVersion.ts';
+
 export interface PersistedTab {
   id: string;
   title: string;
@@ -5,6 +7,7 @@ export interface PersistedTab {
   content: string;
   modified: boolean;
   encoding?: string;
+  fileVersion?: FileVersion;
 }
 
 export function applySavedTab<T extends PersistedTab>(
@@ -13,6 +16,7 @@ export function applySavedTab<T extends PersistedTab>(
   path: string,
   savedContent: string,
   savedEncoding?: string,
+  fileVersion?: FileVersion,
 ): T[] {
   return tabs.map(tab => tab.id === tabId
     ? {
@@ -20,6 +24,7 @@ export function applySavedTab<T extends PersistedTab>(
         path,
         title: path.split(/[\\/]/).pop() || path,
         modified: tab.content !== savedContent || (savedEncoding !== undefined && (tab.encoding || 'utf-8') !== savedEncoding),
+        ...(fileVersion ? { fileVersion } : {}),
       }
     : tab);
 }

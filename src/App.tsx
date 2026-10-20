@@ -27,6 +27,8 @@ const AIDiffConfirmDialog = lazy(() => import('./components/AI/AIDiffConfirmDial
 const AIChatbotPanel = lazy(() => import('./components/Chatbot/AIChatbotPanel').then(m => ({ default: m.AIChatbotPanel })));
 const ImmersiveOutline = lazy(() => import('./components/Immersive/ImmersiveOutline').then(m => ({ default: m.ImmersiveOutline })));
 const UnsavedChangesDialog = lazy(() => import('./components/UnsavedChangesDialog/UnsavedChangesDialog').then(m => ({ default: m.UnsavedChangesDialog })));
+const RecoveryDialog = lazy(() => import('./components/Recovery/RecoveryDialog').then(m => ({ default: m.RecoveryDialog })));
+const FileConflictDialog = lazy(() => import('./components/FileConflict/FileConflictDialog').then(m => ({ default: m.FileConflictDialog })));
 const ConverterDialog = lazy(() => import('./components/ConverterDialog/ConverterDialog').then(m => ({ default: m.ConverterDialog })));
 const PresentationView = lazy(() => import('./components/Presentation/PresentationView').then(m => ({ default: m.PresentationView })));
 const AIPalette = lazy(() => import('./components/AIPalette/AIPalette').then(m => ({ default: m.AIPalette })));
@@ -62,6 +64,7 @@ import './styles/onboarding.css';
 import './styles/macos.css';
 import { contentFontStack, typographyCssVariables } from './utils/appearanceSettings';
 import { resolveEditorDisplay } from './utils/editorDisplay';
+import { createRecoverySnapshot } from './utils/recovery';
 import { LineWidthWheel } from './components/Editor/LineWidthWheel';
 import { applyThemeToDocument, toggleThemeMode } from './themes/apply';
 import { isMacOS, isNativeMenuActive } from './utils/platform';
@@ -111,12 +114,18 @@ function App() {
     loadSettings,
     settings,
     splitRatio,
+    recoveryLoaded,
+    recoverySnapshots,
+    fileConflict,
+    loadRecoverySnapshots,
+    persistRecoverySnapshot,
+    deleteRecoverySnapshot,
     setSplitRatio,
     setSidebarWidth,
     setSidebarVisible,
     setSettingsOpen,
     openFile
-  } = useAppStore(useShallow(state => ({ mode: state.mode, settingsOpen: state.settingsOpen, sidebarVisible: state.sidebarVisible, sidebarWidth: state.sidebarWidth, outlineVisible: state.outlineVisible, loadSettings: state.loadSettings, settings: state.settings, splitRatio: state.splitRatio, setSplitRatio: state.setSplitRatio, setSidebarWidth: state.setSidebarWidth, setSidebarVisible: state.setSidebarVisible, setSettingsOpen: state.setSettingsOpen, openFile: state.openFile })));
+  } = useAppStore(useShallow(state => ({ mode: state.mode, settingsOpen: state.settingsOpen, sidebarVisible: state.sidebarVisible, sidebarWidth: state.sidebarWidth, outlineVisible: state.outlineVisible, loadSettings: state.loadSettings, settings: state.settings, splitRatio: state.splitRatio, recoveryLoaded: state.recoveryLoaded, recoverySnapshots: state.recoverySnapshots, fileConflict: state.fileConflict, loadRecoverySnapshots: state.loadRecoverySnapshots, persistRecoverySnapshot: state.persistRecoverySnapshot, deleteRecoverySnapshot: state.deleteRecoverySnapshot, setSplitRatio: state.setSplitRatio, setSidebarWidth: state.setSidebarWidth, setSidebarVisible: state.setSidebarVisible, setSettingsOpen: state.setSettingsOpen, openFile: state.openFile })));
   const editorView = useAppStore(state => state.editorView);
   const activeTabId = useAppStore(state => state.activeTabId);
   const converterDialog = useAppStore(state => state.converterDialog);
@@ -168,6 +177,59 @@ function App() {
   const closeDocumentSwitcher = useCallback(() => {
     setDocumentSwitcherVisible(false);
     setSwitcherQuery('');
+  }, []);
+
+  const saveRecoverySnapshotAs = useCallback(async (snapshotId: string) => {
+    const snapshot = useAppStore.getState().recoverySnapshots.find(item => item.id === snapshotId);
+    if (!snapshot) return;
+    const baseName = await resolveSaveBaseName(snapshot.title, snapshot.content);
+    const selected = await chooseSaveFile({
+      title: '另存恢复的文档',
+      defaultPath: `${baseName}.md`,
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
+    });
+    if (typeof selected !== 'string') return;
+    const tabId = useAppStore.getState().addTab({
+      title: snapshot.title,
+      path: snapshot.path,
+      content: snapshot.content,
+      encoding: snapshot.encoding,
+      modified: true,
+      recoveryId: snapshot.id,
+      fileVersion: snapshot.fileVersion,
+    });
+    try {
+      await useAppStore.getState().saveTab(tabId, selected);
+    } catch (error) {
+      useAIStore.getState().setStatus('error', `另存恢复文档失败：${String(error)}`);
+    }
+  }, []);
+
+  const discardRecoverySnapshot = useCallback((snapshotId: string) => {
+    void useAppStore.getState().deleteRecoverySnapshot(snapshotId).catch(error => {
+      useAIStore.getState().setStatus('error', `删除恢复快照失败：${String(error)}`);
+    });
+  }, []);
+
+  const saveConflictCopy = useCallback(async () => {
+    const conflict = useAppStore.getState().fileConflict;
+    if (!conflict) return;
+    const baseName = await resolveSaveBaseName(conflict.title, conflict.localContent);
+    const selected = await chooseSaveFile({
+      title: '另存冲突副本',
+      defaultPath: `${baseName}-我的版本.md`,
+      filters: [{ name: 'Markdown', extensions: ['md', 'markdown', 'txt'] }],
+    });
+    if (typeof selected !== 'string') return;
+    if (selected === conflict.path) {
+      useAIStore.getState().setStatus('error', '另存冲突副本请选择不同于原文件的路径。');
+      return;
+    }
+    try {
+      await useAppStore.getState().saveTab(conflict.tabId, selected, null);
+    } catch (error) {
+      useAIStore.getState().setStatus('error', `另存冲突副本失败：${String(error)}`);
+    }
   }, []);
 
   useEffect(() => {
@@ -290,6 +352,17 @@ function App() {
         promptAction: promptUnsavedChanges,
         getTabs: () => useAppStore.getState().tabs,
         isCancelled: () => closeCancelled.current,
+        discardTabs: async tabIds => {
+          try {
+            await useAppStore.getState().discardRecoverySnapshotsForTabs(tabIds);
+          } catch (error) {
+            await message(`无法清理草稿恢复记录，应用没有关闭：${String(error)}`, {
+              title: '恢复记录未能清理',
+              kind: 'error',
+            });
+            throw error;
+          }
+        },
         chooseSavePath: async tab => {
           // 与 TabsBar/另存为保持一致：未命名文档先尝试 AI 文件名建议。
           const fullTab = useAppStore.getState().tabs.find(item => item.id === tab.id);
@@ -396,7 +469,7 @@ function App() {
       running = true;
       try {
         for (const tab of useAppStore.getState().tabs) {
-          if (tab.modified && tab.path) await useAppStore.getState().saveTab(tab.id, tab.path);
+          if (tab.modified && tab.path && !tab.externalChangePending) await useAppStore.getState().saveTab(tab.id, tab.path);
         }
       } catch (error) {
         useAIStore.getState().setStatus('error', `自动保存失败：${String(error)}`);
@@ -406,6 +479,20 @@ function App() {
     }, Math.max(1000, interval));
     return () => window.clearInterval(timer);
   }, [settings.editor.auto_save_interval]);
+
+  useEffect(() => {
+    const checkActiveVersion = () => {
+      if (document.visibilityState !== 'visible') return;
+      const activeTabId = useAppStore.getState().activeTabId;
+      if (activeTabId) void useAppStore.getState().checkFileVersion(activeTabId);
+    };
+    window.addEventListener('focus', checkActiveVersion);
+    document.addEventListener('visibilitychange', checkActiveVersion);
+    return () => {
+      window.removeEventListener('focus', checkActiveVersion);
+      document.removeEventListener('visibilitychange', checkActiveVersion);
+    };
+  }, []);
 
   const hasImmersiveOutline = !standardMode && !immersiveOutlineCollapsed;
   const outlineRailWidth = !standardMode && immersiveOutlineCollapsed ? 40 : 0;
@@ -446,16 +533,50 @@ function App() {
   }, []);
 
   useEffect(() => {
-    void loadSettings().then(() => {
+    void loadSettings().then(async () => {
       const store = useAppStore.getState();
       useWebDavStore.getState().initialize(store.settings.webdav);
       useS3Store.getState().initialize(store.settings.s3);
       // 恢复用户上次选择的编辑方式（未选择过则保持源码对照，并由首次选择框引导）。
       const persisted = store.settings.editor.mode;
       if (persisted === 'split' || persisted === 'wysiwyg') store.setMode(persisted);
+      try {
+        await loadRecoverySnapshots();
+      } catch (error) {
+        useAIStore.getState().setStatus('error', `读取草稿恢复记录失败：${String(error)}`);
+      }
       setSettingsLoaded(true);
     });
-  }, [loadSettings]);
+  }, [loadRecoverySnapshots, loadSettings]);
+
+  // 持久化未保存内容，不等待全局设置或标签持久化。
+  // 每次输入停顿 900ms 后写入 app config 下的独立恢复快照；Rust 侧负责限额与原子替换。
+  useEffect(() => {
+    let timer: number | null = null;
+    const unsubscribe = useAppStore.subscribe((state, previous) => {
+      if (!state.recoveryLoaded || state.tabs === previous.tabs) return;
+      if (timer !== null) window.clearTimeout(timer);
+      timer = window.setTimeout(() => {
+        timer = null;
+        const latest = useAppStore.getState();
+        const pending = latest.tabs.map(tab => {
+          const snapshot = createRecoverySnapshot(tab);
+          if (snapshot) return persistRecoverySnapshot(snapshot);
+          if (tab.recoveryId || latest.recoverySnapshots.some(item => item.id === tab.id)) {
+            return deleteRecoverySnapshot(tab.recoveryId || tab.id);
+          }
+          return Promise.resolve();
+        });
+        void Promise.all(pending).catch(error => {
+          useAIStore.getState().setStatus('error', `写入草稿恢复记录失败：${String(error)}`);
+        });
+      }, 900);
+    });
+    return () => {
+      unsubscribe();
+      if (timer !== null) window.clearTimeout(timer);
+    };
+  }, [deleteRecoverySnapshot, persistRecoverySnapshot]);
 
   // 应用就绪后淡出内置启动页。原生窗口由 Rust 侧在 setup 中立即显示
   // （背景色与主题一致），这里不再负责 show，避免把窗口可见性绑定到
@@ -841,6 +962,7 @@ function App() {
   // 首次启动（设置里没有 editor.mode）时引导选择编辑方式；关闭或 Esc 视为选择源码对照。
   const persistedMode = settings.editor.mode;
   const showModeChooser = settingsLoaded && persistedMode !== 'split' && persistedMode !== 'wysiwyg';
+  const showRecoveryDialog = settingsLoaded && recoveryLoaded && recoverySnapshots.length > 0 && !showModeChooser && !settingsOpen && !closePromptTabs && !fileConflict;
 
   const chooseMode = useCallback(async (choice: PersistentWorkspaceMode) => {
     const latest = useAppStore.getState();
@@ -1374,6 +1496,28 @@ function App() {
       {settingsOpen && (
         <Suspense fallback={null}>
           <SettingsPanel />
+        </Suspense>
+      )}
+      {showRecoveryDialog && (
+        <Suspense fallback={null}>
+          <RecoveryDialog
+            snapshots={recoverySnapshots}
+            onRestore={id => { useAppStore.getState().restoreSavedRecoverySnapshot(id); }}
+            onSaveCopy={id => { void saveRecoverySnapshotAs(id); }}
+            onDiscard={discardRecoverySnapshot}
+          />
+        </Suspense>
+      )}
+      {fileConflict && (
+        <Suspense fallback={null}>
+          <FileConflictDialog
+            conflict={fileConflict}
+            onReload={() => { void useAppStore.getState().reloadExternalFile(); }}
+            onOpenDiskCopy={() => { useAppStore.getState().openExternalVersionCopy(); }}
+            onSaveCopy={() => { void saveConflictCopy(); }}
+            onOverwrite={() => useAppStore.getState().overwriteExternalFile()}
+            onClose={() => useAppStore.getState().dismissFileConflict()}
+          />
         </Suspense>
       )}
       {companionVisible && (

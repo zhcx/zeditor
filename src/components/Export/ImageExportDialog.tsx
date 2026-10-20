@@ -1,8 +1,7 @@
 import { AppIcon } from '../Icons/AppIcon';
 import { useMemo, useState } from 'react';
-import MarkdownIt from 'markdown-it';
 import { applyExportTemplate, EXPORT_TEMPLATES, loadExportTemplate, saveExportTemplate, type ExportTemplate } from './exportTemplates';
-import { sanitizeRenderedHtml } from '../../utils/safeHtml';
+import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
 
 type ImageRatio = 'square' | 'landscape' | 'wide' | 'portrait' | 'a4';
 
@@ -11,7 +10,6 @@ interface ImageExportDialogProps {
   onClose: () => void;
 }
 
-const md = new MarkdownIt({ html: true, breaks: true, linkify: true });
 const formats: Array<{ id: ImageRatio; label: string; ratio: number; hint: string }> = [
   { id: 'square', label: '1 : 1', ratio: 1, hint: '社交媒体 / 卡片' },
   { id: 'landscape', label: '4 : 3', ratio: 4 / 3, hint: '演示文稿 / 平板' },
@@ -34,7 +32,7 @@ export function ImageExportDialog({ content, onClose }: ImageExportDialogProps) 
   const [exporting, setExporting] = useState(false);
   const [template, setTemplate] = useState<ExportTemplate>(loadExportTemplate);
   const current = formats.find((format) => format.id === selected) || formats[0];
-  const renderedHtml = useMemo(() => sanitizeRenderedHtml(md.render(content || '暂无内容')), [content]);
+  const renderedHtml = useMemo(() => renderMarkdownToHtml(content || '暂无内容'), [content]);
 
   const handleExport = async () => {
     saveExportTemplate(template);

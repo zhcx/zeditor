@@ -42,11 +42,28 @@ export interface WebDavDocumentSummary {
 }
 
 export interface WebDavVersion {
+  encoding?: string;
   id: string;
   created_at: string;
   size: number;
   sha256: string;
   snapshot_path: string;
+  /** Absent on legacy document-only backups; empty means verified no attachments. */
+  assets?: BackupAsset[];
+}
+
+export interface BackupAsset {
+  relative_path: string;
+  snapshot_path: string;
+  size: number;
+  sha256: string;
+}
+
+export interface RestoredBackup {
+  encoding?: string;
+  path: string;
+  asset_count: number;
+  legacy_document_only: boolean;
 }
 
 export interface WebDavDownloadedVersion {

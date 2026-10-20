@@ -35,13 +35,19 @@ urlencoding = "2.1"
 headless_chrome = "1.0"
 font-kit = "0.14"
 regex = "1"
+pulldown-cmark = { version = "0.13", default-features = false }
 ed25519-dalek = "2"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 semver = "1"
 encoding_rs = "0.8"
+trash = "5.2.9"
 # MCP 支持：WebSocket 桥接（编辑器内）与 MCP server 二进制共用。
 tokio-tungstenite = "0.24"
 futures = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+# Explicit recycle-only flags; trash supplies portable listing/restoration.
+windows = { version = "0.62", features = ["Win32_System_Com", "Win32_UI_Shell"] }
 
 # Tauri 按此顺序签名：先签嵌套的辅助程序，再签应用主程序和 .app。
 # 主程序仍由与 package 同名的 zeditor 识别，不依赖声明顺序。

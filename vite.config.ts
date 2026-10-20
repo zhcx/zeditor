@@ -234,6 +234,11 @@ export default defineConfig({
       },
     },
   ],
+  server: {
+    // Rust compilation creates locked executables on Windows; Tauri watches
+    // backend sources itself, so the frontend watcher should leave them alone.
+    watch: { ignored: ['**/src-tauri/**'] },
+  },
   build: {
     // Editor is loaded lazily via src/App.tsx and Monaco
     // lands in its own async chunk automatically. Do NOT add a manualChunks

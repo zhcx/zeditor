@@ -2,8 +2,9 @@ import { AppIcon } from '../Icons/AppIcon';
 import { openBase64Document } from '../../services/textDocuments';
 import { useEffect, useState } from 'react';
 import { invoke } from '@tauri-apps/api/core';
-import { save } from '@tauri-apps/plugin-dialog';
+import { open as selectDirectory, save } from '@tauri-apps/plugin-dialog';
 import type {
+  RestoredBackup,
   S3Settings,
   WebDavDocumentSummary,
   WebDavDownloadedVersion,
@@ -13,6 +14,7 @@ import type {
 import { useWebDavStore } from '../../stores/webdavStore';
 import { useS3Store } from '../../stores/s3Store';
 import { useAppStore } from '../../stores/appStore';
+import type { TextEncoding } from '../../utils/textEncoding';
 
 interface WebDavHistoryDialogProps {
   open: boolean;
@@ -54,6 +56,7 @@ export function WebDavHistoryDialog({
   const [selectedDocumentId, setSelectedDocumentId] = useState<string | null>(null);
   const [downloadingId, setDownloadingId] = useState<string | null>(null);
   const [error, setError] = useState('');
+  const [restoredPath, setRestoredPath] = useState('');
 
   useEffect(() => {
     if (!open || !settings.enabled) return;
@@ -70,22 +73,35 @@ export function WebDavHistoryDialog({
     mode === 'global'
       ? selectedDocumentId ?? documents[0]?.document_id ?? ''
       : currentDocumentId ?? '';
-  const activeVersions =
-    activeDocumentId !== '' && versions.length > 0 && selectedDocumentId === activeDocumentId
-      ? versions
-      : mode === 'global'
-        ? []
-        : versions;
+  const activeVersions = store.versionsDocumentId === activeDocumentId ? versions : [];
 
   const pickDocument = (documentId: string) => {
     setSelectedDocumentId(documentId);
     void loadVersions(documentId, settings);
   };
 
+  const restoreBundle = async (documentId: string, version: WebDavVersion, openDocument: boolean) => {
+    const destinationDir = await selectDirectory({ directory: true, multiple: false, title: '选择恢复位置（将新建独立文件夹）' });
+    if (typeof destinationDir !== 'string') return;
+    const restored = await invoke<RestoredBackup>(`${provider}_restore_version`, {
+      documentId, versionId: version.id, destinationDir, settings,
+    });
+    setRestoredPath(restored.path);
+    if (openDocument) {
+      await useAppStore.getState().openFile(restored.path, restored.encoding as TextEncoding | undefined);
+      onClose();
+    }
+  };
+
   const download = async (documentId: string, version: WebDavVersion) => {
     setDownloadingId(version.id);
     setError('');
+    setRestoredPath('');
     try {
+      if (version.assets !== undefined) {
+        await restoreBundle(documentId, version, false);
+        return;
+      }
       const downloaded = await downloadVersion(documentId, version.id, settings);
       const path = await save({
         defaultPath: downloaded.filename,
@@ -106,7 +122,12 @@ export function WebDavHistoryDialog({
   const openVersion = async (documentId: string, version: WebDavVersion) => {
     setDownloadingId(version.id);
     setError('');
+    setRestoredPath('');
     try {
+      if (version.assets !== undefined) {
+        await restoreBundle(documentId, version, true);
+        return;
+      }
       const downloaded = await downloadVersion(documentId, version.id, settings);
       if (downloaded.data_base64 !== undefined) {
         await openBase64Document(downloaded.filename, downloaded.data_base64);
@@ -184,6 +205,7 @@ export function WebDavHistoryDialog({
 
         <div className="webdav-version-list">
           <h4>版本</h4>
+          <p className="webdav-history-empty">完整版本恢复到新建文件夹，并保留原文件名与附件路径。旧版备份仅包含文档，无法补回当时未上传的附件。</p>
           {historyLoading && activeVersions.length === 0 ? (
             <p className="webdav-history-empty">加载中…</p>
           ) : activeVersions.length === 0 ? (
@@ -203,6 +225,7 @@ export function WebDavHistoryDialog({
                   <span className="webdav-version-size">
                     {(version.size / 1024).toFixed(1)} KB
                   </span>
+                  <span>{version.assets === undefined ? '旧版：仅文档' : `完整备份 · ${version.assets.length} 个附件`}</span>
                   <span className="webdav-version-hash">{version.sha256.slice(0, 12)}</span>
                 </div>
                 <div className="webdav-version-actions">
@@ -220,7 +243,7 @@ export function WebDavHistoryDialog({
                     disabled={downloadingId === version.id || !isTauriRuntime() || activeDocumentId === ''}
                     onClick={() => void download(activeDocumentId, version)}
                   >
-                    另存为
+                    {version.assets === undefined ? '另存为' : '恢复到新文件夹'}
                   </button>
                 </div>
               </div>
@@ -229,7 +252,8 @@ export function WebDavHistoryDialog({
         </div>
       </div>
 
-      {error && <p className="webdav-connection-result error">{error}</p>}
+      {restoredPath && <p className="webdav-connection-result">已恢复：{restoredPath}</p>}
+      {(error || store.historyError) && <p className="webdav-connection-result error">{error || store.historyError}</p>}
     </div>
   );
 }

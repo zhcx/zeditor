@@ -62,9 +62,10 @@ test('webdav store contract exposes status labels and retry', () => {
 test('successful local save enqueues WebDAV without awaiting cloud completion', () => {
   const source = readFileSync(new URL('../src/stores/appStore.ts', import.meta.url), 'utf8');
   const saveTab = source.match(/saveTab:\s*async[\s\S]*?\r?\n\s*},\r?\n\r?\n\s*saveFile:/)?.[0] || '';
-  assert.match(saveTab, /await invoke\('save_file_content'/);
+  assert.match(saveTab, /await invoke<CheckedSaveResult>\('save_file_content_checked'/);
   assert.match(saveTab, /void invoke\('webdav_enqueue_backup'/);
-  assert.ok(saveTab.indexOf('save_file_content') < saveTab.indexOf('webdav_enqueue_backup'));
+  assert.ok(saveTab.indexOf('save_file_content_checked') < saveTab.indexOf('webdav_enqueue_backup'));
+  assert.match(saveTab, /if \(outcome\.status === 'conflict'\)[\s\S]*?return;/);
 });
 
 test('startup initializes WebDAV after settings load', () => {

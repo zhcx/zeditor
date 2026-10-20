@@ -1,4 +1,5 @@
 use base64::{engine::general_purpose, Engine as _};
+mod assets;
 mod client;
 mod manager;
 mod manifest;
@@ -14,10 +15,10 @@ pub use manifest::{
     parse_index, parse_manifest, validate_index_namespace, validate_manifest_namespace,
 };
 pub use model::{
-    BackupIndex, BackupIndexEntry, DocumentManifest, PendingBackupTask, RemoteDocumentPath,
-    S3Settings, WebDavBackupRequest, WebDavConnectionResult, WebDavDocumentRef,
-    WebDavDocumentSummary, WebDavDownloadedVersion, WebDavQueuedResult, WebDavRetryResult,
-    WebDavSettings, WebDavSyncEvent, WebDavVersion, HISTORY_LIMIT,
+    BackupAsset, BackupIndex, BackupIndexEntry, DocumentManifest, PendingBackupTask,
+    RemoteDocumentPath, RestoredBackup, S3Settings, WebDavBackupRequest, WebDavConnectionResult,
+    WebDavDocumentRef, WebDavDocumentSummary, WebDavDownloadedVersion, WebDavQueuedResult,
+    WebDavRetryResult, WebDavSettings, WebDavSyncEvent, WebDavVersion, HISTORY_LIMIT,
 };
 pub use path::{
     deterministic_version_id, document_manifest_path, document_versions_dir, history_index_path,
@@ -162,6 +163,75 @@ pub async fn webdav_download_version(
         size,
         sha256: version.sha256.clone(),
     })
+}
+
+/// Restore a verified document and its version-bound attachments into a new directory.
+#[tauri::command]
+pub async fn webdav_restore_version(
+    document_id: String,
+    version_id: String,
+    destination_dir: String,
+    settings: WebDavSettings,
+) -> Result<RestoredBackup, String> {
+    let client = RemoteClient::WebDav(WebDavClient::new(&settings)?);
+    restore_version(
+        &client,
+        &settings.remote_root,
+        &document_id,
+        &version_id,
+        &destination_dir,
+    )
+    .await
+}
+
+#[tauri::command]
+pub async fn s3_restore_version(
+    document_id: String,
+    version_id: String,
+    destination_dir: String,
+    settings: S3Settings,
+) -> Result<RestoredBackup, String> {
+    let client = RemoteClient::S3(S3Client::new_for_mapped_paths(&settings)?);
+    restore_version(
+        &client,
+        &settings.remote_root,
+        &document_id,
+        &version_id,
+        &destination_dir,
+    )
+    .await
+}
+
+async fn restore_version(
+    client: &RemoteClient,
+    remote_root: &str,
+    document_id: &str,
+    version_id: &str,
+    destination_dir: &str,
+) -> Result<RestoredBackup, String> {
+    let remote_root = normalize_remote_root(remote_root)?;
+    let manifest_path = document_manifest_path(&remote_root, document_id);
+    let bytes = client
+        .get_optional(&manifest_path)
+        .await?
+        .ok_or("云端文档清单不存在")?;
+    let manifest = parse_manifest(&bytes)?;
+    validate_manifest_namespace(
+        &manifest,
+        &expected_for_download(
+            &remote_root,
+            document_id,
+            &manifest.display_name,
+            &manifest.current_path,
+        )?,
+        &remote_root,
+    )?;
+    let version = manifest
+        .versions
+        .iter()
+        .find(|v| v.id == version_id)
+        .ok_or("云端版本不存在")?;
+    assets::restore(client, &manifest.display_name, version, destination_dir).await
 }
 
 /// The expected remote layout for a downloaded document's manifest.
@@ -365,6 +435,8 @@ mod command_tests {
             current_path: "/Zeditor/notes/note.md".to_string(),
             versions: vec![WebDavVersion {
                 id: version_id.clone(),
+                assets: None,
+                encoding: None,
                 created_at: "2026-08-19T14:32:00Z".to_string(),
                 size: 7,
                 sha256: sha256_hex(b"version one"),
@@ -412,6 +484,8 @@ mod command_tests {
             current_path: "/Zeditor/notes/note.md".to_string(),
             versions: vec![WebDavVersion {
                 id: version_id.clone(),
+                assets: None,
+                encoding: None,
                 created_at: "2026-08-19T14:32:00Z".to_string(),
                 size: 7,
                 sha256: sha256_hex(b"expected"),

@@ -47,6 +47,7 @@ function StatusGlyph({ name }: { name: 'ai' | 'proofread' | 'success' | 'error' 
 export function StatusBar() {
   const activeEncoding = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.encoding || 'utf-8');
   const modified = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.modified ?? false);
+  const externalChangePending = useAppStore(state => state.tabs.find(tab => tab.id === state.activeTabId)?.externalChangePending ?? false);
   // 不订阅 content：状态栏只需要字数（单独字段）和「整篇」动作。订阅 content 会让
   // 每次按键都整条状态栏重渲染，而这里读到的正文只在点击摘要/大纲时才用到。
   const {
@@ -83,6 +84,8 @@ export function StatusBar() {
   // 保存状态放在状态栏最前面：圆点颜色 + 文案，悬停给出这一状态的含义。
   const saveState = isSaving
     ? { key: 'saving', label: '保存中...', hint: '正在把当前内容写入磁盘' }
+    : externalChangePending
+      ? { key: 'conflict', label: '文件已在外部更改', hint: '自动保存已暂停。请比较两份内容，合并或另存后再继续。' }
     : modified
       ? { key: 'modified', label: '未保存修改', hint: formatShortcut('内容已改动但还没写入磁盘：自动保存会在设定的间隔后触发，也可以按 Ctrl+S 立即保存') }
       : currentFile

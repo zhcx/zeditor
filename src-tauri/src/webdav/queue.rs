@@ -123,6 +123,7 @@ mod tests {
 
     fn task(document_id: &str, sha256: &str, version_id: &str) -> PendingBackupTask {
         PendingBackupTask {
+            encoding: None,
             document_id: document_id.into(),
             display_name: "note.md".into(),
             local_path: "C:\\notes\\note.md".into(),

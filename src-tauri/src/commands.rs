@@ -807,7 +807,25 @@ async fn write_utf8_text_file(path: &str, content: &str) -> Result<(), String> {
     write_file_bytes_atomic(path, content.as_bytes()).await
 }
 
-async fn write_file_bytes_atomic(path: &str, content: &[u8]) -> Result<(), String> {
+pub(crate) async fn write_file_bytes_atomic(path: &str, content: &[u8]) -> Result<(), String> {
+    write_file_bytes_atomic_inner(path, content, None)
+        .await
+        .map(|_| ())
+}
+
+pub(crate) async fn write_file_bytes_atomic_if_unchanged(
+    path: &str,
+    content: &[u8],
+    expected: &crate::file_version::FileVersion,
+) -> Result<bool, String> {
+    write_file_bytes_atomic_inner(path, content, Some(expected)).await
+}
+
+async fn write_file_bytes_atomic_inner(
+    path: &str,
+    content: &[u8],
+    expected: Option<&crate::file_version::FileVersion>,
+) -> Result<bool, String> {
     use tokio::io::AsyncWriteExt;
     let mut target = PathBuf::from(path);
     // 保留已有符号链接的语义，替换实际文档而不是链接本身。
@@ -834,6 +852,9 @@ async fn write_file_bytes_atomic(path: &str, content: &[u8]) -> Result<(), Strin
             return Err("目标不是可写文件，原文档未修改。".into());
         }
     }
+    if expected.is_some() && metadata.is_none() {
+        return Ok(false);
+    }
     // 同目录的临时文件确保最终重命名位于同一文件系统；写入失败保留原文档。
     let temporary = target.with_file_name(format!(".zeditor-save-{}.tmp", uuid::Uuid::new_v4()));
     let result = async {
@@ -848,7 +869,21 @@ async fn write_file_bytes_atomic(path: &str, content: &[u8]) -> Result<(), Strin
         if let Some(meta) = metadata {
             tokio::fs::set_permissions(&temporary, meta.permissions()).await?;
         }
-        tokio::fs::rename(&temporary, &target).await
+        if let Some(expected) = expected {
+            let current = match tokio::fs::read(&target).await {
+                Ok(current) => current,
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {
+                    let _ = tokio::fs::remove_file(&temporary).await;
+                    return Ok(false);
+                }
+                Err(error) => return Err(error),
+            };
+            if !expected.matches_bytes(&current) {
+                let _ = tokio::fs::remove_file(&temporary).await;
+                return Ok(false);
+            }
+        }
+        tokio::fs::rename(&temporary, &target).await.map(|()| true)
     }
     .await;
     if result.is_err() {
@@ -870,7 +905,16 @@ pub async fn read_text_document(
     let bytes = tokio::fs::read(&path)
         .await
         .map_err(|error| error.to_string())?;
-    crate::text_encoding::decode_text(&bytes, encoding.as_deref())
+    let mut document = crate::text_encoding::decode_text(&bytes, encoding.as_deref())?;
+    document.file_version = Some(crate::file_version::FileVersion::from_bytes(&bytes));
+    Ok(document)
+}
+
+#[tauri::command]
+pub async fn get_file_version(
+    path: String,
+) -> Result<Option<crate::file_version::FileVersion>, String> {
+    crate::file_version::read_file_version(&path).await
 }
 
 #[tauri::command]
@@ -931,6 +975,69 @@ pub async fn save_file_content(
     let bytes =
         crate::text_encoding::encode_text(&content, encoding.as_deref().unwrap_or("utf-8"))?;
     write_file_bytes_atomic(&path, &bytes).await
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CheckedSaveResult {
+    pub status: String,
+    pub file_version: Option<crate::file_version::FileVersion>,
+    pub disk_exists: bool,
+    pub current: Option<crate::text_encoding::TextDocument>,
+}
+
+/// Save a file-backed editor tab only if the on-disk bytes still match the
+/// fingerprint captured when that tab was opened or last saved.
+#[tauri::command]
+pub async fn save_file_content_checked(
+    path: String,
+    content: String,
+    encoding: Option<String>,
+    expected_version: Option<crate::file_version::FileVersion>,
+) -> Result<CheckedSaveResult, String> {
+    let encoding_name = encoding.as_deref().unwrap_or("utf-8");
+    let bytes = crate::text_encoding::encode_text(&content, encoding_name)?;
+
+    let file_version = if let Some(expected) = expected_version.as_ref() {
+        match crate::file_version::save_if_unchanged(&path, expected, &bytes).await? {
+            crate::file_version::SaveIfUnchanged::Saved(version) => version,
+            crate::file_version::SaveIfUnchanged::Conflict => {
+                let current_bytes = match tokio::fs::read(&path).await {
+                    Ok(bytes) => Some(bytes),
+                    Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+                    Err(error) => return Err(format!("无法读取外部修改：{error}")),
+                };
+                let disk_exists = current_bytes.is_some();
+                let current_version = current_bytes
+                    .as_ref()
+                    .map(|bytes| crate::file_version::FileVersion::from_bytes(bytes));
+                let current = current_bytes.as_ref().and_then(|bytes| {
+                    crate::text_encoding::decode_text(bytes, Some(encoding_name))
+                        .ok()
+                        .map(|mut document| {
+                            document.file_version = current_version.clone();
+                            document
+                        })
+                });
+                return Ok(CheckedSaveResult {
+                    status: "conflict".into(),
+                    file_version: current_version,
+                    disk_exists,
+                    current,
+                });
+            }
+        }
+    } else {
+        write_file_bytes_atomic(&path, &bytes).await?;
+        crate::file_version::FileVersion::from_bytes(&bytes)
+    };
+
+    Ok(CheckedSaveResult {
+        status: "saved".into(),
+        file_version: Some(file_version),
+        disk_exists: true,
+        current: None,
+    })
 }
 
 fn get_recent_files_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -1239,20 +1346,48 @@ pub async fn create_directory(path: String) -> Result<(), String> {
 }
 
 #[tauri::command]
-pub async fn delete_fs_item(path: String) -> Result<(), String> {
+pub async fn delete_fs_item(
+    app: AppHandle,
+    path: String,
+) -> Result<crate::recycle::RecycleEntry, String> {
     ensure_fs_authorized(&path, "删除")?;
-    let meta = tokio::fs::metadata(&path)
+    let store = app_recycle_store(&app)?;
+    tokio::task::spawn_blocking(move || store.recycle(Path::new(&path)))
         .await
-        .map_err(|e| format!("无法获取文件信息：{e}"))?;
-    if meta.is_dir() {
-        tokio::fs::remove_dir_all(&path)
-            .await
-            .map_err(|e| format!("删除文件夹失败：{e}"))
-    } else {
-        tokio::fs::remove_file(&path)
-            .await
-            .map_err(|e| format!("删除文件失败：{e}"))
-    }
+        .map_err(|error| format!("回收站操作失败：{error}"))?
+}
+
+fn app_recycle_store(app: &AppHandle) -> Result<crate::recycle::RecycleStore, String> {
+    let directory = app
+        .path()
+        .app_data_dir()
+        .map_err(|error| format!("无法定位恢复区：{error}"))?;
+    Ok(crate::recycle::RecycleStore::new(directory.join("recycle")))
+}
+
+#[tauri::command]
+pub async fn list_recycled_items(
+    app: AppHandle,
+) -> Result<Vec<crate::recycle::RecycleEntry>, String> {
+    let store = app_recycle_store(&app)?;
+    tokio::task::spawn_blocking(move || store.list())
+        .await
+        .map_err(|error| format!("读取回收站失败：{error}"))?
+}
+
+#[tauri::command]
+pub async fn restore_recycled_item(app: AppHandle, id: String) -> Result<String, String> {
+    let store = app_recycle_store(&app)?;
+    tokio::task::spawn_blocking(move || {
+        let original = store.original_path(&id)?;
+        ensure_fs_authorized(
+            original.to_str().ok_or("恢复路径无法编码为 Unicode")?,
+            "恢复",
+        )?;
+        store.restore(&id)
+    })
+    .await
+    .map_err(|error| format!("恢复回收站项目失败：{error}"))?
 }
 
 #[tauri::command]

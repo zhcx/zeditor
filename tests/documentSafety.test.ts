@@ -140,3 +140,36 @@ test('a failed document deletion does not close its open tab', async () => {
   );
   assert.equal(closed, false);
 });
+
+test('recycling a folder preserves dirty descendants and leaves similarly named siblings open', async () => {
+  const events: string[] = [];
+  await documentSafety.deleteDocument('C:\\Docs\\chapter', 'chapter', [
+    { id: 'dirty', path: 'c:/docs/chapter/nested/a.md', modified: true },
+    { id: 'clean', path: 'C:/Docs/chapter/b.md', modified: false },
+    { id: 'sibling', path: 'C:/Docs/chapter2/c.md', modified: false },
+  ], {
+    confirm: () => true,
+    deleteItem: async () => { events.push('recycle'); },
+    preserveTab: id => { events.push(`draft:${id}`); },
+    closeTab: id => { events.push(`close:${id}`); },
+  });
+  assert.deepEqual(events, ['recycle', 'draft:dirty', 'close:clean']);
+});
+
+test('edits buffered during a delayed recycle are flushed before deciding to close a clean tab', async () => {
+  let tabs = [{ id: 'active', path: 'C:/docs/note.md', modified: false }];
+  const events: string[] = [];
+  let completeDelete!: () => void;
+  const deletion = documentSafety.deleteDocument('C:/docs', 'docs', tabs, {
+    confirm: () => true,
+    deleteItem: () => new Promise(resolve => { completeDelete = resolve; }),
+    flushEdits: () => { tabs = tabs.map(tab => ({ ...tab, modified: true })); },
+    getTabs: () => tabs,
+    preserveTab: id => { events.push(`draft:${id}`); },
+    closeTab: id => { events.push(`closed:${id}`); },
+  });
+  await Promise.resolve();
+  completeDelete();
+  await deletion;
+  assert.deepEqual(events, ['draft:active']);
+});

@@ -10,26 +10,44 @@ export interface DocumentDeletionOptions {
   confirm: (message: string) => boolean | Promise<boolean>;
   deleteItem: () => Promise<void>;
   closeTab: (id: string) => void;
+  preserveTab?: (id: string) => void;
+  getTabs?: () => DeletableDocumentTab[];
+  flushEdits?: () => void;
 }
 
-/** Confirm a destructive delete, then close affected editor tabs only after the delete succeeds. */
+/** Match whole path segments; Windows paths are case insensitive. */
+export function isPathWithin(path: string, root: string): boolean {
+  const normalize = (value: string) => {
+    const normalized = value.replace(/\\/g, '/').replace(/\/+$/, '');
+    return /^[a-z]:\//i.test(normalized) || normalized.startsWith('//') ? normalized.toLowerCase() : normalized;
+  };
+  const target = normalize(path);
+  const parent = normalize(root);
+  return target === parent || target.startsWith(`${parent}/`);
+}
+
+/** Recycle first; only then detach dirty buffers and close clean descendants. */
 export async function deleteDocument(
   path: string,
   name: string,
   tabs: DeletableDocumentTab[],
   options: DocumentDeletionOptions,
 ): Promise<boolean> {
-  const openTabs = tabs.filter(tab => tab.path === path);
+  const openTabs = tabs.filter(tab => tab.path !== null && isPathWithin(tab.path, path));
   const hasUnsavedChanges = openTabs.some(tab => tab.modified);
   const message = openTabs.length > 0
     ? hasUnsavedChanges
-      ? `文档「${name}」正在编辑，且包含未保存修改。确认删除后将关闭编辑器并永久删除该文档，是否继续？`
-      : `文档「${name}」当前已打开。确认删除后将关闭编辑器并永久删除该文档，是否继续？`
-    : `确定要删除「${name}」吗？此操作不可撤销。`;
+      ? `「${name}」包含正在编辑且尚未保存的文档。移入回收站后，未保存修改将保留为草稿，是否继续？`
+      : `「${name}」包含已打开的文档。移入回收站后将关闭这些标签，是否继续？`
+    : `确定将「${name}」移入回收站吗？可在“回收站与恢复”中找回。`;
 
   if (!(await options.confirm(message))) return false;
   await options.deleteItem();
-  openTabs.forEach(tab => options.closeTab(tab.id));
+  options.flushEdits?.();
+  (options.getTabs?.() || tabs).filter(tab => tab.path !== null && isPathWithin(tab.path, path)).forEach(tab => {
+    if (tab.modified && options.preserveTab) options.preserveTab(tab.id);
+    else options.closeTab(tab.id);
+  });
   return true;
 }
 
@@ -42,6 +60,9 @@ export function createSaveQueue() {
     return result;
   };
 }
+
+/** Serialize editor saves and recycling so a queued save cannot recreate a deleted file. */
+export const enqueueDocumentWrite = createSaveQueue();
 
 export function sameDocument(a: DocumentSnapshot, b: DocumentSnapshot): boolean {
   return a.activeTabId !== null && a.activeTabId === b.activeTabId && a.content === b.content;

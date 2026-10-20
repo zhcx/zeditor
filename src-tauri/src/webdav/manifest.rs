@@ -33,13 +33,13 @@ impl DocumentManifest {
         let mut version_ids = HashSet::new();
         let mut content_hashes = HashSet::new();
         for candidate in self.versions.drain(..) {
-            let is_duplicate =
-                version_ids.contains(&candidate.id) || content_hashes.contains(&candidate.sha256);
+            let is_duplicate = version_ids.contains(&candidate.id)
+                || content_hashes.contains(&content_identity(&candidate));
             if is_duplicate || retained.len() == HISTORY_LIMIT {
                 pruned.push(candidate);
             } else {
                 version_ids.insert(candidate.id.clone());
-                content_hashes.insert(candidate.sha256.clone());
+                content_hashes.insert(content_identity(&candidate));
                 retained.push(candidate);
             }
         }
@@ -57,6 +57,29 @@ impl DocumentManifest {
         });
         pruned
     }
+}
+
+/// Snapshot locations depend on version IDs, so only relative names and content
+/// hashes participate in deduplication. Legacy None stays distinguishable from
+/// a verified attachment-free version.
+type ContentIdentity = (String, Option<Vec<(String, String, u64)>>);
+
+fn content_identity(version: &WebDavVersion) -> ContentIdentity {
+    let assets = version.assets.as_ref().map(|assets| {
+        let mut identities: Vec<_> = assets
+            .iter()
+            .map(|asset| {
+                (
+                    asset.relative_path.clone(),
+                    asset.sha256.clone(),
+                    asset.size,
+                )
+            })
+            .collect();
+        identities.sort();
+        identities
+    });
+    (version.sha256.clone(), assets)
 }
 
 fn sort_versions(versions: &mut [WebDavVersion]) {
@@ -210,6 +233,9 @@ pub fn validate_manifest_namespace(
                 version.id
             ));
         }
+        if let Some(assets) = &version.assets {
+            super::assets::validate_asset_manifest(assets, &expected.versions_dir, &version.id)?;
+        }
         validate_canonical_remote_path(&version.snapshot_path, "version snapshot path")?;
         let Some((parent, basename)) = version.snapshot_path.rsplit_once('/') else {
             return Err(format!(
@@ -340,6 +366,8 @@ mod tests {
     fn version(id: &str, created_at: &str, sha256: &str, snapshot_path: &str) -> WebDavVersion {
         WebDavVersion {
             id: id.to_string(),
+            assets: None,
+            encoding: None,
             created_at: created_at.to_string(),
             size: 1,
             sha256: sha256.to_string(),
@@ -406,6 +434,8 @@ mod tests {
         for index in 0..21 {
             limit_pruned.extend(manifest.insert_version(WebDavVersion {
                 id: format!("v{index:02}"),
+                assets: None,
+                encoding: None,
                 created_at: format!("2026-08-19T12:{index:02}:00Z"),
                 size: index,
                 sha256: format!("hash-{index}"),

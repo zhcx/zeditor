@@ -23,3 +23,18 @@ test('keeps a tab dirty when its content changes while saving', () => {
   assert.equal(result[1].modified, true);
   assert.equal(result[1].path, 'C:\\docs\\second.md');
 });
+
+test('refreshes the file fingerprint after a successful save without clearing newer edits', () => {
+  const baseline = { size: 6, sha256: 'baseline' };
+  const saved = { size: 6, sha256: 'saved' };
+  const source = tabs.map(tab => tab.id === 'second' ? { ...tab, fileVersion: baseline } : tab);
+  const result = applySavedTab(source, 'second', 'C:\\docs\\second.md', 'second', 'utf-8', saved);
+
+  assert.equal(result[1].fileVersion, saved);
+  assert.equal(result[1].modified, false);
+
+  const editedWhileSaving = source.map(tab => tab.id === 'second' ? { ...tab, content: 'newer' } : tab);
+  const newer = applySavedTab(editedWhileSaving, 'second', 'C:\\docs\\second.md', 'second', 'utf-8', saved);
+  assert.equal(newer[1].fileVersion, saved);
+  assert.equal(newer[1].modified, true);
+});

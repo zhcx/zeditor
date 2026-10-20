@@ -1,9 +1,11 @@
 use serde::Serialize;
 
 #[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct TextDocument {
     pub content: String,
     pub encoding: String,
+    pub file_version: Option<crate::file_version::FileVersion>,
 }
 
 fn legacy_encoding(name: &str) -> Option<&'static encoding_rs::Encoding> {
@@ -89,6 +91,7 @@ pub fn decode_text(bytes: &[u8], encoding: Option<&str>) -> Result<TextDocument,
     Ok(TextDocument {
         content,
         encoding: actual.into(),
+        file_version: None,
     })
 }
 

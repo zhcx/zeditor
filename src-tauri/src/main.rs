@@ -16,10 +16,14 @@ mod agent;
 mod ai;
 mod commands;
 mod converter;
+mod export_image;
+mod file_version;
 mod image;
 mod imaging;
 mod mcp;
 mod pdf;
+mod recovery;
+mod recycle;
 mod text_encoding;
 pub mod webdav;
 
@@ -197,6 +201,9 @@ fn main() {
             take_pending_open_files,
             commands::get_settings,
             commands::save_settings,
+            recovery::list_recovery_snapshots,
+            recovery::save_recovery_snapshot,
+            recovery::delete_recovery_snapshot,
             commands::get_local_font_families,
             commands::upload_image,
             commands::upload_image_bytes,
@@ -205,6 +212,7 @@ fn main() {
             commands::export_word,
             commands::get_file_content,
             commands::read_text_document,
+            commands::get_file_version,
             commands::decode_text_document,
             commands::save_file_bytes,
             commands::get_text_attachment_content,
@@ -216,6 +224,7 @@ fn main() {
             converter::import_converter_module,
             converter::uninstall_converter_module,
             commands::save_file_content,
+            commands::save_file_content_checked,
             commands::read_file_base64,
             commands::reveal_in_file_manager,
             commands::resolve_wiki_link,
@@ -227,6 +236,9 @@ fn main() {
             commands::create_file,
             commands::create_directory,
             commands::delete_fs_item,
+            commands::list_recycled_items,
+            commands::restore_recycled_item,
+            export_image::read_export_image,
             commands::rename_fs_item,
             commands::copy_fs_item,
             commands::import_media_asset,
@@ -250,12 +262,14 @@ fn main() {
             webdav::webdav_list_documents,
             webdav::webdav_list_versions,
             webdav::webdav_download_version,
+            webdav::webdav_restore_version,
             webdav::s3_test_connection,
             webdav::s3_enqueue_backup,
             webdav::s3_retry_pending,
             webdav::s3_list_documents,
             webdav::s3_list_versions,
             webdav::s3_download_version,
+            webdav::s3_restore_version,
             ai::ai_request,
             ai::ai_streaming,
             ai::ai_chat_streaming,

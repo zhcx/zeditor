@@ -1,8 +1,8 @@
 import { AppIcon } from '../Icons/AppIcon';
 import { useMemo, useState } from 'react';
-import MarkdownIt from 'markdown-it';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
+import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
 
 type WeChatThemeId = 'jade' | 'vermilion' | 'graphite' | 'zen' | 'amber' | 'olive';
 interface WeChatTheme { id: WeChatThemeId; label: string; description: string; primary: string; pale: string; ink: string; accent: string; }
@@ -15,7 +15,6 @@ const themes: WeChatTheme[] = [
   { id: 'amber', label: '琥珀便签', description: '轻快、有温度，适合测评与工具推荐', primary: '#a85e20', pale: '#fff7e9', ink: '#3f3023', accent: '#e3b24e' },
   { id: 'olive', label: '橄榄书页', description: '编辑感、沉稳，适合案例与复盘', primary: '#58633b', pale: '#f4f5ec', ink: '#292d22', accent: '#a68d58' },
 ];
-const md = new MarkdownIt({ html: false, linkify: true, breaks: false, typographer: true });
 const WECHAT_FONT_FAMILY = '"Microsoft YaHei","微软雅黑",sans-serif';
 // Typography is deliberately inlined so WeChat and the app theme cannot replace it.
 const textStyle = (theme: WeChatTheme) => `font-family:${WECHAT_FONT_FAMILY};color:${theme.ink};line-height:1.85;letter-spacing:0.4px;`;
@@ -31,7 +30,7 @@ function wrapTextLeaves(root: HTMLElement) {
 }
 
 function renderWeChatHtml(markdown: string, title: string, theme: WeChatTheme) {
-  const documentNode = new DOMParser().parseFromString(`<section>${md.render(markdown || '暂无内容')}</section>`, 'text/html');
+  const documentNode = new DOMParser().parseFromString(`<section>${renderMarkdownToHtml(markdown || '暂无内容')}</section>`, 'text/html');
   const root = documentNode.body.firstElementChild as HTMLElement;
   root.setAttribute('style', `max-width:677px;margin:0 auto;padding:4px 0;font-size:16px;${textStyle(theme)}`);
   root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6,p,blockquote,pre,ul,ol,li,table,th,td,a,img,hr,code,strong,em,del').forEach((element) => {

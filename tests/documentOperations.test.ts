@@ -1,6 +1,7 @@
 import { register } from 'node:module';
 import test, { afterEach } from 'node:test';
 import assert from 'node:assert/strict';
+import { enqueueDocumentWrite } from '../src/utils/documentSafety.ts';
 
 register('./helpers/resolveTypescript.mjs', import.meta.url);
 Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: { getItem: () => null, setItem: () => {} } });
@@ -16,6 +17,9 @@ Object.assign(globalThis, {
     async invoke(command: string, args: Record<string, unknown>) {
       calls.push({ command, args });
       const result = await invokeHandler(command, args);
+      if (command === 'save_file_content_checked' && result === undefined) {
+        return { status: 'saved', fileVersion: { size: 0, sha256: 'test-version' }, current: null };
+      }
       return command === 'read_text_document' && typeof result === 'string'
         ? { content: result, encoding: args.encoding || 'utf-8' } : result;
     },
@@ -31,6 +35,7 @@ afterEach(() => {
   useAppStore.getState().setUploadStatus('idle');
   useAppStore.getState().setConversionStatus('idle');
   useAppStore.getState().setEncodingDialog(null);
+  useAppStore.setState({ fileConflict: null, recoverySnapshots: [], recoveryLoaded: false });
 });
 
 test('取消编码读取后，迟到的错误不会重新打开选择窗口', async () => {
@@ -51,7 +56,72 @@ test('打开非 UTF-8 文档时记住编码，保存继续使用相同编码', a
   const tab = useAppStore.getState().getActiveTab()!;
   assert.equal(tab.encoding, 'gbk');
   await useAppStore.getState().saveTab(tab.id, 'C:/gbk.md');
-  assert.equal(calls.find(call => call.command === 'save_file_content')?.args.encoding, 'gbk');
+  assert.equal(calls.find(call => call.command === 'save_file_content_checked')?.args.encoding, 'gbk');
+});
+
+test('stale checked saves keep both versions and do not enqueue cloud backup', async () => {
+  const original = { size: 8, sha256: 'original' };
+  const external = { size: 8, sha256: 'external' };
+  const id = useAppStore.getState().addTab({
+    title: 'note.md', path: 'C:/note.md', content: '我的修改', modified: true, fileVersion: original,
+  });
+  invokeHandler = async command => command === 'save_file_content_checked'
+    ? { status: 'conflict', fileVersion: external, diskExists: true, current: { content: '外部修改', encoding: 'utf-8', fileVersion: external } }
+    : undefined;
+
+  await useAppStore.getState().saveTab(id, 'C:/note.md');
+
+  assert.equal(useAppStore.getState().tabs.find(tab => tab.id === id)?.content, '我的修改');
+  assert.equal(useAppStore.getState().tabs.find(tab => tab.id === id)?.modified, true);
+  assert.equal(useAppStore.getState().tabs.find(tab => tab.id === id)?.externalChangePending, true);
+  assert.equal(useAppStore.getState().fileConflict?.diskContent, '外部修改');
+  assert.equal(calls.some(call => call.command === 'webdav_enqueue_backup' || call.command === 's3_enqueue_backup'), false);
+});
+
+test('focus version checks report external deletion and keep the local draft recoverable', async () => {
+  const id = useAppStore.getState().addTab({
+    title: 'note.md', path: 'C:/note.md', content: '我的修改', modified: true,
+    fileVersion: { size: 8, sha256: 'original' },
+  });
+  invokeHandler = async command => command === 'get_file_version' ? null : undefined;
+
+  await useAppStore.getState().checkFileVersion(id);
+
+  assert.equal(useAppStore.getState().fileConflict?.diskExists, false);
+  assert.equal(useAppStore.getState().tabs.find(tab => tab.id === id)?.content, '我的修改');
+  await useAppStore.getState().reloadExternalFile();
+  const tab = useAppStore.getState().tabs.find(item => item.id === id)!;
+  assert.equal(tab.path, null);
+  assert.equal(tab.modified, true);
+});
+
+test('detaching a recycled document keeps its buffer and recovery identity', () => {
+  const id = useAppStore.getState().addTab({ title: 'note.md', path: 'C:/note.md', content: '未保存内容', modified: true, recoveryId: 'original-draft', fileVersion: { size: 1, sha256: 'old' } });
+  useAppStore.getState().detachDeletedTab(id);
+  const tab = useAppStore.getState().getActiveTab()!;
+  assert.equal(tab.path, null);
+  assert.equal(tab.content, '未保存内容');
+  assert.equal(tab.modified, true);
+  assert.equal(tab.recoveryId, 'original-draft');
+  assert.equal(tab.fileVersion, undefined);
+  assert.equal(useAppStore.getState().currentFile, null);
+});
+
+test('a save queued during recycling cannot recreate the deleted document', async () => {
+  const id = useAppStore.getState().addTab({ title: 'note.md', path: 'C:/note.md', content: '草稿', modified: true });
+  let release!: () => void;
+  const recycling = enqueueDocumentWrite(async () => {
+    await new Promise<void>(resolve => { release = resolve; });
+    useAppStore.getState().detachDeletedTab(id);
+  });
+  await Promise.resolve();
+  const saving = useAppStore.getState().saveTab(id, 'C:/note.md');
+  const rejection = assert.rejects(saving, /文档位置已改变/);
+  release();
+  await recycling;
+  await rejection;
+  assert.equal(calls.some(call => call.command === 'save_file_content_checked'), false);
+  assert.equal(useAppStore.getState().getActiveTab()!.content, '草稿');
 });
 
 test('云端旧编码版本不会作为空文本打开，选择编码后保留原文和编码', async () => {

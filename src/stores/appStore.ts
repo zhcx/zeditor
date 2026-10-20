@@ -1,4 +1,4 @@
-import { createSaveQueue } from '../utils/documentSafety';
+import { enqueueDocumentWrite } from '../utils/documentSafety';
 import { create } from 'zustand';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -17,8 +17,9 @@ import { isConvertibleDocumentName } from '../utils/documentFormats';
 import { isTextFileName } from '../utils/fileIcon';
 import { normalizeAgentBackend } from '../utils/agentSettings';
 import { isTextEncoding, type TextEncoding, type TextDocument, type EncodingDialogRequest } from '../utils/textEncoding';
+import { restoreRecoverySnapshot as createRestoredTab, type RecoverySnapshot } from '../utils/recovery';
+import { fileVersionsMatch, type FileVersion } from '../utils/fileVersion';
 
-const enqueueSave = createSaveQueue();
 let pendingSaves = 0;
 let fileOpenSequence = 0;
 const pendingFileReads = new Map<string, Promise<TextDocument>>();
@@ -26,6 +27,7 @@ const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS
   const browserSettingsKey = 'zeditor.browser.settings';
 let settingsMutationVersion = 0;
 let settingsSaveQueue: Promise<unknown> = Promise.resolve();
+let recoveryMutationQueue: Promise<unknown> = Promise.resolve();
 let converterDialogResolve: ((value: boolean) => void) | null = null;
 
 const cacheSettingsForStartup = (settings: Settings) => {
@@ -260,6 +262,9 @@ export interface Tab {
   content: string;
   modified: boolean;
   encoding?: TextEncoding;
+  recoveryId?: string;
+  fileVersion?: FileVersion;
+  externalChangePending?: boolean;
 }
 
 export interface TimelineEntry {
@@ -268,6 +273,23 @@ export interface TimelineEntry {
   timestamp: number;
   label: string;
   operation: string;
+}
+
+export interface FileConflict {
+  tabId: string;
+  title: string;
+  path: string;
+  localContent: string;
+  diskContent: string | null;
+  diskFileVersion: FileVersion | null;
+  diskExists: boolean;
+}
+
+interface CheckedSaveResult {
+  status: 'saved' | 'conflict';
+  fileVersion: FileVersion | null;
+  diskExists: boolean;
+  current: TextDocument | null;
 }
 
 export type UploadStatus = 'idle' | 'uploading' | 'success' | 'error';
@@ -313,6 +335,9 @@ interface AppState {
   tabs: Tab[];
   activeTabId: string | null;
   timeline: Record<string, TimelineEntry[]>;
+  recoveryLoaded: boolean;
+  recoverySnapshots: RecoverySnapshot[];
+  fileConflict: FileConflict | null;
   uploadStatus: UploadStatus;
   uploadProgress: number;
   uploadMessage: string;
@@ -350,12 +375,24 @@ interface AppState {
   openFile: (path: string, encoding?: TextEncoding, cancelled?: () => boolean) => Promise<void>;
   convertDocument: (path: string) => Promise<void>;
   saveFile: (path: string) => Promise<void>;
-  saveTab: (tabId: string, path: string) => Promise<void>;
+  saveTab: (tabId: string, path: string, expectedVersionOverride?: FileVersion | null) => Promise<void>;
+  checkFileVersion: (tabId: string) => Promise<void>;
+  reloadExternalFile: () => Promise<void>;
+  overwriteExternalFile: () => Promise<void>;
+  openExternalVersionCopy: () => string | null;
+  dismissFileConflict: () => void;
+  loadRecoverySnapshots: () => Promise<void>;
+  persistRecoverySnapshot: (snapshot: RecoverySnapshot) => Promise<void>;
+  deleteRecoverySnapshot: (id: string) => Promise<void>;
+  dismissRecoverySnapshot: (id: string) => void;
+  restoreSavedRecoverySnapshot: (id: string) => string | null;
+  discardRecoverySnapshotsForTabs: (tabIds: string[]) => Promise<void>;
   updateWordCount: () => void;
   scheduleWordCount: () => void;
 
   addTab: (tab?: Partial<Tab>) => string;
   closeTab: (id: string) => void;
+  detachDeletedTab: (id: string) => void;
   setActiveTab: (id: string) => void;
   updateTabContent: (id: string, content: string) => void;
   updateTabTitle: (id: string, path: string) => void;
@@ -625,6 +662,9 @@ export const useAppStore = create<AppState>((set, get) => ({
   tabs: [initialTab],
   activeTabId: initialTab.id,
   timeline: {},
+  recoveryLoaded: false,
+  recoverySnapshots: [],
+  fileConflict: null,
   uploadStatus: 'idle',
   uploadProgress: 0,
   uploadMessage: '',
@@ -655,7 +695,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().editorView?.resetValue?.(loaded.content);
     }
     set(state => ({
-      tabs: state.tabs.map(item => item.id === tabId ? { ...item, content: loaded.content, encoding: loaded.encoding, modified: false } : item),
+      tabs: state.tabs.map(item => item.id === tabId ? { ...item, content: loaded.content, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined } : item),
       ...(state.activeTabId === tabId ? { content: loaded.content } : {}),
     }));
     get().updateWordCount();
@@ -823,7 +863,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         if (!existingTab) {
           set({ tabs: [...tabs, {
             id: generateId(), title: path.split(/[\\/]/).pop() || path,
-            path, content: fileContent, encoding: loaded.encoding, modified: false,
+            path, content: fileContent, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined,
           }] });
         }
         return;
@@ -841,7 +881,7 @@ export const useAppStore = create<AppState>((set, get) => ({
           if (get().editorView?.getValue() === activeTab.content) get().editorView?.resetValue?.(fileContent);
           const newTabs = tabs.map(t =>
             t.id === activeTabId
-              ? { ...t, content: fileContent, path, title: path.split(/[\\/]/).pop() || path, encoding: loaded.encoding, modified: false }
+              ? { ...t, content: fileContent, path, title: path.split(/[\\/]/).pop() || path, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined }
               : t
           );
           set({
@@ -858,6 +898,7 @@ export const useAppStore = create<AppState>((set, get) => ({
             content: fileContent,
             modified: false,
             encoding: loaded.encoding,
+            fileVersion: loaded.fileVersion || undefined,
           };
           set({
             tabs: [...tabs, newTab],
@@ -978,20 +1019,188 @@ export const useAppStore = create<AppState>((set, get) => ({
     }
   },
 
-  saveTab: async (tabId, path) => {
+  loadRecoverySnapshots: async () => {
+    if (!isTauriRuntime()) {
+      set({ recoveryLoaded: true, recoverySnapshots: [] });
+      return;
+    }
+    try {
+      const snapshots = await invoke<RecoverySnapshot[]>('list_recovery_snapshots');
+      set({ recoverySnapshots: snapshots, recoveryLoaded: true });
+    } catch (error) {
+      set({ recoveryLoaded: true });
+      throw error;
+    }
+  },
+
+  persistRecoverySnapshot: async (snapshot) => {
+    if (!isTauriRuntime()) return;
+    const operation = recoveryMutationQueue.then(() => invoke('save_recovery_snapshot', { snapshot }));
+    recoveryMutationQueue = operation.catch(() => undefined);
+    await operation;
+  },
+
+  deleteRecoverySnapshot: async (id) => {
+    if (!id) return;
+    if (isTauriRuntime() && get().recoveryLoaded) {
+      const operation = recoveryMutationQueue.then(() => invoke('delete_recovery_snapshot', { id }));
+      recoveryMutationQueue = operation.catch(() => undefined);
+      await operation;
+    }
+    set(state => ({ recoverySnapshots: state.recoverySnapshots.filter(snapshot => snapshot.id !== id) }));
+  },
+
+  dismissRecoverySnapshot: (id) => set(state => ({
+    recoverySnapshots: state.recoverySnapshots.filter(snapshot => snapshot.id !== id),
+  })),
+
+  restoreSavedRecoverySnapshot: (id) => {
+    const snapshot = get().recoverySnapshots.find(item => item.id === id);
+    if (!snapshot) return null;
+    const tab = createRestoredTab(snapshot, generateId());
+    const restoredId = get().addTab(tab);
+    get().dismissRecoverySnapshot(id);
+    return restoredId;
+  },
+
+  discardRecoverySnapshotsForTabs: async (tabIds) => {
+    const state = get();
+    const snapshotIds = tabIds.map(tabId => state.tabs.find(tab => tab.id === tabId)?.recoveryId || tabId);
+    await Promise.all(snapshotIds.map(id => get().deleteRecoverySnapshot(id)));
+  },
+
+  checkFileVersion: async (tabId) => {
+    if (!isTauriRuntime()) return;
+    const tab = get().tabs.find(item => item.id === tabId);
+    if (!tab?.path || !tab.fileVersion || tab.externalChangePending || get().fileConflict) return;
+    try {
+      const currentVersion = await invoke<FileVersion | null>('get_file_version', { path: tab.path });
+      const latest = get().tabs.find(item => item.id === tabId);
+      if (!latest || latest.path !== tab.path || !fileVersionsMatch(latest.fileVersion, tab.fileVersion)) return;
+      if (!fileVersionsMatch(tab.fileVersion, currentVersion)) {
+        const current = currentVersion
+          ? await invoke<TextDocument>('read_text_document', { path: tab.path, encoding: tab.encoding || null }).catch(() => null)
+          : null;
+        set(state => ({ fileConflict: {
+          tabId,
+          title: latest.title,
+          path: tab.path,
+          localContent: latest.content,
+          diskContent: current?.content ?? null,
+          diskFileVersion: currentVersion,
+          diskExists: currentVersion !== null,
+        }, tabs: state.tabs.map(item => item.id === tabId ? { ...item, externalChangePending: true } : item) }));
+      }
+    } catch (error) {
+      // A missing file is also reported by the checked save path; avoid turning
+      // transient access errors during focus into a modal or data loss.
+      console.warn('Failed to check the active document version:', error);
+    }
+  },
+
+  reloadExternalFile: async () => {
+    const conflict = get().fileConflict;
+    if (!conflict) return;
+    const latest = get().tabs.find(item => item.id === conflict.tabId);
+    if (!latest) { set({ fileConflict: null }); return; }
+    if (!conflict.diskExists) {
+      set(state => ({
+        fileConflict: null,
+        currentFile: state.activeTabId === conflict.tabId ? null : state.currentFile,
+        tabs: state.tabs.map(item => item.id === conflict.tabId
+          ? { ...item, path: null, modified: true, fileVersion: undefined, externalChangePending: false }
+          : item),
+      }));
+      return;
+    }
+    if (conflict.diskContent === null) return;
+    if (get().activeTabId === conflict.tabId && get().editorView?.getValue() === latest.content) {
+      get().editorView?.resetValue?.(conflict.diskContent);
+    }
+    set(state => ({
+      fileConflict: null,
+      content: state.activeTabId === conflict.tabId ? conflict.diskContent! : state.content,
+      tabs: state.tabs.map(item => item.id === conflict.tabId
+        ? { ...item, content: conflict.diskContent!, modified: false, fileVersion: conflict.diskFileVersion || undefined, externalChangePending: false }
+        : item),
+    }));
+    get().updateWordCount();
+    await get().deleteRecoverySnapshot(latest.recoveryId || latest.id).catch(error => {
+      console.warn('Failed to remove recovery snapshot after reload:', error);
+    });
+  },
+
+  overwriteExternalFile: async () => {
+    const conflict = get().fileConflict;
+    if (!conflict || conflict.diskContent === null || !conflict.diskFileVersion) return;
+    await get().saveTab(conflict.tabId, conflict.path, conflict.diskFileVersion);
+  },
+
+  openExternalVersionCopy: () => {
+    const conflict = get().fileConflict;
+    if (!conflict || conflict.diskContent === null) return null;
+    const source = get().tabs.find(item => item.id === conflict.tabId);
+    const title = `${conflict.title.replace(/\.md$/i, '')}（磁盘版本）.md`;
+    const id = get().addTab({
+      title,
+      path: null,
+      content: conflict.diskContent,
+      encoding: source?.encoding || 'utf-8',
+      modified: false,
+      fileVersion: conflict.diskFileVersion || undefined,
+    });
+    set({ fileConflict: null });
+    return id;
+  },
+
+  dismissFileConflict: () => set({ fileConflict: null }),
+
+  saveTab: async (tabId, path, expectedVersionOverride) => {
     if (get().activeTabId === tabId) get().editorView?.flushPendingEdits?.();
+    const requestedTabPath = get().tabs.find(tab => tab.id === tabId)?.path;
     pendingSaves += 1;
     set({ isSaving: true });
     try {
-      await enqueueSave(async () => {
+      await enqueueDocumentWrite(async () => {
         const tab = get().tabs.find(item => item.id === tabId);
         if (!tab) throw new Error('找不到要保存的标签页');
+        if (tab.path !== requestedTabPath) throw new Error('文档位置已改变，请重新保存。');
         const encoding = tab.encoding || 'utf-8';
-        await invoke('save_file_content', { path, content: tab.content, encoding });
+        const expectedVersion = expectedVersionOverride !== undefined
+          ? expectedVersionOverride
+          : (tab.path === path ? tab.fileVersion || null : null);
+        const outcome = await invoke<CheckedSaveResult>('save_file_content_checked', {
+          path,
+          content: tab.content,
+          encoding,
+          expectedVersion,
+        });
+        if (outcome.status === 'conflict') {
+          const current = outcome.current;
+          set({ fileConflict: {
+            tabId,
+            title: tab.title,
+            path,
+            localContent: tab.content,
+            diskContent: current?.content ?? null,
+            diskFileVersion: outcome.fileVersion,
+            diskExists: outcome.diskExists,
+          }, tabs: get().tabs.map(item => item.id === tabId ? { ...item, externalChangePending: true } : item) });
+          return;
+        }
         set(state => ({
-          tabs: applySavedTab(state.tabs, tabId, path, tab.content, encoding),
+          tabs: applySavedTab(state.tabs, tabId, path, tab.content, encoding, outcome.fileVersion || undefined)
+            .map(item => item.id === tabId ? { ...item, externalChangePending: false } : item),
           currentFile: state.activeTabId === tabId ? path : state.currentFile,
+          fileConflict: state.fileConflict?.tabId === tabId ? null : state.fileConflict,
         }));
+
+        const latest = get().tabs.find(item => item.id === tabId);
+        if (latest && !latest.modified && latest.content === tab.content) {
+          await get().deleteRecoverySnapshot(latest.recoveryId || latest.id).catch(error => {
+            console.warn('Failed to remove saved recovery snapshot:', error);
+          });
+        }
 
         // Cloud backup is a background side effect of a successful local save.
         // It must never await remote completion or mark the document dirty again.
@@ -999,7 +1208,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const webdav = get().settings.webdav;
         if (webdav?.enabled && isTauriRuntime()) {
           void invoke('webdav_enqueue_backup', {
-            request: { local_path: path, workspace_roots: workspaceRoots },
+            request: { local_path: path, workspace_roots: workspaceRoots, encoding },
             settings: webdav,
           }).catch(error => {
             useWebDavStore.getState().setEnqueueError(path, String(error));
@@ -1008,7 +1217,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         const s3 = get().settings.s3;
         if (s3?.enabled && isTauriRuntime()) {
           void invoke('s3_enqueue_backup', {
-            request: { local_path: path, workspace_roots: workspaceRoots },
+            request: { local_path: path, workspace_roots: workspaceRoots, encoding },
             settings: s3,
           }).catch(error => {
             useS3Store.getState().setEnqueueError(path, String(error));
@@ -1056,6 +1265,9 @@ export const useAppStore = create<AppState>((set, get) => ({
       content: tab?.content || '',
       modified: tab?.modified || false,
       encoding: tab?.encoding || 'utf-8',
+      recoveryId: tab?.recoveryId,
+      fileVersion: tab?.fileVersion,
+      externalChangePending: tab?.externalChangePending,
     };
     set({
       tabs: [...tabs, newTab],
@@ -1067,9 +1279,27 @@ export const useAppStore = create<AppState>((set, get) => ({
     return id;
   },
 
+  detachDeletedTab: (id) => {
+    get().editorView?.flushPendingEdits?.();
+    if (get().activeTabId === id) fileOpenSequence += 1;
+    set(state => ({
+      currentFile: state.activeTabId === id ? null : state.currentFile,
+      fileConflict: state.fileConflict?.tabId === id ? null : state.fileConflict,
+      tabs: state.tabs.map(tab => tab.id === id
+        ? { ...tab, path: null, modified: true, fileVersion: undefined, externalChangePending: false }
+        : tab),
+    }));
+  },
+
   closeTab: (id) => {
     get().editorView?.flushPendingEdits?.();
-    const { tabs, activeTabId, timeline } = get();
+    const { tabs, activeTabId, timeline, recoverySnapshots } = get();
+    const closingTab = tabs.find(tab => tab.id === id);
+    if (closingTab && (closingTab.recoveryId || closingTab.modified || recoverySnapshots.some(snapshot => snapshot.id === id))) {
+      void get().deleteRecoverySnapshot(closingTab.recoveryId || closingTab.id).catch(error => {
+        console.warn('Failed to remove discarded recovery snapshot:', error);
+      });
+    }
     if (id === activeTabId) fileOpenSequence += 1;
     const tabIndex = tabs.findIndex(t => t.id === id);
     const newTabs = tabs.filter(t => t.id !== id);
@@ -1117,6 +1347,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         currentFile: tab.path,
       });
       get().updateWordCount();
+      void get().checkFileVersion(id);
     }
   },
 

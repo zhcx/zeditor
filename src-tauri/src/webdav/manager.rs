@@ -165,6 +165,7 @@ async fn enqueue_impl(
     let version_id = deterministic_version_id(&queued_at, &sha256);
 
     let task = PendingBackupTask {
+        encoding: request.encoding,
         document_id: mapped.document_id.clone(),
         display_name: mapped.display_name.clone(),
         local_path: request.local_path.clone(),
@@ -315,6 +316,14 @@ async fn sync_task(
     // Refresh stale hash/version metadata before any network call.
     let queued_at = task.queued_at.clone();
     task.refresh_for_bytes(&bytes, &queued_at);
+    // Fail explicitly before network publication when any referenced attachment
+    // is missing or unsafe. The pending task remains durable for a later retry.
+    let local_assets =
+        super::assets::collect_assets(&task.local_path, &bytes, task.encoding.as_deref())?;
+    let bundle_hash = super::assets::bundle_hash(&task.sha256, &local_assets);
+    task.version_id = deterministic_version_id(&queued_at, &bundle_hash);
+    let assets =
+        super::assets::describe_assets(&local_assets, &task.versions_dir, &task.version_id);
 
     let remote_root = normalize_remote_root(remote_root)?;
 
@@ -336,18 +345,40 @@ async fn sync_task(
         }
         None => DocumentManifest::new(&task.document_id, &task.display_name, &task.current_path),
     };
+    // Validate even a new document, since queued metadata is persisted input.
+    validate_manifest_namespace(&manifest, &expected, &remote_root)?;
 
     let mut pruned = Vec::new();
     // 3. Skip snapshot creation when the newest version already matches.
-    if manifest.newest_hash() != Some(task.sha256.as_str()) {
+    let same_bundle = manifest.versions.first().is_some_and(|latest| {
+        latest.sha256 == task.sha256
+            && latest.assets.as_ref().is_some_and(|previous| {
+                previous.len() == assets.len()
+                    && previous.iter().zip(&assets).all(|(a, b)| {
+                        a.relative_path == b.relative_path
+                            && a.sha256 == b.sha256
+                            && a.size == b.size
+                    })
+            })
+    });
+    if !same_bundle {
         // 4-5. Create collections and upload the deterministic snapshot.
         client.ensure_collection(&task.versions_dir).await?;
         let snapshot_path = format!("{}/{}.md", task.versions_dir, task.version_id);
+        // Upload every attachment before publishing the version manifest.
+        for (asset, local) in assets.iter().zip(&local_assets) {
+            client
+                .ensure_collection(&parent_path(&asset.snapshot_path))
+                .await?;
+            client.put(&asset.snapshot_path, &local.bytes).await?;
+        }
         client.put(&snapshot_path, &bytes).await?;
 
         // 6. Insert the new version, build the manifest, and upload it.
         pruned = manifest.insert_version(WebDavVersion {
             id: task.version_id.clone(),
+            assets: Some(assets),
+            encoding: task.encoding.clone(),
             created_at: task.queued_at.clone(),
             size: bytes.len() as u64,
             sha256: task.sha256.clone(),
@@ -388,6 +419,9 @@ async fn sync_task(
     // 9. Clean up snapshot files pruned from the visible manifest.
     for version in &pruned {
         let _ = client.delete_optional(&version.snapshot_path).await;
+        for asset in version.assets.as_deref().unwrap_or_default() {
+            let _ = client.delete_optional(&asset.snapshot_path).await;
+        }
     }
 
     Ok(())
@@ -432,6 +466,7 @@ mod tests {
         let version_id = deterministic_version_id("2026-08-19T14:32:00Z", &sha256);
         let document_id = "a".repeat(24);
         PendingBackupTask {
+            encoding: None,
             document_id: document_id.clone(),
             display_name: "note.md".into(),
             local_path: path.to_string_lossy().into_owned(),
@@ -475,8 +510,10 @@ mod tests {
             .expect("sync");
 
         let document_id = "a".repeat(24);
-        let version_id =
-            deterministic_version_id("2026-08-19T14:32:00Z", &sha256_hex(b"version one"));
+        let version_id = deterministic_version_id(
+            "2026-08-19T14:32:00Z",
+            &super::super::assets::bundle_hash(&sha256_hex(b"version one"), &[]),
+        );
         assert_eq!(
             fixture.put_paths().await,
             vec![
@@ -560,5 +597,235 @@ mod tests {
         assert!(paths
             .iter()
             .any(|path| path.ends_with("/Zeditor/notes/note.md")));
+    }
+
+    #[tokio::test]
+    async fn document_with_attachments_restores_exact_versions_on_webdav_and_s3() {
+        for use_s3 in [false, true] {
+            let server = TestDavServer::success().await;
+            let root = test_temp_dir();
+            let destination = test_temp_dir();
+            let note = root.join("note.md");
+            let bytes = "![中文图](.assets/%E4%B8%AD%E6%96%87%20%E5%9B%BE.png)\n@[video](.assets/movie.mp4)\n".as_bytes();
+            fs_assets(&root, b"image version one");
+            let mut task = task_for(&note, bytes);
+            let client = if use_s3 {
+                RemoteClient::S3(
+                    super::super::S3Client::new_for_mapped_paths(&super::super::S3Settings {
+                        enabled: true,
+                        endpoint: server.url.clone(),
+                        bucket: "backup".into(),
+                        region: "test".into(),
+                        access_key: "key".into(),
+                        secret_key: "secret".into(),
+                        path_style: true,
+                        remote_root: "/Zeditor".into(),
+                    })
+                    .unwrap(),
+                )
+            } else {
+                RemoteClient::WebDav(
+                    super::super::WebDavClient::new(&settings_for(&server.url)).unwrap(),
+                )
+            };
+            sync_task(&client, &mut task, "/Zeditor").await.unwrap();
+            let first_id = task.version_id.clone();
+            let first = super::super::restore_version(
+                &client,
+                "/Zeditor",
+                &task.document_id,
+                &first_id,
+                destination.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let restored = Path::new(&first.path);
+            assert_eq!(std::fs::read(restored).unwrap(), bytes);
+            assert_eq!(
+                std::fs::read(restored.parent().unwrap().join(".assets/中文 图.png")).unwrap(),
+                b"image version one"
+            );
+            assert_eq!(first.asset_count, 2);
+            assert!(!first.legacy_document_only);
+            // Only the attachment changes. It must produce a new history version.
+            fs_assets(&root, b"image version two");
+            task.queued_at = "2026-08-19T14:33:00Z".into();
+            sync_task(&client, &mut task, "/Zeditor").await.unwrap();
+            assert_ne!(task.version_id, first_id);
+            let first_again = super::super::restore_version(
+                &client,
+                "/Zeditor",
+                &task.document_id,
+                &first_id,
+                destination.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            let latest = super::super::restore_version(
+                &client,
+                "/Zeditor",
+                &task.document_id,
+                &task.version_id,
+                destination.to_str().unwrap(),
+            )
+            .await
+            .unwrap();
+            for (result, image) in [
+                (&first_again, b"image version one"),
+                (&latest, b"image version two"),
+            ] {
+                assert_eq!(
+                    std::fs::read(
+                        Path::new(&result.path)
+                            .parent()
+                            .unwrap()
+                            .join(".assets/中文 图.png")
+                    )
+                    .unwrap(),
+                    image
+                );
+            }
+            assert_ne!(first.path, first_again.path); // repeat restore never overwrites
+            std::fs::remove_dir_all(root).unwrap();
+            std::fs::remove_dir_all(destination).unwrap();
+        }
+    }
+
+    fn fs_assets(root: &Path, image: &[u8]) {
+        std::fs::create_dir_all(root.join(".assets")).unwrap();
+        std::fs::write(root.join(".assets/中文 图.png"), image).unwrap();
+        std::fs::write(root.join(".assets/movie.mp4"), b"movie bytes").unwrap();
+    }
+
+    #[tokio::test]
+    async fn missing_local_attachment_keeps_task_pending_and_never_publishes_success() {
+        let server = TestDavServer::success().await;
+        let root = test_temp_dir();
+        let sink = Arc::new(RecordingEventSink::default());
+        let manager = WebDavSyncManager::new(root.join("pending.json"), sink.clone());
+        let task = task_for(&root.join("note.md"), b"![x](.assets/missing.png)");
+        manager.inner.queue.upsert(task.clone()).unwrap();
+        assert!(manager
+            .process(task, settings_for(&server.url))
+            .await
+            .is_err());
+        assert_eq!(manager.inner.queue.load().unwrap().len(), 1);
+        assert!(server.put_paths().await.is_empty());
+        assert_eq!(sink.events.lock().unwrap().last().unwrap().phase, "error");
+        std::fs::remove_dir_all(root).unwrap();
+    }
+
+    #[tokio::test]
+    async fn tampered_or_missing_remote_asset_never_creates_recovery_files() {
+        let server = TestDavServer::success().await;
+        let root = test_temp_dir();
+        let destination = test_temp_dir();
+        fs_assets(&root, b"image version one");
+        let mut task = task_for(&root.join("note.md"), b"![x](.assets/movie.mp4)");
+        let client = RemoteClient::WebDav(
+            super::super::WebDavClient::new(&settings_for(&server.url)).unwrap(),
+        );
+        sync_task(&client, &mut task, "/Zeditor").await.unwrap();
+        // A syntactically valid but incomplete attachment manifest must not
+        // produce a successful restore with silently broken local images.
+        let original_manifest = client
+            .get_optional(&task.manifest_path)
+            .await
+            .unwrap()
+            .unwrap();
+        let mut missing_entry = parse_manifest(&original_manifest).unwrap();
+        missing_entry.versions[0].assets = Some(Vec::new());
+        client
+            .put(
+                &task.manifest_path,
+                &serde_json::to_vec(&missing_entry).unwrap(),
+            )
+            .await
+            .unwrap();
+        assert!(super::super::restore_version(
+            &client,
+            "/Zeditor",
+            &task.document_id,
+            &task.version_id,
+            destination.to_str().unwrap()
+        )
+        .await
+        .unwrap_err()
+        .contains("清单与文档引用不一致"));
+        client
+            .put(&task.manifest_path, &original_manifest)
+            .await
+            .unwrap();
+        let asset_path = format!(
+            "{}/{}/assets/{}",
+            task.versions_dir,
+            task.version_id,
+            sha256_hex(b"movie bytes")
+        );
+        client.put(&asset_path, b"tampered").await.unwrap();
+        assert!(super::super::restore_version(
+            &client,
+            "/Zeditor",
+            &task.document_id,
+            &task.version_id,
+            destination.to_str().unwrap()
+        )
+        .await
+        .unwrap_err()
+        .contains("校验失败"));
+        client.delete_optional(&asset_path).await.unwrap();
+        assert!(super::super::restore_version(
+            &client,
+            "/Zeditor",
+            &task.document_id,
+            &task.version_id,
+            destination.to_str().unwrap()
+        )
+        .await
+        .unwrap_err()
+        .contains("附件缺失"));
+        assert_eq!(std::fs::read_dir(&destination).unwrap().count(), 0);
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(destination).unwrap();
+    }
+
+    #[tokio::test]
+    async fn restoration_retains_legacy_encoding_hint_and_original_bytes() {
+        let server = TestDavServer::success().await;
+        let root = test_temp_dir();
+        let destination = test_temp_dir();
+        fs_assets(&root, b"picture");
+        let bytes =
+            crate::text_encoding::encode_text("# 中文编码\n![图](<.assets/中文 图.png>)", "gbk")
+                .unwrap();
+        let mut task = task_for(&root.join("note.md"), &bytes);
+        task.encoding = Some("gbk".into());
+        let client = RemoteClient::WebDav(
+            super::super::WebDavClient::new(&settings_for(&server.url)).unwrap(),
+        );
+        sync_task(&client, &mut task, "/Zeditor").await.unwrap();
+        let restored = super::super::restore_version(
+            &client,
+            "/Zeditor",
+            &task.document_id,
+            &task.version_id,
+            destination.to_str().unwrap(),
+        )
+        .await
+        .unwrap();
+        assert_eq!(restored.encoding.as_deref(), Some("gbk"));
+        assert_eq!(std::fs::read(&restored.path).unwrap(), bytes);
+        assert_eq!(
+            std::fs::read(
+                Path::new(&restored.path)
+                    .parent()
+                    .unwrap()
+                    .join(".assets/中文 图.png")
+            )
+            .unwrap(),
+            b"picture"
+        );
+        std::fs::remove_dir_all(root).unwrap();
+        std::fs::remove_dir_all(destination).unwrap();
     }
 }

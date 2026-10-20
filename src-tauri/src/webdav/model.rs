@@ -84,11 +84,34 @@ pub struct RemoteDocumentPath {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebDavVersion {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
     pub id: String,
     pub created_at: String,
     pub size: u64,
     pub sha256: String,
     pub snapshot_path: String,
+    /// None denotes historical document-only backups; Some(empty) is a complete
+    /// new backup with no referenced .assets resources.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub assets: Option<Vec<BackupAsset>>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackupAsset {
+    pub relative_path: String,
+    pub snapshot_path: String,
+    pub size: u64,
+    pub sha256: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RestoredBackup {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub encoding: Option<String>,
+    pub path: String,
+    pub asset_count: usize,
+    pub legacy_document_only: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -115,12 +138,16 @@ pub struct BackupIndex {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct WebDavBackupRequest {
+    #[serde(default)]
+    pub encoding: Option<String>,
     pub local_path: String,
     pub workspace_roots: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PendingBackupTask {
+    #[serde(default)]
+    pub encoding: Option<String>,
     pub document_id: String,
     pub display_name: String,
     pub local_path: String,

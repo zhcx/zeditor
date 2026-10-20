@@ -51,13 +51,27 @@ test('keeps the window open when save-as is cancelled', async () => {
 });
 
 test('closes without saving when discard is selected', async () => {
+  const discarded: string[] = [];
   const result = await guardWindowClose(tabs, {
     promptAction: async () => 'discard',
     chooseSavePath: async () => null,
     saveTab: async () => undefined,
+    discardTabs: async ids => { discarded.push(...ids); },
   });
 
   assert.equal(result, 'close');
+  assert.deepEqual(discarded, ['existing', 'untitled']);
+});
+
+test('keeps the window open if discarded recovery snapshots cannot be removed', async () => {
+  const result = await guardWindowClose(tabs, {
+    promptAction: async () => 'discard',
+    chooseSavePath: async () => null,
+    saveTab: async () => undefined,
+    discardTabs: async () => { throw new Error('recovery storage unavailable'); },
+  });
+
+  assert.equal(result, 'stay');
 });
 
 test('keeps the window open when the close prompt is dismissed', async () => {

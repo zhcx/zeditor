@@ -133,6 +133,7 @@
 .statusbar .status-save-state { gap: 6px; }
 .status-save-dot { width: 5px; height: 5px; flex-shrink: 0; border-radius: 50%; background: var(--success-color); }
 .status-save-state[data-state="modified"] .status-save-dot { background: var(--warning-color); }
+.status-save-state[data-state="conflict"] .status-save-dot { background: var(--error-color, #d9534f); }
 .status-save-state[data-state="saving"] .status-save-dot { background: var(--accent-color); }
 .statusbar-center { flex: 1; overflow: hidden; justify-content: center; padding-inline: 10px; }
 .statusbar-center > .status-item { max-width: 100%; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; display: block; line-height: 24px; }

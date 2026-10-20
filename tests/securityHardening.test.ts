@@ -11,10 +11,11 @@ test('all rendered Markdown HTML is sanitized before reaching a browser or PDF s
   const menu = read('src/components/MenuBar/MenuBar.tsx')
   const imageExport = read('src/components/Export/ImageExportDialog.tsx')
   const pdfExport = read('src/components/Export/PdfExportDialog.tsx')
+  const wechatExport = read('src/components/Export/WeChatExportDialog.tsx')
   const chatbot = read('src/components/Chatbot/AIChatbotPanel.tsx')
 
-  for (const source of [pipeline, enhancers, menu, imageExport, pdfExport, chatbot]) {
-    assert.match(source, /sanitizeRenderedHtml/)
+  for (const source of [pipeline, enhancers, menu, imageExport, pdfExport, wechatExport, chatbot]) {
+    assert.match(source, /sanitizeRenderedHtml|renderMarkdownToHtml/)
   }
   assert.match(enhancers, /securityLevel:\s*['"]strict['"]/)
   assert.match(enhancers, /sanitizeRenderedHtml\([^)]*svg/)

@@ -16,6 +16,7 @@ import {
 
 const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
 let eventUnlisten: UnlistenFn | null = null;
+let historyVersionsSequence = 0;
 
 export interface WebDavStoreState {
   phase: WebDavSyncPhase;
@@ -24,6 +25,8 @@ export interface WebDavStoreState {
   lastSuccessAt: string;
   error: string;
   versions: WebDavVersion[];
+  versionsDocumentId: string;
+  historyError: string;
   documents: WebDavDocumentSummary[];
   historyLoading: boolean;
   historyOpen: boolean;
@@ -69,6 +72,8 @@ export const useWebDavStore = create<WebDavStoreState>((set, get) => ({
   lastSuccessAt: '',
   error: '',
   versions: [],
+  versionsDocumentId: '',
+  historyError: '',
   documents: [],
   historyLoading: false,
   historyOpen: false,
@@ -126,15 +131,18 @@ export const useWebDavStore = create<WebDavStoreState>((set, get) => ({
 
   loadVersions: async (documentId, settings) => {
     if (!isTauriRuntime()) return;
-    set({ historyLoading: true });
+    const request = ++historyVersionsSequence;
+    set({ historyLoading: true, historyError: '', versions: [], versionsDocumentId: documentId });
     try {
       const versions = await invoke<WebDavVersion[]>('webdav_list_versions', {
         documentId,
         settings,
       });
-      set({ versions, historyLoading: false });
+      if (request !== historyVersionsSequence) return;
+      set({ versions, versionsDocumentId: documentId, historyLoading: false });
     } catch (error) {
-      set({ error: String(error).slice(0, 240), historyLoading: false });
+      if (request !== historyVersionsSequence) return;
+      set({ historyError: String(error).slice(0, 240), historyLoading: false });
     }
   },
 

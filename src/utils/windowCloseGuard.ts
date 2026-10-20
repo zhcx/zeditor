@@ -11,6 +11,7 @@ interface WindowCloseDependencies {
   promptAction: (tabs: CloseGuardTab[]) => Promise<UnsavedChangesAction>;
   chooseSavePath: (tab: CloseGuardTab) => Promise<string | null>;
   saveTab: (tabId: string, path: string) => Promise<void>;
+  discardTabs?: (tabIds: string[]) => Promise<void>;
   getTabs?: () => CloseGuardTab[];
   isCancelled?: () => boolean;
 }
@@ -27,7 +28,14 @@ export async function guardWindowClose(
   const action = await dependencies.promptAction(modifiedTabs);
   if (dependencies.isCancelled?.()) return 'stay';
   if (action === 'cancel') return 'stay';
-  if (action === 'discard') return 'close';
+  if (action === 'discard') {
+    try {
+      await dependencies.discardTabs?.(modifiedTabs.map(tab => tab.id));
+      return 'close';
+    } catch {
+      return 'stay';
+    }
+  }
 
   try {
     for (const tab of modifiedTabs) {

@@ -34,6 +34,6 @@ test('closing a dirty tab uses the themed dialog instead of a native ask dialog'
 test('tab-specific save persists the selected tab content', async () => {
   const source = await readFile(new URL('../src/stores/appStore.ts', import.meta.url), 'utf8');
 
-  assert.match(source, /saveTab:\s*async\s*\(tabId, path\)/);
-  assert.match(source, /save_file_content[\s\S]*?content:\s*tab\.content/);
+  assert.match(source, /saveTab:\s*async\s*\(tabId, path, expectedVersionOverride\)/);
+  assert.match(source, /save_file_content_checked[\s\S]*?content:\s*tab\.content/);
 });

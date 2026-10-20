@@ -15,6 +15,7 @@ import { sanitizeRenderedHtml } from '../../utils/safeHtml';
 import { resolveSaveBaseName } from '../../utils/saveName';
 import { formatShortcut } from '../../utils/platformShortcuts';
 import { isMacOS, isNativeMenuActive } from '../../utils/platform';
+import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
 import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
 import { createMenuDispatcher, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
@@ -731,9 +732,8 @@ export function MenuBar() {
     return 'document.' + format;
   };
 
-  // Render markdown to HTML using the same markdown-it as the preview
   const renderMarkdown = (text: string): string => {
-    return sanitizeRenderedHtml(md.render(text));
+    return renderMarkdownToHtml(text);
   };
 
   const handleExport = async (format: 'pdf' | 'html' | 'word') => {
@@ -741,9 +741,10 @@ export function MenuBar() {
       const activeTab = getActiveTab();
       const filePath = activeTab?.path || null;
 
-      // Render markdown to HTML on the front-end using markdown-it
+      // Reuse the preview pipeline so the exported source HTML includes the same
+      // formulas, footnotes, task lists, media placeholders, and wiki-link syntax.
       const documentTitle = getActiveTab()?.title?.replace(/\.md$/i, '') || 'document';
-      const htmlBody = applyExportTemplate(renderMarkdown(content), documentTitle, loadExportTemplate());
+      const htmlBody = format === 'word' ? '' : applyExportTemplate(renderMarkdown(content), documentTitle, loadExportTemplate());
 
       if (format === 'html') {
         const defaultFilename = getExportFilename('html');
@@ -760,18 +761,22 @@ export function MenuBar() {
           await invoke('save_file_content', { path: selected, content: fullHtml });
         }
       } else if (format === 'word') {
-        const defaultFilename = getExportFilename('doc');
+        const defaultFilename = getExportFilename('docx');
         const selected = await save({
-          filters: [{ name: 'Word', extensions: ['doc'] }],
+          filters: [{ name: 'Word 文档（.docx）', extensions: ['docx'] }],
           defaultPath: defaultFilename,
         });
         if (selected) {
-          const wordDocument = await invoke<string>('export_word', {
-            htmlBody,
-            settings: settings.export,
-            filePath
+          // Load the OOXML packer only when requested, keeping normal startup light.
+          const [{ createDocx }, { loadDocxImage }] = await Promise.all([
+            import('../../utils/docxExport'), import('../../utils/docxImages'),
+          ]);
+          const wordDocument = await createDocx(content, {
+            ...loadExportTemplate(), title: documentTitle,
+            loadImage: source => loadDocxImage(source, filePath),
           });
-          await invoke('save_file_content', { path: selected, content: wordDocument });
+          await invoke('save_file_bytes', { path: selected, dataBase64: wordDocument.base64 });
+          if (wordDocument.warnings.length) await message(`Word 文档已保存。请检查以下格式转换：\n\n${wordDocument.warnings.join('\n\n')}`, { title: 'Word 导出说明', kind: 'warning' });
         }
       } else if (format === 'pdf') {
         // 使用新的直接 PDF 导出功能
@@ -792,6 +797,7 @@ export function MenuBar() {
       }
     } catch (error) {
       console.error('Failed to export:', error);
+      await message(String(error), { title: '导出失败', kind: 'error' });
     }
     setActiveMenu(null);
     setMenuOpen(false);
