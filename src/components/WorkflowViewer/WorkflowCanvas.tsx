@@ -13,6 +13,8 @@ interface WorkflowCanvasProps {
   /** 内联预览里使用紧凑排版。 */
   compact?: boolean;
   svgRef?: React.RefObject<SVGSVGElement | null>;
+  /** 导出时指定配色，不跟随当前界面主题（例如浅色的公众号排版）。 */
+  paletteTheme?: 'light' | 'dark';
 }
 
 const MIN_SCALE = 0.6;
@@ -94,8 +96,9 @@ function nodeBadges(node: WorkflowGraphNode): string[] {
   return badges;
 }
 
-export function WorkflowCanvas({ graph, selectedJobId, onSelectJob, diagnostics, compact, svgRef }: WorkflowCanvasProps) {
-  const theme = useResolvedTheme();
+export function WorkflowCanvas({ graph, selectedJobId, onSelectJob, diagnostics, compact, svgRef, paletteTheme }: WorkflowCanvasProps) {
+  const resolvedTheme = useResolvedTheme();
+  const theme = paletteTheme ?? resolvedTheme;
   const palette = PALETTES[theme];
   const containerRef = useRef<HTMLDivElement>(null);
   const [scale, setScale] = useState(1);

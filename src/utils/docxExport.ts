@@ -30,7 +30,17 @@ export interface DocxExportOptions {
   customCss?: string;
   /** Resolves only actual image tokens, never links or arbitrary HTML attributes. */
   loadImage?: (source: string) => Promise<DocxImage>;
+  /**
+   * Renders fenced diagrams (Mermaid / Markmap / SVG / workflow) as PNG.
+   * Returning null keeps the fence as source code (plain YAML, unknown shape).
+   */
+  loadDiagram?: (language: string, source: string) => Promise<DocxImage | null>;
 }
+
+/** Fences that always represent a diagram, regardless of loadDiagram support. */
+const DIAGRAM_FENCE_LANGUAGES = new Set(['mermaid', 'markmap', 'svg', 'github-actions', 'githubactions']);
+/** YAML fences may be workflows; only the renderer can tell. */
+const WORKFLOW_FENCE_LANGUAGES = new Set(['yaml', 'yml', 'github-actions-workflow']);
 
 const headings = [HeadingLevel.HEADING_1, HeadingLevel.HEADING_2, HeadingLevel.HEADING_3,
   HeadingLevel.HEADING_4, HeadingLevel.HEADING_5, HeadingLevel.HEADING_6];
@@ -198,8 +208,39 @@ export async function createDocx(source: string, options: DocxExportOptions): Pr
         cursor = end;
       } else if (token.type === 'fence' || token.type === 'code_block') {
         const language = token.info.trim().split(/\s/)[0];
-        if (['mermaid', 'markmap', 'svg', 'github-actions', 'githubactions'].includes(language)) {
-          warnings.add('Mermaid、Markmap、SVG 和工作流图以带语言标记的源码导出；如需图形，请先插入对应图片。');
+        const explicitDiagram = DIAGRAM_FENCE_LANGUAGES.has(language);
+        if (explicitDiagram || WORKFLOW_FENCE_LANGUAGES.has(language)) {
+          let diagram: DocxImage | null = null;
+          let reportedFailure = false;
+          if (options.loadDiagram) {
+            try {
+              diagram = await options.loadDiagram(language, token.content);
+            } catch (error) {
+              reportedFailure = true;
+              warnings.add(`“${language}”图表无法转换为图片，已保留源码：${error instanceof Error ? error.message : String(error)}`);
+            }
+          } else if (explicitDiagram) {
+            reportedFailure = true;
+            warnings.add('Mermaid、Markmap、SVG 和工作流图以带语言标记的源码导出；如需图形，请先插入对应图片。');
+          }
+          if (diagram) {
+            const scale = Math.min(1, availableWidth / diagram.width, 850 / diagram.height);
+            output.push(new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [new ImageRun({
+                type: diagram.type, data: diagram.data,
+                transformation: { width: diagram.width * scale, height: diagram.height * scale },
+                altText: { name: `${language} 图表`, description: `${language} 图表`, title: `${language} 图表` },
+              })],
+            }));
+            cursor += 1;
+            continue;
+          }
+          if (explicitDiagram && !reportedFailure) {
+            // The renderer returned null for an explicit diagram fence: keep source
+            // visible and explain the degradation instead of silently dropping it.
+            warnings.add('图表未能转换为图片，已保留源码。');
+          }
           output.push(new Paragraph({ children: [new TextRun({ text: `［${language} 源码］`, italics: true })] }));
         }
         for (const line of token.content.replace(/\n$/, '').split('\n')) output.push(new Paragraph({

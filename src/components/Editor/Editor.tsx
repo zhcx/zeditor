@@ -12,6 +12,7 @@ import { useAIStore, type ProofreadResult } from '../../stores/aiStore';
 import type { EditorController, EditorDispatchSpec, EditorLine } from '../../types/editor';
 import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../../utils/editorLayout';
 import { resolveEditorDisplay } from '../../utils/editorDisplay';
+import { autoCompleteOptions } from '../../utils/editorSuggestions';
 import { markdownFoldingRanges } from '../../utils/markdownFolding';
 import { isNativeMenuActive, isPrimaryModifier } from '../../utils/platform';
 import { findFootnoteReferenceAt, parseFootnoteDefinitions, type FootnoteDefinition } from '../../utils/footnotes';
@@ -600,8 +601,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       ...EDITOR_OVERFLOW_OPTIONS,
       smoothScrolling: false,
       padding: { top: 24, bottom: 40 },
-      quickSuggestions: false,
-      suggestOnTriggerCharacters: false,
+      // 「启用自动补全」开关到 Monaco 建议选项的映射（关闭时连同单词建议一起关掉）。
+      ...autoCompleteOptions(useAppStore.getState().settings.editor.auto_complete !== false),
       autoClosingBrackets: 'never',
       autoClosingQuotes: 'never',
       autoClosingComments: 'never',
@@ -1413,6 +1414,11 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       editContext: settings.editor.input_engine !== 'textarea',
     });
   }, [settings.editor.input_engine]);
+
+  // 自动补全开关即时生效；设置异步加载完成后也同步一次。
+  useEffect(() => {
+    monacoRef.current?.updateOptions(autoCompleteOptions(settings.editor.auto_complete !== false));
+  }, [settings.editor.auto_complete]);
 
   // 折叠标题 / 折叠缩进 / 缩进参考线：即时同步到现有实例，并让 Monaco 重算折叠范围。
   const { fold_headings: foldHeadings, fold_indentation: foldIndentation, indent_guides: indentGuides } = settings.editor;

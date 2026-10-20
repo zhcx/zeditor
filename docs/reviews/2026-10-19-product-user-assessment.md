@@ -192,17 +192,19 @@ App、Editor、所见即所得会话和 Rust commands 文件规模较大。无�
 - **导出基础渲染一致性**：主菜单 HTML/PDF、PDF 对话框、PNG 与公众号导出改用 `renderMarkdownToHtml`；Word 使用同一 Markdown 解析器的 token 生成 OOXML。公式、脚注、任务列表、图片语法和 Wiki 链接共用基础解析规则，各格式的呈现能力仍有差异。
 - **系统回收站删除与恢复**：Windows 优先使用明确的回收标志；Windows/Linux 按系统项目 ID 记录和恢复。系统不可用时只尝试同卷原子移动到应用恢复区，失败则取消删除，不降级为永久删除。资源管理器新增“回收站与恢复”；同名目标拒绝覆盖。删除文件夹后，未保存的子文档保留为草稿；保存与回收串行执行，防止排队保存重新创建已删除文件。macOS 的系统废纸篓项目明确提示在访达恢复。
 - **附件随云备份恢复**：WebDAV/S3 将引用的同级 `.assets` 文件与每个文档版本关联，记录相对路径、大小、SHA-256 和编码。仅修改附件也产生新版本；全部资源上传成功后才发布清单。恢复前核验文档引用与清单一致、全部哈希正确，再写入独立新文件夹。旧版备份明确标为“仅文档”。范围外的本地图片、媒体及下载附件会报错，网络 URL 不会下载；详见云备份指南。
-- **原生 `.docx`**：Word 菜单生成真正的 OOXML ZIP，支持可编辑正文、标题样式、列表、表格、图片、超链接、原生脚注、目录域和页码域。图片读取失败中止导出；SVG/WebP/AVIF 转 PNG。公式保留精确 TeX，图表保留源码，并在保存后提示格式降级；不宣称与屏幕预览完全一致。
+- **原生 `.docx`**：Word 菜单生成真正的 OOXML ZIP，支持可编辑正文、标题样式、列表、表格、图片、超链接、原生脚注、目录域和页码域。图片读取失败中止导出；SVG/WebP/AVIF 转 PNG。公式保留精确 TeX；Mermaid、Markmap、SVG 围栏与工作流图改为离屏渲染后内嵌 PNG，失败时才回退源码并提示；不宣称与屏幕预览完全一致。
+- **导出一致性（图表）**：HTML、PDF、长图、公众号与 Word 共用新增的 `exportDiagrams` 渲染管线，Mermaid / Markmap / SVG / GitHub Actions 工作流不再只导出源码。HTML/PDF 使用内联 SVG，长图/公众号使用 PNG 数据地址，Word 使用 PNG 图片；单个图表失败只影响该处并给出说明。长图导出顺带修复了 `foreignObject` 内非法 XHTML 导致整张图无法解码的问题。
+- **自动补全开关**：`settings.editor.auto_complete` 现在映射到 Monaco 的 `quickSuggestions`、`suggestOnTriggerCharacters`、`wordBasedSuggestions` 与 `suggest.showWords`，创建与设置变更时同步；关闭开关会连同单词建议一起关闭。
 - **本机 Rust 工具链修复**：补齐 stable 1.95.0 缺失的 `rustc_driver` DLL。下载包与本机原有官方清单 SHA-256 一致，仅恢复缺失文件，未更新 Rust 版本。另安装匹配的 rustfmt，以及原先缺失的 Microsoft C++ Build Tools 与 Windows SDK。修复记录位于 `test-output/rust-repair-record.json`。
 
 ### 尚未完成
 
-- **完整导出一致性**：本次统一了基础 Markdown 渲染器，但 Mermaid、Markmap 和 GitHub Actions 工作流在预览中的后置增强尚未接入各导出管线；复杂样稿的各格式验证仍未完成。
-- **跨环境验收**：Office/WPS 的实际分页、字体替换与跨版本显示，真实云账户的跨设备恢复，以及 macOS/Linux 安装与系统回收验证尚未执行。当前云端回归使用本机隔离服务和模拟接口，不能替代真实服务兼容性验收。
+- **跨环境验收**：Office/WPS 仅在本机 WPS 12.1 打开过 DOCX（3 页、5 张图片、1 个脚注，无修复提示），字体替换、目录更新、跨版本与打印分页仍需目视检查；PDF / 长图 / 公众号尚未在真实阅读器与公众号后台验收。真实云账户的跨设备恢复，以及 macOS/Linux 安装与系统回收仍未执行；当前云端回归使用本机隔离服务和模拟接口，不能替代真实服务兼容性验收。
+- **导出视觉一致性**：图表渲染已统一，但各模板下的尺寸、边距、分页与公众号图片留存仍需样稿比对；公式在 Word/公众号中仍为 TeX 原文或图片降级。
 
 ### 本次验证与限制
 
-- `npm test`：710 项通过，0 失败。
+- `npm test`：710 项通过，0 失败（2026-10-20 补充导出与自动补全测试后为 720 项）。
 - `npm run lint`：通过，0 error / 0 warning。
 - `npm run build`：TypeScript 与生产前端构建通过。
 - 隔离浏览器走查：恢复预览、恢复新标签、冲突双栏、打开磁盘副本、覆盖二次确认全部通过，页面异常 0 项。截图见 `test-output/product-review-20261019/safety/`。
@@ -210,5 +212,14 @@ App、Editor、所见即所得会话和 Rust commands 文件规模较大。无�
 - Rust 后端全套测试：218 项通过、0 失败、4 项默认忽略；另显式执行真实 Windows 回收站测试，1 项通过，验证临时中文文稿回收、按 ID 恢复及字节一致。
 - `cargo fmt --manifest-path src-tauri/Cargo.toml -- --check` 与 `cargo clippy --all-targets -- -D warnings`：通过。Rust 依赖使用临时进程参数连接镜像，锁文件保留官方 crates.io 来源与校验值，未修改用户全局代理或 Cargo 配置。C++ Build Tools 安装在 `D:\Software\ZeditorBuildTools`，每次验证仅为当前进程载入编译环境。
 - 独立复核发现并修正：嵌套图片说明导致附件遗漏（改用 Markdown 解析器）；回收等待期间产生的延迟编辑可能被关闭（在关闭前再次同步缓冲）。两项均有行为回归验证。
+
+### 2026-10-20 导出一致性与自动补全验证
+
+- `npm test`：720 项通过、0 失败（新增图表围栏识别、Word 图表图片与回退、自动补全映射及接线断言）。
+- `npx tsc -b`、`npm run lint`、`npm run build`：通过。
+- 新增 `scripts/verify-export-consistency.mjs`（隔离 Edge，Tauri 调用全部内存模拟）。复杂样稿同时包含 Mermaid、Markmap、SVG、GitHub Actions 工作流、公式、脚注、任务列表、Wiki 链接与内联图片：SVG 与 PNG 模式各转换 4 个图表；HTML 与 PDF 正文各含 4 个图表 figure；DOCX 含 4 张图表 PNG 与 1 张正文图片，脚注可读；长图画布非空；页面异常 0。产物在 `test-output/export-consistency/`。
+- 复跑既有浏览器验收：`verify-cloud-backup.mjs` 7 项通过、`verify-recycle.mjs` 全部场景通过、`verify-docx-export.mjs` 通过。
+- 用本机 WPS 12.1 的 Word 兼容接口实际打开 `test-output/export-consistency/export.docx`：3 页、5 张内联图片、1 个脚注，标题与正文可读，无修复提示，未发现图表源码残留。
+- 限制：真实 WebDAV/S3 账户、macOS/Linux 安装与系统回收、公众号后台、Office/WPS 目视分页与字体替换仍未验证；PDF 由 Rust/WebView 打印，浏览器脚本只校验了传入的 HTML 正文。
 
 当前产品最值得承诺的未来，是用户能够放心把一篇真实文章从资料整理做到交付，并且愿意第二天继续打开它。达到这个标准，比继续扩展功能清单更能接近成熟编辑器。
