@@ -35,6 +35,8 @@ export interface DocxExportOptions {
    * Returning null keeps the fence as source code (plain YAML, unknown shape).
    */
   loadDiagram?: (language: string, source: string) => Promise<DocxImage | null>;
+  /** When false, workflow YAML stays as source while other diagram fences still render. */
+  workflowViewerEnabled?: boolean;
 }
 
 /** Fences that always represent a diagram, regardless of loadDiagram support. */
@@ -245,7 +247,11 @@ export async function createDocx(source: string, options: DocxExportOptions): Pr
       } else if (token.type === 'fence' || token.type === 'code_block') {
         const language = token.info.trim().split(/\s/)[0];
         const explicitDiagram = DIAGRAM_FENCE_LANGUAGES.has(language);
-        if (explicitDiagram || WORKFLOW_FENCE_LANGUAGES.has(language)) {
+        const workflowFence = WORKFLOW_FENCE_LANGUAGES.has(language)
+          || language === 'github-actions'
+          || language === 'githubactions';
+        const workflowDisabled = options.workflowViewerEnabled === false && workflowFence;
+        if ((explicitDiagram || WORKFLOW_FENCE_LANGUAGES.has(language)) && !workflowDisabled) {
           let diagram: DocxImage | null = null;
           let reportedFailure = false;
           if (options.loadDiagram) {

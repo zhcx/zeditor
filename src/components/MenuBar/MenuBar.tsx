@@ -789,6 +789,7 @@ export function MenuBar() {
           const wordDocument = await createDocx(snapshot.content, {
             ...template, title: documentTitle,
             loadImage: source => loadDocxImage(source, filePath),
+            workflowViewerEnabled: settings.workflow?.render_in_preview !== false,
             // Word 是白色纸张：图表用浅色并在白底上光栅化。
             loadDiagram: (language, diagramSource) => renderDiagramForDocx(language, diagramSource, { theme: 'light', background: '#ffffff' }),
           });
@@ -1234,7 +1235,7 @@ export function MenuBar() {
       )}
       {weChatExportOpen && exportSnapshot && (
         <Suspense fallback={null}>
-          <WeChatExportDialog content={exportSnapshot.content} title={exportSnapshot.title} onClose={() => { setWeChatExportOpen(false); setExportSnapshot(null); }} />
+          <WeChatExportDialog content={exportSnapshot.content} title={exportSnapshot.title} workflowViewerEnabled={settings.workflow?.render_in_preview !== false} onClose={() => { setWeChatExportOpen(false); setExportSnapshot(null); }} />
         </Suspense>
       )}
     </>

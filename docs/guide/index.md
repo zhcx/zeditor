@@ -18,6 +18,7 @@ title: 简介
 | 能力 | 说明 | 了解更多 |
 | --- | --- | --- |
 | 沉浸编辑 | Monaco 编辑器、智能 Tab 导航、斜杠命令、表格工具栏、内联弹窗 | [编辑与格式](/guide/editing) |
+| 数据保护与恢复 | 异常退出找回草稿、检测外部修改冲突、系统回收站与 Zeditor 恢复区 | [文件与工作区](/guide/files) |
 | 强大渲染 | KaTeX 公式、Mermaid 图表、Markmap 思维导图、工作流查看器 | [Mermaid 图表](/guide/mermaid) |
 | AI 辅助 | 13 家服务商对话、指令面板、校对、联网搜索 | [AI 助手](/guide/ai/) |
 | 本地 Agent | 驱动 Claude Code / Codex / OpenCode / Pi，worktree 隔离审阅 | [本地 Agent](/guide/ai/agent) |

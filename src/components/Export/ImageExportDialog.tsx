@@ -1,9 +1,10 @@
 import { AppIcon } from '../Icons/AppIcon';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { applyExportTemplate, EXPORT_TEMPLATES, loadExportTemplate, saveExportTemplate, type ExportTemplate } from './exportTemplates';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
-import { enhanceExportHtml } from '../../utils/exportDiagrams';
+import { enhanceExportHtml, isExportDiagramRequestReady, type ExportDiagramRequest } from '../../utils/exportDiagrams';
 import { useAppStore } from '../../stores/appStore';
+import { resolveThemePreference } from '../../themes/apply';
 
 type ImageRatio = 'square' | 'landscape' | 'wide' | 'portrait' | 'a4';
 
@@ -35,31 +36,42 @@ export function ImageExportDialog({ content, onClose }: ImageExportDialogProps) 
   const [template, setTemplate] = useState<ExportTemplate>(loadExportTemplate);
   const current = formats.find((format) => format.id === selected) || formats[0];
   const settings = useAppStore(state => state.settings);
+  const source = content || '暂无内容';
+  const theme = resolveThemePreference(settings.appearance.theme);
+  const workflowViewerEnabled = settings.workflow?.render_in_preview !== false;
+  const diagramRequest = useMemo<ExportDiagramRequest>(() => ({ source, theme, workflowViewerEnabled }), [source, theme, workflowViewerEnabled]);
   // 长图通过 SVG foreignObject 一次性光栅化：图表先转成 PNG 数据地址，
   // 避免嵌套 SVG（Markmap 还带 foreignObject）在绘制时丢图。
-  const [renderedHtml, setRenderedHtml] = useState(() => renderMarkdownToHtml(content || '暂无内容'));
+  const [renderedHtml, setRenderedHtml] = useState(() => renderMarkdownToHtml(source));
   const [diagramWarnings, setDiagramWarnings] = useState<string[]>([]);
+  const [renderedDiagramRequest, setRenderedDiagramRequest] = useState<ExportDiagramRequest | null>(null);
+  const diagramsReady = isExportDiagramRequestReady(renderedDiagramRequest, diagramRequest);
 
   useEffect(() => {
     let cancelled = false;
-    const source = content || '暂无内容';
     const background = getComputedStyle(document.documentElement).getPropertyValue('--bg-document').trim() || '#fffdf8';
-    void enhanceExportHtml(renderMarkdownToHtml(source), {
+    void enhanceExportHtml(renderMarkdownToHtml(diagramRequest.source), {
       mode: 'image',
-      theme: settings.appearance.theme,
+      theme: diagramRequest.theme,
       background,
-      workflowViewerEnabled: settings.workflow?.render_in_preview !== false,
+      workflowViewerEnabled: diagramRequest.workflowViewerEnabled,
     }).then((result) => {
       if (cancelled) return;
       setRenderedHtml(result.html);
       setDiagramWarnings(result.warnings);
+      setRenderedDiagramRequest(diagramRequest);
     }).catch(() => {
-      if (!cancelled) setRenderedHtml(renderMarkdownToHtml(source));
+      if (!cancelled) {
+        setRenderedHtml(renderMarkdownToHtml(diagramRequest.source));
+        setDiagramWarnings([]);
+        setRenderedDiagramRequest(diagramRequest);
+      }
     });
     return () => { cancelled = true; };
-  }, [content, settings.appearance.theme, settings.workflow?.render_in_preview]);
+  }, [diagramRequest]);
 
   const handleExport = async () => {
+    if (!diagramsReady || exporting) return;
     saveExportTemplate(template);
     setExporting(true);
     const scale = 2;
@@ -108,7 +120,7 @@ export function ImageExportDialog({ content, onClose }: ImageExportDialogProps) 
         <div className="image-export-preview-wrap"><span className="image-export-preview-label">预览</span><div className="image-export-preview" style={{ aspectRatio: current.ratio }}><div dangerouslySetInnerHTML={{ __html: renderedHtml }} /></div></div>
         {diagramWarnings.length > 0 && <p style={{ margin: '8px 0 0', color: 'var(--warning-color, #b45309)', fontSize: 12, lineHeight: 1.6 }}>{diagramWarnings.join('；')}</p>}
       </div>
-      <div className="form-actions image-export-actions"><button className="cancel-btn" onClick={onClose}>取消</button><button className="save-btn" onClick={handleExport} disabled={exporting}>{exporting ? '正在生成...' : '导出 PNG'}</button></div>
+      <div className="form-actions image-export-actions"><button className="cancel-btn" onClick={onClose}>取消</button><button className="save-btn" onClick={handleExport} disabled={exporting || !diagramsReady}>{exporting ? '正在生成...' : diagramsReady ? '导出 PNG' : '正在准备图表...'}</button></div>
     </div>
   </div>;
 }

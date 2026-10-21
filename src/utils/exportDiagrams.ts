@@ -40,6 +40,23 @@ export interface ExportEnhanceResult {
   diagrams: number;
 }
 
+export interface ExportDiagramRequest {
+  source: string;
+  theme: string;
+  workflowViewerEnabled: boolean;
+}
+
+/** Prevent an export from using diagram HTML rendered for an older request. */
+export function isExportDiagramRequestReady(
+  rendered: ExportDiagramRequest | null,
+  requested: ExportDiagramRequest,
+): boolean {
+  return rendered !== null
+    && rendered.source === requested.source
+    && rendered.theme === requested.theme
+    && rendered.workflowViewerEnabled === requested.workflowViewerEnabled;
+}
+
 interface DiagramSvg {
   markup: string;
   width: number;

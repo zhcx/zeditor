@@ -32,6 +32,11 @@ features:
     details: 用 Ctrl+P 一次输入即可搜索打开的文档、当前正文、工作区文件与内容；空输入列出快捷命令与近期文件，输入 > 可筛选全部命令。
     link: /guide/files
     linkText: 了解搜索与替换
+  - icon: 🛟
+    title: 文稿恢复与文件保护
+    details: 异常退出后恢复草稿；保存前检查外部修改；删除的文件进入系统回收站或安全恢复区，避免静默覆盖和误删。
+    link: /guide/files
+    linkText: 了解文件恢复
   - icon: 📊
     title: 强大渲染能力
     details: KaTeX 公式、Mermaid 图表、Markmap 思维导图、GitHub Actions 工作流查看器、SVG 与任务列表。
@@ -49,12 +54,12 @@ features:
     linkText: 了解文档转换
   - icon: 📤
     title: 丰富导出选项
-    details: 导出 HTML / PDF / Word / 公众号排版 / 多比例长图，9 套排版模板随心切换。
+    details: 导出 HTML / PDF / 可编辑 Word / 公众号排版 / 多比例长图；Mermaid、Markmap、SVG 与工作流图表可进入导出结果。
     link: /guide/export
     linkText: 了解导出功能
   - icon: ☁️
     title: 自动云备份
-    details: WebDAV 与 S3 兼容存储自动备份，保留最近 20 个内容版本，本地保存永不受云端影响。
+    details: WebDAV 与 S3 兼容存储自动备份文稿及其引用的 .assets 附件，保留最近 20 个内容版本，可恢复到新文件夹。
     link: /guide/cloud-backup
     linkText: 了解云备份
   - icon: 🍎

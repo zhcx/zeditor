@@ -3,7 +3,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
-import { enhanceExportHtml } from '../../utils/exportDiagrams';
+import { enhanceExportHtml, isExportDiagramRequestReady, type ExportDiagramRequest } from '../../utils/exportDiagrams';
 
 type WeChatThemeId = 'jade' | 'vermilion' | 'graphite' | 'zen' | 'amber' | 'olive';
 interface WeChatTheme { id: WeChatThemeId; label: string; description: string; primary: string; pale: string; ink: string; accent: string; }
@@ -75,32 +75,43 @@ async function copyRichHtml(html: string) {
   const holder = document.createElement('div'); holder.contentEditable = 'true'; holder.innerHTML = html; document.body.append(holder); const range = document.createRange(); range.selectNodeContents(holder); const selection = window.getSelection(); selection?.removeAllRanges(); selection?.addRange(range); document.execCommand('copy'); holder.remove();
 }
 
-export function WeChatExportDialog({ content, title, onClose }: { content: string; title: string; onClose: () => void }) {
+export function WeChatExportDialog({ content, title, workflowViewerEnabled, onClose }: { content: string; title: string; workflowViewerEnabled: boolean; onClose: () => void }) {
   const [themeId, setThemeId] = useState<WeChatThemeId>('jade'); const [copied, setCopied] = useState(false);
   const theme = themes.find((item) => item.id === themeId) || themes[0];
+  const source = content || '暂无内容';
+  const diagramRequest = useMemo<ExportDiagramRequest>(() => ({ source, theme: 'light', workflowViewerEnabled }), [source, workflowViewerEnabled]);
   // 公众号排版是白底：图表固定用浅色转成内联 PNG，避免预览里的暗色图在正文中看不清。
-  const [bodyHtml, setBodyHtml] = useState(() => renderMarkdownToHtml(content || '暂无内容'));
+  const [bodyHtml, setBodyHtml] = useState(() => renderMarkdownToHtml(source));
   const [diagramWarnings, setDiagramWarnings] = useState<string[]>([]);
   const [diagramCount, setDiagramCount] = useState(0);
+  const [renderedDiagramRequest, setRenderedDiagramRequest] = useState<ExportDiagramRequest | null>(null);
+  const diagramsReady = isExportDiagramRequestReady(renderedDiagramRequest, diagramRequest);
   useEffect(() => {
     let cancelled = false;
-    void enhanceExportHtml(renderMarkdownToHtml(content || '暂无内容'), {
+    void enhanceExportHtml(renderMarkdownToHtml(diagramRequest.source), {
       mode: 'image',
-      theme: 'light',
+      theme: diagramRequest.theme,
       background: '#ffffff',
+      workflowViewerEnabled: diagramRequest.workflowViewerEnabled,
     }).then((result) => {
       if (cancelled) return;
       setBodyHtml(result.html);
       setDiagramWarnings(result.warnings);
       setDiagramCount(result.diagrams);
+      setRenderedDiagramRequest(diagramRequest);
     }).catch(() => {
-      if (!cancelled) setBodyHtml(renderMarkdownToHtml(content || '暂无内容'));
+      if (!cancelled) {
+        setBodyHtml(renderMarkdownToHtml(diagramRequest.source));
+        setDiagramWarnings([]);
+        setDiagramCount(0);
+        setRenderedDiagramRequest(diagramRequest);
+      }
     });
     return () => { cancelled = true; };
-  }, [content]);
+  }, [diagramRequest]);
   const html = useMemo(() => renderWeChatHtml(bodyHtml, title, theme), [bodyHtml, title, theme]);
-  const copy = async () => { await copyRichHtml(html); setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
-  const saveHtml = async () => { const path = await save({ filters: [{ name: '公众号 HTML', extensions: ['html'] }], defaultPath: `${title}-公众号.html` }); if (path) await invoke('save_file_content', { path, content: html }); };
+  const copy = async () => { if (!diagramsReady) return; await copyRichHtml(html); setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
+  const saveHtml = async () => { if (!diagramsReady) return; const path = await save({ filters: [{ name: '公众号 HTML', extensions: ['html'] }], defaultPath: `${title}-公众号.html` }); if (path) await invoke('save_file_content', { path, content: html }); };
   return <div className="modal-overlay" onClick={onClose}><div className="modal-content wechat-export-modal" onClick={(event) => event.stopPropagation()}>
     <div className="modal-header"><div><h2>公众号排版导出</h2><p className="export-modal-subtitle">原创主题 · 内联样式 · 可直接粘贴到微信公众号编辑器</p></div><button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button></div>
     <div className="modal-body"><div className="wechat-theme-grid">{themes.map((item) => <button key={item.id} className={item.id === themeId ? 'active' : ''} onClick={() => setThemeId(item.id)} style={{ '--wechat-primary': item.primary, '--wechat-pale': item.pale } as React.CSSProperties}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div><div className="wechat-export-preview" dangerouslySetInnerHTML={{ __html: html }} />
@@ -109,6 +120,6 @@ export function WeChatExportDialog({ content, title, onClose }: { content: strin
         {diagramWarnings.length > 0 && ` ${diagramWarnings.join('；')}`}
       </p>}
     </div>
-    <div className="form-actions"><button className="cancel-btn" onClick={onClose}>取消</button><button className="secondary-btn" onClick={() => void saveHtml()}>保存 HTML</button><button className="save-btn" onClick={() => void copy()}>{copied ? '已复制，可粘贴到公众号' : '复制富文本到公众号'}</button></div>
+    <div className="form-actions"><button className="cancel-btn" onClick={onClose}>取消</button><button className="secondary-btn" disabled={!diagramsReady} onClick={() => void saveHtml()}>{diagramsReady ? '保存 HTML' : '正在准备图表...'}</button><button className="save-btn" disabled={!diagramsReady} onClick={() => void copy()}>{diagramsReady ? copied ? '已复制，可粘贴到公众号' : '复制富文本到公众号' : '正在准备图表...'}</button></div>
   </div></div>;
 }

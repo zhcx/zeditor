@@ -264,6 +264,24 @@ test('fenced diagrams are embedded as images when a renderer is provided', async
   assert.deepEqual(result.warnings.filter(warning => warning.includes('图表')), []);
 });
 
+test('disabling workflow rendering keeps workflow YAML source in Word without invoking the renderer', async () => {
+  let calls = 0;
+  const result = await createDocx('```yaml\nname: ci\njobs:\n  build:\n    runs-on: ubuntu-latest\n```\n', {
+    title: '保留工作流源码',
+    workflowViewerEnabled: false,
+    loadDiagram: async () => {
+      calls += 1;
+      return { data: png, type: 'png', width: 40, height: 20 };
+    },
+  });
+  const { xml } = await unpack(result.base64);
+  const document = await xml('word/document.xml');
+  assert.equal(calls, 0);
+  assert.equal(find(document, 'w:drawing').length, 0);
+  assert.ok(texts(document).includes('runs-on: ubuntu-latest'));
+  assert.deepEqual(result.warnings, []);
+});
+
 test('failed diagram rendering keeps the source and reports the reason', async () => {
   const failed = await createDocx('```mermaid\ngraph TD\n  A --> B\n```\n', {
     title: '图表失败',

@@ -1,10 +1,10 @@
 {
   "name": "zeditor",
   "private": true,
-  "version": "0.6.5",
+  "version": "0.6.6",
   "type": "module",
   "engines": {
-    "node": ">=22.6.0"
+    "node": ">=22.12.0"
   },
   "scripts": {
     "dev": "vite",
@@ -25,11 +25,11 @@
     "@tauri-apps/plugin-fs": "^2.0.0",
     "@tauri-apps/plugin-shell": "^2.0.0",
     "docx": "^9.7.0",
-    "dompurify": "3.4.14",
+    "dompurify": "3.4.17",
     "framer-motion": "^11.0.0",
     "highlight.js": "^11.9.0",
-    "katex": "^0.16.9",
-    "markdown-it": "14.3.0",
+    "katex": "0.18.2",
+    "markdown-it": "14.3.3",
     "markdown-it-task-lists": "^2.1.1",
     "markmap-lib": "^0.18.12",
     "markmap-view": "^0.18.12",
@@ -53,16 +53,17 @@
     "eslint": "^10.2.1",
     "eslint-plugin-react-hooks": "^7.1.1",
     "eslint-plugin-react-refresh": "^0.5.2",
-    "fast-xml-parser": "^5.5.6",
+    "fast-xml-parser": "^5.11.2",
     "globals": "^17.5.0",
     "jszip": "^3.10.1",
     "sharp": "^0.35.5",
     "typescript": "~5.9.3",
     "typescript-eslint": "^8.58.2",
-    "vite": "8.1.5"
+    "vite": "8.3.4"
   },
   "overrides": {
     "browserslist": "4.28.9",
-    "dompurify": "3.4.14"
+    "dompurify": "3.4.17",
+    "katex": "0.18.2"
   }
 }

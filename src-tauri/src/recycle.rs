@@ -143,8 +143,8 @@ impl RecycleStore {
             }
         }
         record.pending = false;
-        // If this write fails, the already durable pending record plus payload
-        // or native ID difference can still be reconciled by list().
+        // If this final write fails, list() can recognize a persisted app payload.
+        // A system move without its durable native ID is conservatively left for manual recovery.
         self.write_record(&record)?;
         Ok(record.entry)
     }
@@ -195,6 +195,11 @@ impl RecycleStore {
                 record.entry.can_restore = false;
                 if record.pending && Path::new(&record.entry.original_path).exists() {
                     continue;
+                }
+                if record.pending {
+                    record.entry.note =
+                        "回收操作中断，应用无法安全定位该系统回收项目，请在系统回收站确认并恢复。"
+                            .into();
                 }
             }
             if !record.entry.available {
@@ -806,6 +811,29 @@ mod tests {
         assert!(listed[0].available && listed[0].can_restore);
         store.restore_with(&entry.id, &native).unwrap();
         assert_eq!(fs::read(original).unwrap(), b"retained in native bin");
+    }
+    #[test]
+    fn interrupted_system_recycle_without_saved_id_explains_manual_recovery() {
+        let fixture = Fixture::new();
+        let native = FakeNative::new(&fixture.root);
+        let store = fixture.store();
+        let original = fixture.root.join("interrupted-system.md");
+        fs::write(&original, b"retained in native bin").unwrap();
+        let entry = store.recycle_with(&original, &native).unwrap();
+
+        // Simulate a crash after the system move but before its native ID was
+        // durably written back to the operation record.
+        let mut record = store.read_record(&entry.id).unwrap();
+        record.native_id = None;
+        record.pending = true;
+        record.entry.can_restore = false;
+        record.entry.note.clear();
+        store.write_record(&record).unwrap();
+
+        let listed = store.list_with(&native).unwrap();
+        assert_eq!(listed.len(), 1);
+        assert!(!listed[0].can_restore);
+        assert!(listed[0].note.contains("系统回收站"));
     }
     #[test]
     fn incomplete_or_corrupt_record_does_not_hide_valid_recovery_entries() {
