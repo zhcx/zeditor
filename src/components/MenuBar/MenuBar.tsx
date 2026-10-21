@@ -17,6 +17,7 @@ import { formatShortcut } from '../../utils/platformShortcuts';
 import { isMacOS, isNativeMenuActive } from '../../utils/platform';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
 import { captureExportSnapshot, type ExportSnapshot } from '../../utils/exportSnapshot';
+import { enhanceExportHtml, renderDiagramForDocx } from '../../utils/exportDiagrams';
 import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
 import { createMenuDispatcher, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
@@ -744,7 +745,20 @@ export function MenuBar() {
       // formulas, footnotes, task lists, media placeholders, and wiki-link syntax.
       const documentTitle = snapshot.title;
       const template = loadExportTemplate();
-      const renderBody = () => applyExportTemplate(renderMarkdown(snapshot.content), documentTitle, template);
+      // 预览里的 Mermaid / Markmap / SVG / 工作流是 DOM 后置增强；导出时补做同一步，
+      // 否则 HTML / PDF / Word 里只剩源码。
+      let htmlBody = '';
+      let diagramWarnings: string[] = [];
+      if (format !== 'word') {
+        const enhanced = await enhanceExportHtml(renderMarkdown(snapshot.content), {
+          mode: 'svg',
+          // HTML / PDF 模板是浅色页面：图表固定用浅色，避免暗色主题下浅字落在白底上。
+          theme: 'light',
+          workflowViewerEnabled: settings.workflow?.render_in_preview !== false,
+        });
+        diagramWarnings = enhanced.warnings;
+        htmlBody = applyExportTemplate(enhanced.html, documentTitle, template);
+      }
 
       if (format === 'html') {
         const defaultFilename = `${documentTitle}.html`;
@@ -754,11 +768,12 @@ export function MenuBar() {
         });
         if (selected) {
           const fullHtml = await invoke<string>('export_html', {
-            htmlBody: renderBody(),
+            htmlBody,
             settings: settings.export,
             filePath
           });
           await invoke('save_file_content', { path: selected, content: fullHtml });
+          if (diagramWarnings.length) await message(`HTML 已保存，但部分图表保留了源码：\n\n${diagramWarnings.join('\n\n')}`, { title: '导出说明', kind: 'warning' });
         }
       } else if (format === 'word') {
         const defaultFilename = `${documentTitle}.docx`;
@@ -774,6 +789,8 @@ export function MenuBar() {
           const wordDocument = await createDocx(snapshot.content, {
             ...template, title: documentTitle,
             loadImage: source => loadDocxImage(source, filePath),
+            // Word 是白色纸张：图表用浅色并在白底上光栅化。
+            loadDiagram: (language, diagramSource) => renderDiagramForDocx(language, diagramSource, { theme: 'light', background: '#ffffff' }),
           });
           await invoke('save_file_bytes', { path: selected, dataBase64: wordDocument.base64 });
           if (wordDocument.warnings.length) await message(`Word 文档已保存。请检查以下格式转换：\n\n${wordDocument.warnings.join('\n\n')}`, { title: 'Word 导出说明', kind: 'warning' });
@@ -787,12 +804,13 @@ export function MenuBar() {
         });
         if (selected) {
           await invoke<string>('export_pdf_direct', {
-            htmlBody: renderBody(),
+            htmlBody,
             outputPath: selected,
             settings: settings.export,
             options: null,
             filePath
           });
+          if (diagramWarnings.length) await message(`PDF 已保存，但部分图表保留了源码：\n\n${diagramWarnings.join('\n\n')}`, { title: '导出说明', kind: 'warning' });
         }
       }
     } catch (error) {

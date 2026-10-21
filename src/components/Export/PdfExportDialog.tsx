@@ -2,8 +2,10 @@ import { AppIcon } from '../Icons/AppIcon';
 import { useState, useEffect } from 'react';
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
-import { save } from '@tauri-apps/plugin-dialog';
+import { save, message } from '@tauri-apps/plugin-dialog';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
+import { enhanceExportHtml } from '../../utils/exportDiagrams';
+import { useAppStore } from '../../stores/appStore';
 import { applyExportTemplate, EXPORT_TEMPLATES, loadExportTemplate, saveExportTemplate, type ExportTemplate } from './exportTemplates';
 
 interface ProgressEvent {
@@ -54,6 +56,7 @@ export function PdfExportDialog({ content, filePath, onClose }: PdfExportDialogP
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
   const [success, setSuccess] = useState(false);
   const [template, setTemplate] = useState<ExportTemplate>(loadExportTemplate);
+  const settings = useAppStore(state => state.settings);
 
   useEffect(() => {
     let unlisten: (() => void) | null = null;
@@ -82,7 +85,13 @@ export function PdfExportDialog({ content, filePath, onClose }: PdfExportDialogP
 
     try {
       const title = filePath?.split(/[\\/]/).pop()?.replace(/\.md$/i, '') || '文档';
-      const htmlBody = applyExportTemplate(renderMarkdownToHtml(content), title, template);
+      const enhanced = await enhanceExportHtml(renderMarkdownToHtml(content), {
+        mode: 'svg',
+        // PDF 模板是浅色页面，图表固定用浅色。
+        theme: 'light',
+        workflowViewerEnabled: settings.workflow?.render_in_preview !== false,
+      });
+      const htmlBody = applyExportTemplate(enhanced.html, title, template);
 
       const defaultFilename = filePath
         ? filePath.split(/[\\/]/).pop()?.replace(/\.md$/i, '') || 'document'
@@ -114,6 +123,9 @@ export function PdfExportDialog({ content, filePath, onClose }: PdfExportDialogP
         filePath,
       });
 
+      if (enhanced.warnings.length) {
+        await message(`PDF 已保存，但部分图表保留了源码：\n\n${enhanced.warnings.join('\n\n')}`, { title: '导出说明', kind: 'warning' });
+      }
       // Show success briefly before closing
       setTimeout(() => onClose(), 800);
     } catch (err) {

@@ -220,3 +220,62 @@ test('CJK escaping, separate nested list numbering and footnote names survive th
   assert.ok(texts(await xml('word/footnotes.xml')).includes('脚注乙 < 2'));
   assert.ok(!texts(document).includes('脚注甲'));
 });
+
+test('fenced diagrams are embedded as images when a renderer is provided', async () => {
+  const calls: string[] = [];
+  const source = [
+    '# 图表',
+    '',
+    '```mermaid',
+    'graph TD',
+    '  A --> B',
+    '```',
+    '',
+    '```yaml',
+    'name: ci',
+    'jobs:',
+    '  build:',
+    '    runs-on: ubuntu-latest',
+    '```',
+    '',
+    '```yaml',
+    'name: just-data',
+    'values:',
+    '  - 1',
+    '```',
+    '',
+  ].join('\n');
+  const result = await createDocx(source, {
+    title: '图表',
+    loadDiagram: async (language, diagramSource) => {
+      calls.push(`${language}:${diagramSource.includes('runs-on')}`);
+      if (language === 'yaml' && !diagramSource.includes('runs-on')) return null;
+      return { data: png, type: 'png', width: 40, height: 20 };
+    },
+  });
+  // 普通 YAML 不应被当成图表；工作流与 Mermaid 各写一张图片。
+  assert.deepEqual(calls, ['mermaid:false', 'yaml:true', 'yaml:false']);
+  const { xml } = await unpack(result.base64);
+  const document = await xml('word/document.xml');
+  assert.equal(find(document, 'w:drawing').length, 2);
+  const text = texts(document);
+  assert.ok(!text.includes('A --> B'), 'rendered diagrams must not duplicate their source');
+  assert.ok(text.includes('just-data') && text.includes('values'));
+  assert.deepEqual(result.warnings.filter(warning => warning.includes('图表')), []);
+});
+
+test('failed diagram rendering keeps the source and reports the reason', async () => {
+  const failed = await createDocx('```mermaid\ngraph TD\n  A --> B\n```\n', {
+    title: '图表失败',
+    loadDiagram: async () => { throw new Error('渲染器不可用'); },
+  });
+  const failedParts = await unpack(failed.base64);
+  assert.ok(texts(await failedParts.xml('word/document.xml')).includes('A --> B'));
+  assert.ok(failed.warnings.some(warning => warning.includes('渲染器不可用')));
+
+  const empty = await createDocx('```mermaid\ngraph TD\n  A --> B\n```\n', {
+    title: '图表为空',
+    loadDiagram: async () => null,
+  });
+  assert.ok(empty.warnings.some(warning => warning.includes('图表未能转换为图片')));
+});

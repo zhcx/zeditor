@@ -1,8 +1,9 @@
 import { AppIcon } from '../Icons/AppIcon';
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { save } from '@tauri-apps/plugin-dialog';
 import { invoke } from '@tauri-apps/api/core';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
+import { enhanceExportHtml } from '../../utils/exportDiagrams';
 
 type WeChatThemeId = 'jade' | 'vermilion' | 'graphite' | 'zen' | 'amber' | 'olive';
 interface WeChatTheme { id: WeChatThemeId; label: string; description: string; primary: string; pale: string; ink: string; accent: string; }
@@ -29,11 +30,11 @@ function wrapTextLeaves(root: HTMLElement) {
   });
 }
 
-function renderWeChatHtml(markdown: string, title: string, theme: WeChatTheme) {
-  const documentNode = new DOMParser().parseFromString(`<section>${renderMarkdownToHtml(markdown || '暂无内容')}</section>`, 'text/html');
+function renderWeChatHtml(html: string, title: string, theme: WeChatTheme) {
+  const documentNode = new DOMParser().parseFromString(`<section>${html}</section>`, 'text/html');
   const root = documentNode.body.firstElementChild as HTMLElement;
   root.setAttribute('style', `max-width:677px;margin:0 auto;padding:4px 0;font-size:16px;${textStyle(theme)}`);
-  root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6,p,blockquote,pre,ul,ol,li,table,th,td,a,img,hr,code,strong,em,del').forEach((element) => {
+  root.querySelectorAll<HTMLElement>('h1,h2,h3,h4,h5,h6,p,blockquote,pre,ul,ol,li,table,th,td,a,img,figure,figcaption,hr,code,strong,em,del').forEach((element) => {
     const tag = element.tagName.toLowerCase();
     if (tag === 'h1') element.setAttribute('style', `margin:34px 0 18px;padding:0 0 12px;border-bottom:2px solid ${theme.primary};font-size:27px;line-height:1.35;font-weight:700;${textStyle(theme)}`);
     else if (/^h[2-6]$/.test(tag)) element.setAttribute('style', `margin:30px 0 14px;padding-left:12px;border-left:4px solid ${theme.primary};font-size:${tag === 'h2' ? 21 : 18}px;line-height:1.45;font-weight:700;${textStyle(theme)}`);
@@ -51,6 +52,8 @@ function renderWeChatHtml(markdown: string, title: string, theme: WeChatTheme) {
     else if (tag === 'em') element.setAttribute('style', `font-style:italic;${textStyle(theme)}`);
     else if (tag === 'del') element.setAttribute('style', `text-decoration:line-through;${textStyle(theme)}`);
     else if (tag === 'img') element.setAttribute('style', 'display:block;max-width:100%;height:auto;margin:22px auto;border-radius:4px;');
+    else if (tag === 'figure') element.setAttribute('style', 'margin:22px 0;text-align:center;');
+    else if (tag === 'figcaption') element.setAttribute('style', `margin:6px 0;font-size:12px;line-height:1.5;color:${theme.primary};font-family:${WECHAT_FONT_FAMILY};`);
     else if (tag === 'hr') element.setAttribute('style', `margin:30px 0;border:0;border-top:1px solid ${theme.primary}55;`);
   });
   const cover = documentNode.createElement('section');
@@ -75,12 +78,37 @@ async function copyRichHtml(html: string) {
 export function WeChatExportDialog({ content, title, onClose }: { content: string; title: string; onClose: () => void }) {
   const [themeId, setThemeId] = useState<WeChatThemeId>('jade'); const [copied, setCopied] = useState(false);
   const theme = themes.find((item) => item.id === themeId) || themes[0];
-  const html = useMemo(() => renderWeChatHtml(content, title, theme), [content, title, theme]);
+  // 公众号排版是白底：图表固定用浅色转成内联 PNG，避免预览里的暗色图在正文中看不清。
+  const [bodyHtml, setBodyHtml] = useState(() => renderMarkdownToHtml(content || '暂无内容'));
+  const [diagramWarnings, setDiagramWarnings] = useState<string[]>([]);
+  const [diagramCount, setDiagramCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void enhanceExportHtml(renderMarkdownToHtml(content || '暂无内容'), {
+      mode: 'image',
+      theme: 'light',
+      background: '#ffffff',
+    }).then((result) => {
+      if (cancelled) return;
+      setBodyHtml(result.html);
+      setDiagramWarnings(result.warnings);
+      setDiagramCount(result.diagrams);
+    }).catch(() => {
+      if (!cancelled) setBodyHtml(renderMarkdownToHtml(content || '暂无内容'));
+    });
+    return () => { cancelled = true; };
+  }, [content]);
+  const html = useMemo(() => renderWeChatHtml(bodyHtml, title, theme), [bodyHtml, title, theme]);
   const copy = async () => { await copyRichHtml(html); setCopied(true); window.setTimeout(() => setCopied(false), 1800); };
   const saveHtml = async () => { const path = await save({ filters: [{ name: '公众号 HTML', extensions: ['html'] }], defaultPath: `${title}-公众号.html` }); if (path) await invoke('save_file_content', { path, content: html }); };
   return <div className="modal-overlay" onClick={onClose}><div className="modal-content wechat-export-modal" onClick={(event) => event.stopPropagation()}>
     <div className="modal-header"><div><h2>公众号排版导出</h2><p className="export-modal-subtitle">原创主题 · 内联样式 · 可直接粘贴到微信公众号编辑器</p></div><button className="modal-close" onClick={onClose} aria-label="关闭"><AppIcon name="close" size={16} /></button></div>
-    <div className="modal-body"><div className="wechat-theme-grid">{themes.map((item) => <button key={item.id} className={item.id === themeId ? 'active' : ''} onClick={() => setThemeId(item.id)} style={{ '--wechat-primary': item.primary, '--wechat-pale': item.pale } as React.CSSProperties}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div><div className="wechat-export-preview" dangerouslySetInnerHTML={{ __html: html }} /></div>
+    <div className="modal-body"><div className="wechat-theme-grid">{themes.map((item) => <button key={item.id} className={item.id === themeId ? 'active' : ''} onClick={() => setThemeId(item.id)} style={{ '--wechat-primary': item.primary, '--wechat-pale': item.pale } as React.CSSProperties}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div><div className="wechat-export-preview" dangerouslySetInnerHTML={{ __html: html }} />
+      {(diagramCount > 0 || diagramWarnings.length > 0) && <p style={{ margin: '10px 0 0', fontSize: 12, lineHeight: 1.6, color: diagramWarnings.length ? '#b45309' : 'var(--text-muted, #6b7280)' }}>
+        {diagramCount > 0 && `已把 ${diagramCount} 个图表转为内联图片；若粘贴到公众号后图片丢失，请先保存 HTML 或单独导出图表图片。`}
+        {diagramWarnings.length > 0 && ` ${diagramWarnings.join('；')}`}
+      </p>}
+    </div>
     <div className="form-actions"><button className="cancel-btn" onClick={onClose}>取消</button><button className="secondary-btn" onClick={() => void saveHtml()}>保存 HTML</button><button className="save-btn" onClick={() => void copy()}>{copied ? '已复制，可粘贴到公众号' : '复制富文本到公众号'}</button></div>
   </div></div>;
 }

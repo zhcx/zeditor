@@ -1,7 +1,9 @@
 import { AppIcon } from '../Icons/AppIcon';
-import { useMemo, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { applyExportTemplate, EXPORT_TEMPLATES, loadExportTemplate, saveExportTemplate, type ExportTemplate } from './exportTemplates';
 import { renderMarkdownToHtml } from '../../utils/markdownPipeline';
+import { enhanceExportHtml } from '../../utils/exportDiagrams';
+import { useAppStore } from '../../stores/appStore';
 
 type ImageRatio = 'square' | 'landscape' | 'wide' | 'portrait' | 'a4';
 
@@ -32,7 +34,30 @@ export function ImageExportDialog({ content, onClose }: ImageExportDialogProps) 
   const [exporting, setExporting] = useState(false);
   const [template, setTemplate] = useState<ExportTemplate>(loadExportTemplate);
   const current = formats.find((format) => format.id === selected) || formats[0];
-  const renderedHtml = useMemo(() => renderMarkdownToHtml(content || '暂无内容'), [content]);
+  const settings = useAppStore(state => state.settings);
+  // 长图通过 SVG foreignObject 一次性光栅化：图表先转成 PNG 数据地址，
+  // 避免嵌套 SVG（Markmap 还带 foreignObject）在绘制时丢图。
+  const [renderedHtml, setRenderedHtml] = useState(() => renderMarkdownToHtml(content || '暂无内容'));
+  const [diagramWarnings, setDiagramWarnings] = useState<string[]>([]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const source = content || '暂无内容';
+    const background = getComputedStyle(document.documentElement).getPropertyValue('--bg-document').trim() || '#fffdf8';
+    void enhanceExportHtml(renderMarkdownToHtml(source), {
+      mode: 'image',
+      theme: settings.appearance.theme,
+      background,
+      workflowViewerEnabled: settings.workflow?.render_in_preview !== false,
+    }).then((result) => {
+      if (cancelled) return;
+      setRenderedHtml(result.html);
+      setDiagramWarnings(result.warnings);
+    }).catch(() => {
+      if (!cancelled) setRenderedHtml(renderMarkdownToHtml(source));
+    });
+    return () => { cancelled = true; };
+  }, [content, settings.appearance.theme, settings.workflow?.render_in_preview]);
 
   const handleExport = async () => {
     saveExportTemplate(template);
@@ -43,7 +68,14 @@ export function ImageExportDialog({ content, onClose }: ImageExportDialogProps) 
     const background = getComputedStyle(document.documentElement).getPropertyValue('--bg-document').trim() || '#fffdf8';
     const foreground = getComputedStyle(document.documentElement).getPropertyValue('--text-color').trim() || '#242321';
     const themedHtml = applyExportTemplate(renderedHtml, 'Zeditor', template);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * scale}" height="${height * scale}"><foreignObject width="100%" height="100%"><div xmlns="http://www.w3.org/1999/xhtml" style="box-sizing:border-box;width:100%;height:100%;padding:${Math.round(width * 0.04)}px;background:${background};color:${foreground};font-size:${Math.max(18, Math.round(width / 48))}px;overflow:hidden"><style>img{max-width:100%}</style>${themedHtml}</div></foreignObject></svg>`;
+    // foreignObject 内部必须是良构 XHTML：Markdown 生成的 `<img>` / `<br>` 不是
+    // 自闭合标签，直接拼进 SVG 会让整张图无法解码。先交给 XMLSerializer。
+    const container = document.createElement('div');
+    container.setAttribute('xmlns', 'http://www.w3.org/1999/xhtml');
+    container.setAttribute('style', `box-sizing:border-box;width:100%;height:100%;padding:${Math.round(width * 0.04)}px;background:${background};color:${foreground};font-size:${Math.max(18, Math.round(width / 48))}px;overflow:hidden`);
+    container.innerHTML = `<style>img{max-width:100%}</style>${themedHtml}`;
+    const xhtml = new XMLSerializer().serializeToString(container);
+    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${width * scale}" height="${height * scale}"><foreignObject width="100%" height="100%">${xhtml}</foreignObject></svg>`;
     const image = new Image();
     image.onload = () => {
       const canvas = document.createElement('canvas');
@@ -74,6 +106,7 @@ export function ImageExportDialog({ content, onClose }: ImageExportDialogProps) 
           </button>)}
         </div>
         <div className="image-export-preview-wrap"><span className="image-export-preview-label">预览</span><div className="image-export-preview" style={{ aspectRatio: current.ratio }}><div dangerouslySetInnerHTML={{ __html: renderedHtml }} /></div></div>
+        {diagramWarnings.length > 0 && <p style={{ margin: '8px 0 0', color: 'var(--warning-color, #b45309)', fontSize: 12, lineHeight: 1.6 }}>{diagramWarnings.join('；')}</p>}
       </div>
       <div className="form-actions image-export-actions"><button className="cancel-btn" onClick={onClose}>取消</button><button className="save-btn" onClick={handleExport} disabled={exporting}>{exporting ? '正在生成...' : '导出 PNG'}</button></div>
     </div>
