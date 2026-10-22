@@ -64,7 +64,7 @@ jobs:
         run: npm install --global npm@11
 
       - name: Install locked frontend dependencies
-        run: npm ci
+        run: npm ci --no-audit
 
       - name: Check frontend quality
         run: |
