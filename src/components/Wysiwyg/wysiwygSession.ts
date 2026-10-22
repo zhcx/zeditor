@@ -7,8 +7,8 @@
  */
 import {
   removeBlockFromSource,
-  replaceBlockSource,
-  splitMarkdownDocument,
+  replaceEditableBlockSource as replaceBlockSource,
+  splitEditableMarkdownDocument as splitMarkdownDocument,
   type WysiwygBlock,
   type WysiwygDocument,
 } from '../../utils/wysiwyg/blocks.ts';
@@ -83,6 +83,17 @@ const WRITE_BACK_DELAY = 250;
 /** 编辑态序列化：允许把刚敲出的块标记当作语法传给重新解析。 */
 const EDITING_SERIALIZE_OPTIONS: BlockSerializeOptions = { allowBlockMarkers: true };
 
+function withEol(source: string, eol: string): string {
+  return source.replace(/\r\n|\n|\r/g, eol);
+}
+
+/** 块菜单操作仍以语法内容为边界，段落编辑投影拥有的空行留在原位置。 */
+function structuralBlock(block: WysiwygBlock): WysiwygBlock {
+  if (block.kind !== 'paragraph') return block;
+  const source = block.source.replace(/(?:\r\n|\n|\r)+$/, '');
+  return source.length === block.length ? block : { ...block, source, length: source.length };
+}
+
 /** 路径 → DOM 节点（空路径返回元素自身）。 */
 function pathToNode(element: HTMLElement, path: number[]): Node | null {
   let current: Node | null = element;
@@ -154,13 +165,14 @@ export class WysiwygSession {
     const collected = this.pendingIndex === null ? null : this.collectBlock(this.pendingIndex);
     if (!collected) return this.document.source;
     const { block, serialized } = collected;
-    return this.document.source.slice(0, block.offset) + serialized.markdown + this.document.source.slice(block.offset + block.length);
+    return this.document.source.slice(0, block.offset) + withEol(serialized.markdown, this.document.eol) + this.document.source.slice(block.offset + block.length);
   }
   getBlocks(): WysiwygBlock[] { return this.document.blocks; }
 
   // ── 输入与写回 ─────────────────────────────────────────────
 
   markComposing(composing: boolean, index?: number): void {
+    if (index !== undefined && this.pendingIndex !== null && this.pendingIndex !== index) this.flushWriteBack();
     this.composing = composing;
     if (index !== undefined) this.pendingIndex = index;
     if (composing) {
@@ -174,6 +186,7 @@ export class WysiwygSession {
   }
 
   handleInput(index: number): void {
+    if (this.pendingIndex !== null && this.pendingIndex !== index) this.flushWriteBack();
     this.pendingIndex = index;
     if (this.composing) return;
     this.renderInlineMarker(index);
@@ -324,8 +337,9 @@ export class WysiwygSession {
   private writeBackBlock(index: number): void {
     const collected = this.collectBlock(index);
     if (!collected) return;
-    if (collected.serialized.markdown === collected.block.source) return;
-    this.commit(collected.block, collected.serialized.markdown);
+    const markdown = withEol(collected.serialized.markdown, this.document.eol);
+    if (markdown === collected.block.source) return;
+    this.commit(collected.block, markdown);
   }
 
   /**
@@ -335,6 +349,7 @@ export class WysiwygSession {
    * 写回前的位置；否则保留 DOM（光标本来就在正确位置，重建反而会丢光标）。
    */
   private commit(block: WysiwygBlock, nextBlockSource: string): void {
+    nextBlockSource = withEol(nextBlockSource, this.document.eol);
     const index = this.document.blocks.indexOf(block);
     if (index >= 0) this.dirtyBlockIndices.add(index);
     const caretBefore = this.locateCaretOffset();
@@ -448,9 +463,9 @@ export class WysiwygSession {
 
     this.checkpointBlock(collected);
     const source = this.document.source.slice(0, previous.offset)
-      + merged.source
+      + withEol(merged.source, this.document.eol)
       + this.document.source.slice(collected.block.offset + collected.block.length);
-    return this.applySource(source, previous.offset + merged.caret);
+    return this.applySource(source, previous.offset + withEol(merged.source.slice(0, merged.caret), this.document.eol).length);
   }
 
   /** 光标是否在块内容开头（含前缀之后的位置）。 */
@@ -505,9 +520,9 @@ export class WysiwygSession {
 
     this.checkpointBlock(collected);
     const source = this.document.source.slice(0, collected.block.offset)
-      + merged.source
+      + withEol(merged.source, this.document.eol)
       + this.document.source.slice(next.offset + next.length);
-    return this.applySource(source, collected.block.offset + merged.caret);
+    return this.applySource(source, collected.block.offset + withEol(merged.source.slice(0, merged.caret), this.document.eol).length);
   }
 
   /** Tab / Shift+Tab：列表层级调整。 */
@@ -622,7 +637,7 @@ export class WysiwygSession {
     let local: number;
     try {
       const markdown = serializeBlockMarkdown(target.kind, toInlineNodes(targetElement), EDITING_SERIALIZE_OPTIONS).markdown;
-      local = forward ? contentStartOffset(markdown, target.kind) : markdown.length;
+      local = forward ? contentStartOffset(markdown, target.kind) : withEol(markdown, this.document.eol).length;
     } catch {
       return false;
     }
@@ -705,14 +720,14 @@ export class WysiwygSession {
     this.flushWriteBack();
     if (!this.document.blocks[index]) return false;
     this.pushUndo({ coalesce: false });
-    const removed = removeBlockFromSource(this.document, index);
+    const removed = removeBlockFromSource({ ...this.document, blocks: this.document.blocks.map(structuralBlock) }, index);
     return this.applySource(removed.source, removed.caret);
   }
 
   /** 在指定块之后插入一个空段落并落光标（悬停操作条「在下方插入」）。 */
   insertParagraphAfter(index: number): boolean {
     this.flushWriteBack();
-    const block = this.document.blocks[index];
+    const block = this.document.blocks[index] && structuralBlock(this.document.blocks[index]);
     if (!block) return false;
     this.pushUndo({ coalesce: false });
     const insertAt = block.offset + block.length;
@@ -727,7 +742,7 @@ export class WysiwygSession {
   insertBlockAfter(index: number, markdown: string, selectionStart = 0, selectionEnd = selectionStart): boolean {
     if (markdown.length === 0) return this.insertParagraphAfter(index);
     this.flushWriteBack();
-    const block = this.document.blocks[index];
+    const block = this.document.blocks[index] && structuralBlock(this.document.blocks[index]);
     if (!block) return false;
     this.pushUndo({ coalesce: false });
     const insertAt = block.offset + block.length;
@@ -757,7 +772,7 @@ export class WysiwygSession {
   /** 调整块顺序，保留原位置的间隔与未渲染源码。 */
   moveBlock(from: number, to: number): boolean {
     this.flushWriteBack();
-    const blocks = this.document.blocks;
+    const blocks = this.document.blocks.map(structuralBlock);
     if (from === to || !blocks[from] || !blocks[to]) return false;
     const reordered = [...blocks];
     const [moved] = reordered.splice(from, 1);
@@ -778,7 +793,7 @@ export class WysiwygSession {
 
   duplicateBlock(index: number): boolean {
     this.flushWriteBack();
-    const block = this.document.blocks[index];
+    const block = this.document.blocks[index] && structuralBlock(this.document.blocks[index]);
     if (!block) return false;
     const at = block.offset + block.length;
     const gap = this.document.eol.repeat(2);
@@ -955,7 +970,7 @@ export class WysiwygSession {
     const atom = element?.closest('.wiki-link[data-wiki-target], .footnote-ref[data-footnote-name]');
     const local = this.containerOffsetOfPoint(collected, atom ?? target, 0);
     if (local === null) return null;
-    return { index, offset: collected.block.offset + local + (atom ? 1 : 0), blockStart: collected.block.offset };
+    return { index, offset: collected.block.offset + withEol(collected.serialized.markdown.slice(0, local), this.document.eol).length + (atom ? 1 : 0), blockStart: collected.block.offset };
   }
 
   /** 控制器用：块索引 → 元素（滚动定位）。 */
@@ -1018,6 +1033,8 @@ export class WysiwygSession {
   }
 
   private applyBlockSource(block: WysiwygBlock, nextBlockSource: string, caret: number): boolean {
+    caret = block.offset + withEol(nextBlockSource.slice(0, caret - block.offset), this.document.eol).length;
+    nextBlockSource = withEol(nextBlockSource, this.document.eol);
     this.document = replaceBlockSource(this.document, block, nextBlockSource);
     this.skipRenderIndex = null;
     this.pendingCaret = caret;
@@ -1031,7 +1048,7 @@ export class WysiwygSession {
   private checkpointBlock(collected: CollectedBlock): void {
     const index = this.document.blocks.indexOf(collected.block);
     if (index >= 0) this.dirtyBlockIndices.add(index);
-    const visibleSource = replaceBlockSource(this.document, collected.block, collected.serialized.markdown).source;
+    const visibleSource = replaceBlockSource(this.document, collected.block, withEol(collected.serialized.markdown, this.document.eol)).source;
     if (visibleSource !== this.document.source) this.pushUndo({ coalesce: true });
     this.pushUndo({ coalesce: false, source: visibleSource });
     if (this.pendingIndex !== null && this.document.blocks[this.pendingIndex] === collected.block) {
@@ -1136,7 +1153,7 @@ export class WysiwygSession {
     if (!collected || !collected.element.contains(node)) return null;
     const local = this.containerOffsetOfPoint(collected, node, offset);
     if (local === null) return null;
-    return collected.block.offset + local;
+    return collected.block.offset + withEol(collected.serialized.markdown.slice(0, local), this.document.eol).length;
   }
 
   /** 全文档光标偏移（撤销快照用）。 */
@@ -1183,7 +1200,8 @@ export class WysiwygSession {
     if (index === null) return null;
     const collected = this.collectBlockForOffset(index);
     if (!collected) return null;
-    const local = offset - collected.block.offset;
+    const sourceLocal = offset - collected.block.offset;
+    const local = withEol(withEol(collected.serialized.markdown, this.document.eol).slice(0, sourceLocal), '\n').length;
     let fallback: Range | null = null;
     for (const container of collected.serialized.containers) {
       const containerNode = pathToNode(collected.element, container.path);

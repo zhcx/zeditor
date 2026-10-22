@@ -1,5 +1,6 @@
 import type { BlockArrowDirection } from '../../utils/wysiwyg/blockOps.ts';
-import { textContentOf, toInlineNodes } from '../../utils/wysiwyg/inlineNodes.ts';
+import { toInlineNodes } from '../../utils/wysiwyg/inlineNodes.ts';
+import { serializeInlineNodes } from '../../utils/wysiwyg/inlineSerialize.ts';
 
 interface VerticalRect { top: number; bottom: number }
 
@@ -12,17 +13,19 @@ export function isVisualLineEdge(caret: VerticalRect, rects: VerticalRect[], dir
   return Math.min(caret.bottom, edge.bottom) - Math.max(caret.top, edge.top) > 1;
 }
 
-function textRects(container: HTMLElement): DOMRect[] {
+function editableLineRects(container: HTMLElement): DOMRect[] {
   const owner = container.ownerDocument;
   if (!owner.createTreeWalker) return [];
-  const walker = owner.createTreeWalker(container, 4);
+  const walker = owner.createTreeWalker(container, 5);
   const rects: DOMRect[] = [];
   let node: Node | null;
   while ((node = walker.nextNode())) {
-    if (!(node.textContent ?? '').trim()) continue;
+    const lineBreak = node.nodeType === 1 && (node as Element).tagName === 'BR';
+    if (!lineBreak && (node.nodeType !== 3 || !(node.textContent ?? '').trim())) continue;
     const range = owner.createRange();
-    range.selectNodeContents(node);
-    rects.push(...Array.from(range.getClientRects()).filter(rect => rect.width > 0 && rect.height > 0));
+    if (lineBreak) range.selectNode(node);
+    else range.selectNodeContents(node);
+    rects.push(...Array.from(range.getClientRects()).filter(rect => rect.height > 0 && (lineBreak || rect.width > 0)));
   }
   return rects;
 }
@@ -39,18 +42,17 @@ export function caretAtVisualEdge(container: HTMLElement, range: Range, directio
     if (direction === 'left') probe.setEnd(range.startContainer, range.startOffset);
     else probe.setStart(range.startContainer, range.startOffset);
     const text = probe.toString();
-    if (!text) return true;
     if (/\S/.test(text)) return false;
-    return textContentOf(toInlineNodes(probe.cloneContents())).length === 0;
+    return serializeInlineNodes(toInlineNodes(probe.cloneContents())).length === 0;
   }
-  return isVisualLineEdge(range.getBoundingClientRect(), textRects(container), direction);
+  return isVisualLineEdge(range.getBoundingClientRect(), editableLineRects(container), direction);
 }
 
 /** 上下跨块时保留水平位置；命中失败交回源码偏移映射。 */
 export function caretOnVisualLine(container: HTMLElement, x: number, first: boolean): Range | null {
   const owner = container.ownerDocument;
   if (!owner.caretRangeFromPoint) return null;
-  const rects = textRects(container);
+  const rects = editableLineRects(container);
   const edge = first ? rects[0] : rects.at(-1);
   if (!edge) return null;
   const bounds = container.getBoundingClientRect();

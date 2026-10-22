@@ -7,6 +7,18 @@ import { blockOffsetFromPoint, pointFromBlockOffset } from '../src/utils/wysiwyg
 const p = (...children: InlineNode[]) => elementNode('p', {}, children);
 const strong = (...children: InlineNode[]) => elementNode('strong', {}, children);
 
+it('maps both sides of a line break and the trailing empty line without moving backwards', () => {
+  const nodes = [textNode('前'), elementNode('br', {}, []), textNode('后')];
+  const block = serializeBlockMarkdown('paragraph', nodes);
+  const container = { nodes, path: [] };
+  assert.deepEqual(pointFromBlockOffset(block, container, 2), { path: [], offset: 2 });
+  assert.equal(blockOffsetFromPoint(block, container, { path: [], offset: 2 }), 2);
+  const trailing = [textNode('前'), elementNode('br', {}, []), elementNode('br', { 'data-wysiwyg-placeholder': 'true' }, [])];
+  const end = serializeBlockMarkdown('paragraph', trailing);
+  assert.equal(end.markdown, '前\n');
+  assert.deepEqual(pointFromBlockOffset(end, { nodes: trailing, path: [] }, 2), { path: [], offset: 2 });
+});
+
 it('maps a caret inside wrapped text to the markdown offset', () => {
   const nodes = [textNode('前 '), strong(textNode('重点')), textNode(' 后')];
   const block = serializeBlockMarkdown('paragraph', nodes);

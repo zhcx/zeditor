@@ -1,6 +1,20 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { createBlockHtmlRenderer } from '../src/utils/wysiwyg/blockHtml.ts';
+import { renderMarkdownSource } from '../src/utils/markdownPipeline.ts';
+
+it('renders editable line breaks without duplicating renderer whitespace', () => {
+  const render = createBlockHtmlRenderer(renderMarkdownSource);
+  assert.match(render('paragraph', '第一行\n第二行'), /第一行<br>第二行/);
+  assert.doesNotMatch(render('paragraph', '第一行\n第二行'), /<br>\n/);
+});
+
+it('renders every trailing paragraph newline with a separate caret placeholder', () => {
+  const render = createBlockHtmlRenderer(renderMarkdownSource);
+  const html = render('paragraph', '正文\n\n');
+  assert.match(html, /正文<br><br><br data-wysiwyg-placeholder="true"><\/p>/);
+  assert.match(render('paragraph', '\n'), /<p><br><br data-wysiwyg-placeholder="true"><\/p>/);
+});
 
 it('reuses rendered blocks and includes the block kind in the cache key', () => {
   let calls = 0;

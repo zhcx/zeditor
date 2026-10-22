@@ -53,6 +53,19 @@ export function blockOffsetFromPoint(block: BlockSerializeResult, container: Con
     }
     local += piece.text.length;
   }
+  // Range 落在元素子节点边界（尤其是 BR 之后的空行）时，offset 是子节点
+  // 下标而不是字符数；保留这类位置，不能吸附回前一个文本节点。
+  local = 0;
+  let boundary: number | null = null;
+  for (const piece of pieces) {
+    const inside = piece.path.length > point.path.length && point.path.every((part, index) => piece.path[index] === part);
+    if (inside) {
+      if (piece.path[point.path.length] >= point.offset) return entry.contentOffset + local;
+      boundary = entry.contentOffset + local + piece.text.length;
+    }
+    local += piece.text.length;
+  }
+  if (boundary !== null) return boundary;
   return null;
 }
 

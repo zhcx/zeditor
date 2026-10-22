@@ -98,7 +98,7 @@ it('undoes Enter without also removing the typing that preceded it', () => {
   fixture.setText('原文XYZ');
   fixture.session.handleInput(0);
   assert.equal(fixture.session.handleEnter(0), true);
-  assert.equal(fixture.session.getSource(), '原文XYZ\n\n');
+  assert.equal(fixture.session.getSource(), '原文XYZ\n');
   assert.equal(fixture.session.getSnapshot().renderRevision, 1, '结构变化重新生成 DOM');
   fixture.session.handleUndo();
   assert.equal(fixture.session.getSource(), '原文XYZ');

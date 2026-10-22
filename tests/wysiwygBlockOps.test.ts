@@ -1,5 +1,6 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
+import { renderMarkdownSource } from '../src/utils/markdownPipeline.ts';
 import {
   arrowLeavesBlock,
   contentStartOffset,
@@ -26,12 +27,12 @@ it('splits paragraphs, headings, quotes and list items on Enter', () => {
   assert.deepEqual(splitBlock({ source: '前半后半', kind: 'paragraph', caret: 2 }), {
     head: '前半',
     tail: '后半',
-    separator: '\n\n',
+    separator: '\n',
   });
   assert.deepEqual(splitBlock({ source: '## 标题', kind: 'heading', caret: 7 }), {
     head: '## 标题',
     tail: '',
-    separator: '\n\n',
+    separator: '\n',
   });
   assert.deepEqual(splitBlock({ source: '- 一项', kind: 'list', caret: 4 }), {
     head: '- 一项',
@@ -50,6 +51,14 @@ it('splits paragraphs, headings, quotes and list items on Enter', () => {
     tail: '> ',
     separator: '\n>\n',
   });
+});
+
+it('uses one source newline when Enter inserts a paragraph line break', () => {
+  const split = splitBlock({ source: '前后', kind: 'paragraph', caret: 1 });
+  assert.ok(split);
+  const source = split.head + split.separator + split.tail;
+  assert.equal(source, '前\n后');
+  assert.match(renderMarkdownSource(source), /前<br>\s*后/);
 });
 
 it('breaks a quote into two quote paragraphs, not one soft-wrapped line', () => {

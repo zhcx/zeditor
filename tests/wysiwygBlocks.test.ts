@@ -1,6 +1,27 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
-import { splitMarkdownDocument, replaceBlockSource } from '../src/utils/wysiwyg/blocks.ts';
+import { splitMarkdownDocument, replaceBlockSource, splitEditableMarkdownDocument, replaceEditableBlockSource } from '../src/utils/wysiwyg/blocks.ts';
+
+it('keeps editable trailing and inter-paragraph lines in the owning paragraph', () => {
+  for (const eol of ['\n', '\r\n', '\r']) {
+    const source = `前${eol}${eol}后${eol}${eol}`;
+    const document = splitEditableMarkdownDocument(source);
+    assert.deepEqual(document.blocks.map(block => block.source), [`前${eol}`, `后${eol}${eol}`]);
+    for (const block of document.blocks) assert.equal(source.slice(block.offset, block.offset + block.length), block.source);
+    const first = document.blocks[0];
+    const updated = replaceEditableBlockSource(document, first, `前改${eol}`);
+    assert.equal(updated.source, `前改${eol}${eol}后${eol}${eol}`);
+    assert.deepEqual(updated.blocks, splitEditableMarkdownDocument(updated.source).blocks);
+  }
+});
+
+it('keeps blank documents and the line after a heading editable at their real source offsets', () => {
+  assert.deepEqual(splitEditableMarkdownDocument('\n\n').blocks.map(block => [block.offset, block.source]), [[0, '\n\n']]);
+  const document = splitEditableMarkdownDocument('# 标题\n');
+  assert.deepEqual(document.blocks.map(block => [block.offset, block.source]), [[0, '# 标题'], [5, '']]);
+  const leading = splitEditableMarkdownDocument('\n\n正文').blocks[0];
+  assert.deepEqual([leading.source, leading.startLine, leading.endLine], ['\n', 1, 2]);
+});
 
 it('indexes block offsets, lengths and line numbers', () => {
   const document = splitMarkdownDocument('# 标题\n\n段落\n');

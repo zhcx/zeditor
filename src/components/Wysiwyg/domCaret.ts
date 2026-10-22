@@ -35,6 +35,8 @@ export function snapRangeAroundInlineAtoms(range: Range, host: HTMLElement): voi
 function normalizePoint(node: Node, offset: number): { node: Node; offset: number } {
   if (node.nodeType === TEXT_NODE) return { node, offset };
   const children = node.childNodes;
+  const adjacentBreak = [children[offset], children[offset - 1]].some(child => child?.nodeType === ELEMENT_NODE && (child as Element).tagName === 'BR');
+  if (adjacentBreak) return { node, offset };
   if (offset < children.length) {
     const child = children[offset];
     if (!child) return { node, offset: 0 };

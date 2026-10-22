@@ -27,7 +27,7 @@ export interface WysiwygBlock {
   endLine: number;
   /** 块首字符在整篇源码中的偏移。 */
   offset: number;
-  /** 块源码长度，不含块后的换行。 */
+  /** 源码区间长度；语法索引不含块后换行，编辑投影的段落可包含其可编辑空行。 */
   length: number;
   /** 块源码，等于 source.slice(offset, offset + length)。 */
   source: string;
@@ -104,7 +104,7 @@ function indexLines(source: string): SourceLine[] {
   return lines;
 }
 
-export function splitMarkdownDocument(source: string): WysiwygDocument {
+function splitDocument(source: string, editableParagraphs: boolean): WysiwygDocument {
   const eol = detectEol(source);
   const lines = indexLines(source);
   const blocks: WysiwygBlock[] = [];
@@ -169,7 +169,7 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
   const emptyParagraph = (offset: number, length = 0): WysiwygBlock => ({
     kind: 'paragraph',
     startLine: lineNumberAt(offset),
-    endLine: lineNumberAt(offset),
+    endLine: lineNumberAt(offset + length),
     offset,
     length,
     source: source.slice(offset, offset + length),
@@ -184,18 +184,48 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
       .flatMap((match, index) => index % 2 === 1 ? [from + match.index + match[0].length] : []);
   };
   if (blocks.length === 0) {
-    const initialLength = /[\r\n]/.test(source) ? 0 : source.length;
-    return { source, eol, blocks: [emptyParagraph(0, initialLength), ...pairEnds(0, source.length).map(offset => emptyParagraph(offset))] };
+    if (!editableParagraphs) {
+      const initialLength = /[\r\n]/.test(source) ? 0 : source.length;
+      return { source, eol, blocks: [emptyParagraph(0, initialLength), ...pairEnds(0, source.length).map(offset => emptyParagraph(offset))] };
+    }
+    const blank = emptyParagraph(0, source.length);
+    blank.endLine = lineNumberAt(source.length);
+    return { source, eol, blocks: [blank] };
   }
 
   const editableBlocks: WysiwygBlock[] = [];
-  const leadingPairs = pairEnds(0, blocks[0].offset);
-  if (leadingPairs.length > 0) {
-    editableBlocks.push(emptyParagraph(0), ...leadingPairs.slice(0, -1).map(offset => emptyParagraph(offset)));
+  const leading = source.slice(0, blocks[0].offset);
+  const leadingBreaks = Array.from(leading.matchAll(/\r\n|\n|\r/g));
+  if (editableParagraphs && leadingBreaks.length > 0 && !leading.trim()) {
+    editableBlocks.push(emptyParagraph(0, leading.length - leadingBreaks.at(-1)![0].length));
+  } else if (!editableParagraphs) {
+    const leadingPairs = pairEnds(0, blocks[0].offset);
+    if (leadingPairs.length > 0) editableBlocks.push(emptyParagraph(0), ...leadingPairs.slice(0, -1).map(offset => emptyParagraph(offset)));
   }
   blocks.forEach((block, index) => {
-    editableBlocks.push(block);
     const next = blocks[index + 1];
+    const gapEnd = next?.offset ?? source.length;
+    const tail = source.slice(block.offset + block.length, gapEnd);
+    const breaks = Array.from(tail.matchAll(/\r\n|\n|\r/g));
+    if (editableParagraphs && block.kind === 'paragraph' && !tail.trim()) {
+      // 段落持有它后面的可编辑空行，仅给下一块留下一个分隔换行。
+      // 这样文末和段中连续回车都有真实 DOM 落点，写回也不会重复追加旧空白。
+      const owned = next && breaks.length ? tail.slice(0, -breaks.at(-1)![0].length) : tail;
+      editableBlocks.push({ ...block, source: block.source + owned, length: block.length + owned.length, endLine: lineNumberAt(block.offset + block.length + owned.length) });
+      return;
+    }
+    editableBlocks.push(block);
+    if (editableParagraphs && !next) {
+      const separatorCount = block.kind === 'heading' ? 1 : 2;
+      const separator = breaks[separatorCount - 1];
+      if (separator) {
+        const offset = block.offset + block.length + separator.index! + separator[0].length;
+        const blank = emptyParagraph(offset, source.length - offset);
+        blank.endLine = lineNumberAt(source.length);
+        editableBlocks.push(blank);
+      }
+      return;
+    }
     const gapPairs = pairEnds(block.offset + block.length, next?.offset ?? source.length);
     const emptyOffsets = next ? gapPairs.slice(0, -1) : gapPairs;
     editableBlocks.push(...emptyOffsets.map(offset => emptyParagraph(offset)));
@@ -204,14 +234,32 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
   return { source, eol, blocks: editableBlocks };
 }
 
+/** 原始 Markdown 的语法块索引；块间分隔符保持在块外。 */
+export function splitMarkdownDocument(source: string): WysiwygDocument {
+  return splitDocument(source, false);
+}
+
+/** 编辑投影让段落拥有相邻空行，保证每个源码光标位置有可编辑 DOM 落点。 */
+export function splitEditableMarkdownDocument(source: string): WysiwygDocument {
+  return splitDocument(source, true);
+}
+
 /** 用新的块源码替换该块，其余字符逐字保留；源码未变化时返回原对象。 */
 export function replaceBlockSource(doc: WysiwygDocument, block: WysiwygBlock, source: string): WysiwygDocument {
+  return replaceSource(doc, block, source, false);
+}
+
+export function replaceEditableBlockSource(doc: WysiwygDocument, block: WysiwygBlock, source: string): WysiwygDocument {
+  return replaceSource(doc, block, source, true);
+}
+
+function replaceSource(doc: WysiwygDocument, block: WysiwygBlock, source: string, editableParagraphs: boolean): WysiwygDocument {
   if (source === block.source) return doc;
   const index = doc.blocks.indexOf(block);
-  if (index >= 0 && canUpdateBlockInPlace(block, source)) {
+  if (index >= 0 && canUpdateBlockInPlace(block, source, editableParagraphs)) {
     return updateBlockInPlace(doc, index, block, source);
   }
-  return splitMarkdownDocument(doc.source.slice(0, block.offset) + source + doc.source.slice(block.offset + block.length));
+  return splitDocument(doc.source.slice(0, block.offset) + source + doc.source.slice(block.offset + block.length), editableParagraphs);
 }
 
 /**
@@ -224,7 +272,7 @@ export function replaceBlockSource(doc: WysiwygDocument, block: WysiwygBlock, so
  * 输入普通文字或行内标记时（每 250ms 写回一次），全文 markdown-it 解析是长文档
  * 输入停顿的主要来源；结构编辑保守地退回全文解析，避免留下错误的块边界。
  */
-function canUpdateBlockInPlace(block: WysiwygBlock, source: string): boolean {
+function canUpdateBlockInPlace(block: WysiwygBlock, source: string, editableParagraphs: boolean): boolean {
   if (!block.editable || (block.kind !== 'paragraph' && block.kind !== 'heading')) return false;
   if (!source.trim()) return false;
   // 改变缩进可能把段落吸进前面的列表；改变换行可能影响空块位置和文档 EOL。
@@ -232,7 +280,7 @@ function canUpdateBlockInPlace(block: WysiwygBlock, source: string): boolean {
   const lineBreaks = source.match(/\r\n|\n|\r/g) ?? [];
   const previousBreaks = block.source.match(/\r\n|\n|\r/g) ?? [];
   if (lineBreaks.length !== previousBreaks.length || lineBreaks.some((eol, index) => eol !== previousBreaks[index])) return false;
-  const standalone = splitMarkdownDocument(source);
+  const standalone = splitDocument(source, editableParagraphs);
   if (standalone.blocks.length !== 1) return false;
   const parsed = standalone.blocks[0];
   return parsed.kind === block.kind

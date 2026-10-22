@@ -1,4 +1,5 @@
 import { memo, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { flushSync } from 'react-dom';
 import { useShallow } from 'zustand/react/shallow';
 import { open as openExternal } from '@tauri-apps/plugin-shell';
 import { useAppStore } from '../../stores/appStore';
@@ -14,6 +15,7 @@ import { resolveEditorDisplay } from '../../utils/editorDisplay';
 import { isPrimaryModifier } from '../../utils/platform';
 import { blockInsertion } from '../../utils/wysiwyg/blockMenu';
 import { createBlockHtmlRenderer } from '../../utils/wysiwyg/blockHtml';
+import { escapeInlineText } from '../../utils/wysiwyg/inlineSerialize';
 import { nextBlockRenderBudget } from '../../utils/wysiwyg/renderBudget';
 import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
 import { hasTrailingEmptyQuoteLine } from '../../utils/wysiwyg/blockOps';
@@ -66,9 +68,7 @@ interface WysiwygBlockViewProps {
   onToggleFold: (key: string) => void;
   registerElement: (index: number, element: HTMLElement | null) => void;
   onInput: (index: number) => void;
-  onKeyDown: (event: React.KeyboardEvent<HTMLElement>, index: number) => void;
   onBlurBlock: (index: number, nextFocus: Node | null) => void;
-  onCompositionChange: (composing: boolean, index: number) => void;
   onCommitCode: (index: number, code: string, language?: string) => void;
   onInlineClick: (event: React.MouseEvent<HTMLElement>) => boolean;
   onApplyBlockSource: (index: number, source: string) => void;
@@ -127,7 +127,7 @@ function observeHandleMeasure(target: Element, measure: () => void) {
 
 const WysiwygBlockView = memo(function WysiwygBlockView({
   index, kind, source, startLine, editable, skipRender, renderRevision, documentPath, workflowViewerEnabled,
-  scrollRoot, theme, foldKey, folded, foldIndentation, onToggleFold, registerElement, onInput, onKeyDown, onBlurBlock, onCompositionChange,
+  scrollRoot, theme, foldKey, folded, foldIndentation, onToggleFold, registerElement, onInput, onBlurBlock,
   onCommitCode, onInlineClick, onApplyBlockSource, onEndSourceEditing, onDeleteBlock, onInsertAfter, onMove, onDuplicate, onRetype, count,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
@@ -350,12 +350,9 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
         contentEditable={editable}
         suppressContentEditableWarning
         spellCheck={false}
-        onInput={() => { foldCacheRef.current = { key: '', items: [] }; onInput(index); }}
+        onInput={() => { foldCacheRef.current = { key: '', items: [] }; }}
         onFocus={(event) => { if (kind === 'table' && (event.target as Element).closest('td,th')) onInput(index); }}
-        onKeyDown={(event) => onKeyDown(event, index)}
         onBlur={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) onBlurBlock(index, event.relatedTarget as Node | null); }}
-        onCompositionStart={() => onCompositionChange(true, index)}
-        onCompositionEnd={() => onCompositionChange(false, index)}
         onClick={(event) => {
           if (toggleListFoldAt(event)) return;
           if (kind === 'fence') { setCodeEditing(true); return; }
@@ -653,7 +650,7 @@ export function WysiwygEditor() {
     }
     if (event.key === 'Delete' && !event.nativeEvent.isComposing) {
       // 与退格镜像：块尾的 Delete 把下一段吸进当前块（只吸不带块前缀的段落）。
-      if (session.handleDelete(index)) event.preventDefault();
+      if (session.handleDelete(index) || session.isCaretAtBlockEnd(index)) event.preventDefault();
       return;
     }
     if (
@@ -669,6 +666,94 @@ export function WysiwygEditor() {
       return;
     }
   }, [session]);
+
+  const blockIndexForTarget = useCallback((target: EventTarget | null): number | null => {
+    const element = target instanceof Element ? target : null;
+    const block = element?.closest<HTMLElement>('[data-block-index]');
+    if (block?.dataset.blockIndex !== undefined) {
+      const index = Number(block.dataset.blockIndex);
+      if (Number.isInteger(index)) return index;
+    }
+    const selection = surfaceRef.current?.ownerDocument.getSelection();
+    const focus = selection?.focusNode;
+    const focusElement = focus?.nodeType === Node.ELEMENT_NODE ? focus as Element : focus?.parentElement;
+    const selectedBlock = focusElement?.closest<HTMLElement>('[data-block-index]');
+    if (selectedBlock?.dataset.blockIndex === undefined) return null;
+    const index = Number(selectedBlock.dataset.blockIndex);
+    return Number.isInteger(index) ? index : null;
+  }, []);
+
+  const handleSurfaceInput = useCallback((event: React.FormEvent<HTMLElement>) => {
+    const index = blockIndexForTarget(event.target);
+    const block = index === null ? null : session.getBlocks()[index];
+    if (!block || (!block.editable && block.kind !== 'table')) return;
+    session.handleInput(index);
+  }, [blockIndexForTarget, session]);
+
+  const handleSurfaceKeyDown = useCallback((event: React.KeyboardEvent<HTMLElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('button, input, textarea, select, .wysiwyg-block-actions, .wysiwyg-source-layer, .wysiwyg-code-layer')) return;
+    if (event.nativeEvent.isComposing || event.nativeEvent.keyCode === 229) return;
+    if (event.key === 'Backspace' || event.key === 'Delete' || event.key === 'Enter') {
+      const selection = session.getSelectionOffsets();
+      if (selection.from !== selection.to) {
+        const fromBlock = session.blockIndexAtOffset(selection.from);
+        const toBlock = session.blockIndexAtOffset(selection.to);
+        if (fromBlock !== null && toBlock !== null && fromBlock !== toBlock) {
+          event.preventDefault();
+          session.replaceRange(selection.from, selection.to, event.key === 'Enter' ? session.getSnapshot().document.eol : '');
+          return;
+        }
+      }
+    }
+    const index = blockIndexForTarget(event.target);
+    if (index !== null) handleBlockKeyDown(event, index);
+  }, [blockIndexForTarget, handleBlockKeyDown, session]);
+
+  const handleSurfaceBeforeInput = useCallback((event: React.FormEvent<HTMLElement>) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('button, input, textarea, select, .wysiwyg-block-actions, .wysiwyg-source-layer, .wysiwyg-code-layer')) return;
+    if (blockIndexForTarget(event.target) === null) { event.preventDefault(); return; }
+    const input = event.nativeEvent as InputEvent;
+    if (input.isComposing || typeof input.data !== 'string') return;
+    const selection = session.getSelectionOffsets();
+    if (selection.from !== selection.to && session.blockIndexAtOffset(selection.from) !== session.blockIndexAtOffset(selection.to)) {
+      event.preventDefault();
+      session.replaceRange(selection.from, selection.to, escapeInlineText(input.data));
+    }
+  }, [blockIndexForTarget, session]);
+
+  const handleSurfaceCut = useCallback((event: React.ClipboardEvent<HTMLElement>) => {
+    const selectionOffsets = session.getSelectionOffsets();
+    if (selectionOffsets.from === selectionOffsets.to) return;
+    const fromBlock = session.blockIndexAtOffset(selectionOffsets.from);
+    const toBlock = session.blockIndexAtOffset(selectionOffsets.to);
+    if (fromBlock === null || toBlock === null || fromBlock === toBlock) return;
+
+    const selection = event.currentTarget.ownerDocument.getSelection();
+    if (!selection || selection.rangeCount === 0 || !event.clipboardData) return;
+    const container = event.currentTarget.ownerDocument.createElement('div');
+    container.append(selection.getRangeAt(0).cloneContents());
+    event.clipboardData.setData('text/html', container.innerHTML);
+    event.clipboardData.setData('text/plain', selection.toString());
+    event.preventDefault();
+    session.replaceRange(selectionOffsets.from, selectionOffsets.to, '');
+  }, [session]);
+
+  const handleSurfaceComposition = useCallback((event: React.CompositionEvent<HTMLElement>, composing: boolean) => {
+    const target = event.target instanceof Element ? event.target : null;
+    if (target?.closest('textarea, input, select, .wysiwyg-source-layer, .wysiwyg-code-layer')) return;
+    if (composing) {
+      const selection = session.getSelectionOffsets();
+      if (selection.from !== selection.to && session.blockIndexAtOffset(selection.from) !== session.blockIndexAtOffset(selection.to)) {
+        // compositionstart 之后浏览器会直接删除选区。先同步合并源码和 DOM，
+        // 把候选文字限制在一个块内，避免原生跨块删除破坏 React 管理的块外壳。
+        flushSync(() => session.replaceRange(selection.from, selection.to, ''));
+      }
+    }
+    const index = blockIndexForTarget(event.target);
+    if (index !== null) session.markComposing(composing, index);
+  }, [blockIndexForTarget, session]);
 
   // 点击行内结构（链接 / 公式 / 图片）：用点击位置反查源码目标，复用既有弹窗。
   // 返回值告诉块视图点击是否已被消化——未消化时只读块会改为进入就地源码编辑。
@@ -734,7 +819,6 @@ export function WysiwygEditor() {
 
   const handleInput = useCallback((index: number) => session.handleInput(index), [session]);
   const handleBlurBlock = useCallback((index: number, nextFocus: Node | null) => session.normalizeBlock(index, nextFocus), [session]);
-  const handleCompositionChange = useCallback((composing: boolean, index: number) => session.markComposing(composing, index), [session]);
   const handleCommitCode = useCallback((index: number, code: string, language?: string) => { session.writeCodeBlock(index, code, language); }, [session]);
   const handleDeleteBlock = useCallback((index: number) => { session.deleteBlock(index); }, [session]);
   const editInsertedSource = useCallback(() => {
@@ -846,8 +930,8 @@ export function WysiwygEditor() {
         if (!last) return;
         const lastElement = blockElementsRef.current.get(lastIndex);
         if (lastElement && event.clientY < lastElement.getBoundingClientRect().bottom) return;
-        if (last.kind === 'paragraph' && last.source.trim().length === 0) {
-          session.setSelectionOffsets(last.offset);
+        if (last.kind === 'paragraph') {
+          session.setSelectionOffsets(last.offset + last.length);
           session.focus();
         } else {
           session.insertParagraphAfter(lastIndex);
@@ -896,7 +980,18 @@ export function WysiwygEditor() {
       }}
       style={{ fontFamily: settings.appearance.font_family }}
     >
-      <article className="wysiwyg-document preview-document markdown-body">
+      {/* 共用编辑宿主允许原生选区跨块；输入事件按真实选区路由回所属块。 */}
+      <article
+        className="wysiwyg-document preview-document markdown-body"
+        contentEditable={true}
+        suppressContentEditableWarning
+        onBeforeInput={handleSurfaceBeforeInput}
+        onInput={handleSurfaceInput}
+        onKeyDown={handleSurfaceKeyDown}
+        onCut={handleSurfaceCut}
+        onCompositionStart={event => handleSurfaceComposition(event, true)}
+        onCompositionEnd={event => handleSurfaceComposition(event, false)}
+      >
         {blockDocument.blocks.slice(0, renderBudget).map((block, index) => {
           // 折叠的标题分节不渲染（内容仍在源码里，展开后原样回来）。
           if (hiddenBlocks.has(index)) return null;
@@ -922,9 +1017,7 @@ export function WysiwygEditor() {
               onToggleFold={toggleHeadingFold}
               registerElement={registerElement}
               onInput={handleInput}
-              onKeyDown={handleBlockKeyDown}
               onBlurBlock={handleBlurBlock}
-              onCompositionChange={handleCompositionChange}
               onCommitCode={handleCommitCode}
               onInlineClick={handleInlineClick}
               onApplyBlockSource={handleApplyBlockSource}

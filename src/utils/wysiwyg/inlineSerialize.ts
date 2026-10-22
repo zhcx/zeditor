@@ -19,7 +19,7 @@ export interface MarkdownPiece {
   path: number[];
   /** text 片段对应节点内的原文，可按字映射；syntax 片段没有对应文本。 */
   kind: 'text' | 'syntax';
-  /** Wiki/脚注作为源码原子，DOM 内的光标只能吸附到语法两侧。 */
+  /** Wiki、脚注和 BR 的光标定位在节点两侧；BR 之后可以是没有文本节点的空行。 */
   atomic?: boolean;
   /** text 片段：原文起始下标。 */
   textFrom?: number;
@@ -144,7 +144,7 @@ function emitNode(node: InlineNode, path: number[], options: SerializeOptions, o
 
   if (node.tag === 'br') {
     if (node.attrs['data-wysiwyg-placeholder'] !== undefined) return;
-    out.push({ text: '\n', path, kind: 'syntax' });
+    out.push({ text: '\n', path, kind: 'syntax', atomic: true });
     return;
   }
 

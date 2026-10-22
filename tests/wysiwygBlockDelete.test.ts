@@ -1,7 +1,7 @@
 import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { WysiwygSession } from '../src/components/Wysiwyg/wysiwygSession.ts';
-import { splitMarkdownDocument } from '../src/utils/wysiwyg/blocks.ts';
+import { splitEditableMarkdownDocument } from '../src/utils/wysiwyg/blocks.ts';
 
 interface FakeText { nodeType: number; textContent: string; parentNode: unknown; parentElement: unknown }
 
@@ -35,7 +35,7 @@ function multiBlockFixture(source: string, caretIndex: number) {
   };
   const document = { getSelection: () => selection, createRange, activeElement: undefined };
 
-  for (const [index, block] of splitMarkdownDocument(source).blocks.entries()) {
+  for (const [index, block] of splitEditableMarkdownDocument(source).blocks.entries()) {
     const entry: FakeText = { nodeType: 3, textContent: block.source, parentNode: null, parentElement: null };
     const host = {
       nodeType: 1,
@@ -62,14 +62,17 @@ function multiBlockFixture(source: string, caretIndex: number) {
     getSurface: () => surface,
     getBlockElement: index => elements.get(index) ?? null,
   });
-  return { session, persisted, focusCalls, setText: (index: number, text: string) => { const entry = texts.get(index); if (entry) entry.textContent = text; } };
+  return { session, persisted, focusCalls, setText: (index: number, text: string) => {
+    const entry = texts.get(index);
+    if (entry) entry.textContent = text + (entry.textContent.match(/(?:\r\n|\n|\r)+$/)?.[0] ?? '');
+  } };
 }
 
 it('absorbs the next paragraph on forward delete at the end of a block', () => {
   const fixture = multiBlockFixture('一\n\n二', 0);
   assert.equal(fixture.session.handleDelete(0), true);
-  assert.equal(fixture.session.getSource(), '一二');
-  assert.equal(fixture.session.getCaretOffset(), 1, '光标停在拼接处');
+  assert.equal(fixture.session.getSource(), '一\n二');
+  assert.equal(fixture.session.getCaretOffset(), 2, '光标停在当前可编辑空行的末尾');
 });
 
 it('keeps the current block prefix when absorbing a paragraph', () => {
@@ -85,9 +88,9 @@ it('refuses to absorb a block that carries its own prefix', () => {
 });
 
 it('deletes an empty block instead of merging when it has no content', () => {
-  const fixture = multiBlockFixture('一\n\n\n\n二', 1);
+  const fixture = multiBlockFixture('- 一\n\n', 1);
   assert.equal(fixture.session.handleDelete(1), true);
-  assert.equal(fixture.session.getSource(), '一\n\n二');
+  assert.equal(fixture.session.getSource(), '- 一');
   assert.equal(fixture.session.getCaretOffset(), 3);
 });
 

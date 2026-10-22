@@ -85,7 +85,9 @@ export function splitBlock(input: { source: string; kind: WysiwygBlockKind; care
     const separator = head.length === 0 ? '' : `${eol}${marker.trimEnd()}${eol}`;
     return { head, tail: `${marker}${rest}`, separator };
   }
-  return { head, tail: rest, separator: eol.repeat(2) };
+  // Markdown 渲染器启用了 breaks：单换行仍显示为可见换行，避免 WYSIWYG 中
+  // 普通回车看起来只换一行、源码却多出一个空行。
+  return { head, tail: rest, separator: eol };
 }
 
 /**
