@@ -104,6 +104,44 @@ function indexLines(source: string): SourceLine[] {
   return lines;
 }
 
+/** 普通软换行在编辑视图里各自成块；跨行格式仍保留完整语法块。 */
+function projectParagraphLines(block: WysiwygBlock): WysiwygBlock[] {
+  if (block.kind !== 'paragraph' || !block.editable) return [block];
+  const trailing = block.source.match(/(?:\r\n|\n|\r)+$/)?.[0] ?? '';
+  const body = block.source.slice(0, block.source.length - trailing.length);
+  const lines = indexLines(body);
+  if (lines.length < 2) return [block];
+  const inline = markdownRenderer.parse(body, {}).find(token => token.type === 'inline');
+  if (!inline?.children || inline.children.some(token => token.type === 'html_inline')) return [block];
+  let depth = 0;
+  let breaks = 0;
+  for (const token of inline.children) {
+    // 两空格或反斜杠是硬换行语法，脱离上下文单独渲染会改变内容。
+    if (token.type === 'hardbreak') return [block];
+    if (token.type === 'softbreak') {
+      if (depth !== 0) return [block];
+      breaks += 1;
+    } else depth += token.nesting;
+  }
+  // 多行行内代码会吞换行；引用定义等内容在单行解析时可能不再生成段落。
+  if (breaks !== lines.length - 1 || lines.some(line => {
+    const tokens = markdownRenderer.parse(line.text, {});
+    return tokens.length !== 3 || tokens[0].type !== 'paragraph_open';
+  })) return [block];
+  return lines.map((line, index) => {
+    const last = index === lines.length - 1;
+    const source = line.text + (last ? trailing : '');
+    return {
+      ...block,
+      source,
+      offset: block.offset + line.start,
+      length: source.length,
+      startLine: block.startLine + index,
+      endLine: last ? block.endLine : block.startLine + index,
+    };
+  });
+}
+
 function splitDocument(source: string, editableParagraphs: boolean): WysiwygDocument {
   const eol = detectEol(source);
   const lines = indexLines(source);
@@ -231,7 +269,7 @@ function splitDocument(source: string, editableParagraphs: boolean): WysiwygDocu
     editableBlocks.push(...emptyOffsets.map(offset => emptyParagraph(offset)));
   });
 
-  return { source, eol, blocks: editableBlocks };
+  return { source, eol, blocks: editableParagraphs ? editableBlocks.flatMap(projectParagraphLines) : editableBlocks };
 }
 
 /** 原始 Markdown 的语法块索引；块间分隔符保持在块外。 */
@@ -239,7 +277,7 @@ export function splitMarkdownDocument(source: string): WysiwygDocument {
   return splitDocument(source, false);
 }
 
-/** 编辑投影让段落拥有相邻空行，保证每个源码光标位置有可编辑 DOM 落点。 */
+/** 编辑投影按普通正文行切块，并保留段落末尾空行的光标落点。 */
 export function splitEditableMarkdownDocument(source: string): WysiwygDocument {
   return splitDocument(source, true);
 }
@@ -274,6 +312,8 @@ function replaceSource(doc: WysiwygDocument, block: WysiwygBlock, source: string
  */
 function canUpdateBlockInPlace(block: WysiwygBlock, source: string, editableParagraphs: boolean): boolean {
   if (!block.editable || (block.kind !== 'paragraph' && block.kind !== 'heading')) return false;
+  // 普通行与相邻行可能共同闭合行内语法，此时必须重算原始段落的投影边界。
+  if (editableParagraphs && block.kind === 'paragraph' && /[*_`[\]<>\\]/.test(source + block.source)) return false;
   if (!source.trim()) return false;
   // 改变缩进可能把段落吸进前面的列表；改变换行可能影响空块位置和文档 EOL。
   if (source.match(/^[ \t]*/)?.[0] !== block.source.match(/^[ \t]*/)?.[0]) return false;

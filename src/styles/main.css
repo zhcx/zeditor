@@ -97,6 +97,7 @@
   --font-content: "Microsoft YaHei", "Microsoft YaHei UI", "Segoe UI", system-ui, -apple-system, BlinkMacSystemFont, sans-serif;
   --font-content-size: 14px;
   --font-content-line-height: 1.6;
+  --font-content-line-height-px: 20px;
   --font-reading: "Iowan Old Style", "Noto Serif SC", "Source Han Serif SC", "Songti SC", Georgia, serif;
   --font-mono: "SFMono-Regular", "Cascadia Code", "JetBrains Mono", Consolas, "Liberation Mono", monospace;
 
@@ -4078,6 +4079,17 @@ textarea {
   content: none;
 }
 
+/* 连续软换行仍属同一段落，定位条只跟随当前源码行。 */
+.preview-document .preview-source-line.is-active-source-block {
+  box-shadow: none;
+}
+
+.preview-document .preview-source-line.is-active-source-block::before {
+  content: '';
+  top: 0;
+  bottom: 0;
+}
+
 .preview-document .preview-list-item-content {
   box-decoration-break: clone;
   -webkit-box-decoration-break: clone;
@@ -4531,7 +4543,7 @@ textarea {
 .preview-document p,
 .preview-document li {
   color: var(--text-secondary);
-  line-height: 1.8;
+  line-height: var(--font-content-line-height-px);
 }
 
 .preview-document p { margin: 0.92em 0; }
@@ -5236,7 +5248,7 @@ textarea {
 .preview-document h1 { margin-bottom: 1.3em; font-size: 2.18em; }
 .preview-document h2 { margin-top: 2.25em; }
 .preview-document p,
-.preview-document li { line-height: 1.84; }
+.preview-document li { line-height: var(--font-content-line-height-px); }
 .preview-document {
   min-width: 0;
   overflow-wrap: anywhere;

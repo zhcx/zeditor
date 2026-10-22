@@ -182,7 +182,7 @@ function App() {
   const saveRecoverySnapshotAs = useCallback(async (snapshotId: string) => {
     const snapshot = useAppStore.getState().recoverySnapshots.find(item => item.id === snapshotId);
     if (!snapshot) return;
-    const baseName = await resolveSaveBaseName(snapshot.title, snapshot.content);
+    const baseName = resolveSaveBaseName(snapshot.title, snapshot.content);
     const selected = await chooseSaveFile({
       title: '另存恢复的文档',
       defaultPath: `${baseName}.md`,
@@ -214,7 +214,7 @@ function App() {
   const saveConflictCopy = useCallback(async () => {
     const conflict = useAppStore.getState().fileConflict;
     if (!conflict) return;
-    const baseName = await resolveSaveBaseName(conflict.title, conflict.localContent);
+    const baseName = resolveSaveBaseName(conflict.title, conflict.localContent);
     const selected = await chooseSaveFile({
       title: '另存冲突副本',
       defaultPath: `${baseName}-我的版本.md`,
@@ -364,9 +364,9 @@ function App() {
           }
         },
         chooseSavePath: async tab => {
-          // 与 TabsBar/另存为保持一致：未命名文档先尝试 AI 文件名建议。
+          // 与另存为保持一致：本地提取文件名，关闭文稿时也不等待 AI。
           const fullTab = useAppStore.getState().tabs.find(item => item.id === tab.id);
-          const baseName = await resolveSaveBaseName(tab.title, fullTab?.content || '');
+          const baseName = resolveSaveBaseName(tab.title, fullTab?.content || '');
           const selected = await chooseSaveFile({
             title: `保存“${tab.title}”`,
             defaultPath: `${baseName}.md`,
@@ -831,6 +831,8 @@ function App() {
     root.style.setProperty('--font-content', contentFontStack(settings.appearance.font_family));
     root.style.setProperty('--font-content-size', `${settings.appearance.font_size}px`);
     root.style.setProperty('--font-content-line-height', String(settings.appearance.line_height));
+    // Monaco 的行高取整到像素；预览正文沿用同一数值，避免逐行累积偏差。
+    root.style.setProperty('--font-content-line-height-px', `${Math.round(settings.appearance.font_size * settings.appearance.line_height)}px`);
     for (const [key, value] of Object.entries(typographyCssVariables({ ui_font_size: settings.appearance.ui_font_size, letter_spacing: settings.appearance.letter_spacing }))) root.style.setProperty(key, value);
   }, [
     settings.appearance.font_family,

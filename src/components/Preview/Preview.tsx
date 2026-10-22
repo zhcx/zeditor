@@ -98,7 +98,7 @@ export function Preview({ className, style, onScrollContainerReady, onContentRen
     };
 
     // 渲染与增强都在共享管线里：与所见即所得模式共用同一套规则。
-    container.innerHTML = renderMarkdownToHtml(deferredContent);
+    container.innerHTML = renderMarkdownToHtml(deferredContent, { sourceLineAnchors: true });
     container.querySelectorAll('pre > code').forEach(code => {
       const pre = code.parentElement;
       if (!pre) return;

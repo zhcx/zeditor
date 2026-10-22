@@ -903,8 +903,7 @@ ${beforeText.slice(-2000)}`,
     }
   },
 
-  // 为「保存/另存为」对话框建议文件名。未启用 AI 或请求失败时返回 null，
-  // 调用方据此回退到默认文件名；短超时避免拖慢保存对话框的弹出。
+  // 可选的 AI 文件名建议能力；普通保存窗口使用本地名称，不调用此方法。
   suggestFilename: async (content) => {
     const settings = useAppStore.getState().settings;
 

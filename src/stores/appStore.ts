@@ -68,7 +68,7 @@ export interface Settings {
     fold_headings?: boolean;
     /** 折叠缩进：把缩进内容（如列表）折叠起来。 */
     fold_indentation?: boolean;
-    /** 缩进参考线：在缩进的行之间显示参考线。 */
+    /** 缩进参考线：显示嵌套列表层级，普通段落缩进不画线。 */
     indent_guides?: boolean;
     /** 在状态栏显示当前标签页的视图状态按钮，点击可切换视图状态。 */
     show_view_state_button?: boolean;

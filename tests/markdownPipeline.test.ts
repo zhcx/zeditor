@@ -8,6 +8,30 @@ it('writes source line anchors on block tokens', () => {
   assert.match(html, /<p data-source-line="3">/);
 });
 
+it('locates each of six soft-broken preview lines without changing paragraph semantics', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const source = ['第一行', '第二行', '第三行', '第四行', '第五行', '第六行', '', '', '', '末段'].join(eol);
+    const html = renderMarkdownSource(source, { sourceLineAnchors: true });
+    assert.deepEqual(Array.from(html.matchAll(/class="preview-source-line" data-source-line="(\d+)"/g), match => Number(match[1])), [1, 2, 3, 4, 5, 6]);
+    assert.equal((html.match(/<p /g) ?? []).length, 2);
+    assert.match(html, /<p data-source-line="10">末段<\/p>/);
+    assert.doesNotMatch(renderMarkdownSource(source), /preview-source-line/);
+  }
+});
+
+it('keeps formatting balanced across preview line anchors and maps hard breaks', () => {
+  const html = renderMarkdownSource('**第一行\n第二行**  \n[第三行](https://example.com)', { sourceLineAnchors: true });
+  assert.match(html, /data-source-line="1"><strong>第一行<\/strong><\/span><br>/);
+  assert.match(html, /data-source-line="2"><strong>第二行<\/strong><\/span><br>/);
+  assert.match(html, /data-source-line="3"><a href="https:\/\/example.com">第三行<\/a><\/span>/);
+});
+
+it('keeps nested blocks and non-line-preserving inline syntax on their existing anchors', () => {
+  for (const source of ['> 第一行\n> 第二行', '- 第一行\n  第二行', '`跨\n行`\n正文', '<em>第一行\n第二行</em>']) {
+    assert.doesNotMatch(renderMarkdownSource(source, { sourceLineAnchors: true }), /preview-source-line/);
+  }
+});
+
 it('keeps fenced code away from math and languages intact', () => {
   const html = renderMarkdownSource('```javascript\nconst price = "$5";\n```\n');
   assert.match(html, /<code class="language-javascript">/);

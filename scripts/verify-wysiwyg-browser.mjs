@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // 可选的浏览器回归：先启动开发服务器，运行环境需提供 Playwright。
@@ -69,6 +69,37 @@ try {
       assert.equal(await getSource(), '第一行\n第二行');
     }
   });
+  await test('line blocks: eight ordinary lines remain independent through mode switches and block deletion', async () => {
+    for (const eol of ['\n', '\r\n']) {
+      const lines = Array.from({ length: 8 }, (_, index) => `正文第${index + 1}行`);
+      const source = [...lines, '', '', ' 后段甲', ' 后段乙'].join(eol);
+      await setDocument(source);
+      for (let cycle = 0; cycle < 3; cycle++) {
+        assert.deepEqual(await page.locator('.wysiwyg-block').evaluateAll(nodes => nodes.slice(0, 8).map(node => node.textContent.trim())), lines);
+        assert.deepEqual(await page.locator('.wysiwyg-block').evaluateAll(nodes => nodes.slice(0, 8).map(node => Number(node.dataset.sourceLine))), [1, 2, 3, 4, 5, 6, 7, 8]);
+        await page.locator('.status-view-state').click();
+        await page.locator('.monaco-editor').waitFor();
+        assert.equal(await getSource(), source);
+        await page.locator('.status-view-state').click();
+        await page.locator('.wysiwyg-block').first().waitFor();
+      }
+      await caretIn(page.locator('.wysiwyg-block').nth(3), lines[3], lines[3].length);
+      await page.keyboard.insertText('修改');
+      assert.equal(await getSource(), source.replace(lines[3], `${lines[3]}修改`));
+      const shell = page.locator('.wysiwyg-block-shell').nth(3);
+      await shell.hover();
+      await shell.locator('.wysiwyg-block-handle').click();
+      await shell.locator('.wysiwyg-block-menu .is-danger').click();
+      const removed = source.replace(`${lines[3]}${eol}`, '');
+      assert.equal(await getSource(), removed);
+      await page.keyboard.press('Control+z');
+      assert.equal(await getSource(), source.replace(lines[3], `${lines[3]}修改`));
+      if (process.env.WYSIWYG_TEST_OUTPUT) {
+        await mkdir(process.env.WYSIWYG_TEST_OUTPUT, { recursive: true });
+        await page.screenshot({ path: join(process.env.WYSIWYG_TEST_OUTPUT, 'independent-line-blocks.png') });
+      }
+    }
+  });
   await test('line editing: repeated Enter creates exactly one source newline per key', async () => {
     await setDocument('第一行');
     await caretIn(page.locator('.wysiwyg-block').first(), '第一行', 3);
@@ -76,10 +107,74 @@ try {
     await page.keyboard.insertText('最后一行');
     assert.equal(await getSource(), '第一行\n\n\n\n最后一行');
   });
+  await test('preview regression: six WYSIWYG lines locate independently in source mode', async () => {
+    await setDocument('');
+    await page.locator('.wysiwyg-block').first().click();
+    const lines = ['第一行内容', '第二行内容', '第三行内容', '第四行内容', '第五行内容', '第六行内容'];
+    for (const [index, text] of lines.entries()) {
+      if (index) await page.keyboard.press('Enter');
+      await page.keyboard.insertText(text);
+    }
+    const source = lines.join('\n');
+    assert.equal(await getSource(), source);
+    await page.locator('.status-view-state').click();
+    try {
+      await page.waitForSelector('.monaco-editor');
+      await page.waitForFunction(() => document.querySelectorAll('.preview-source-line').length === 6);
+      for (let line = 1; line <= 6; line++) {
+        await page.evaluate(async line => {
+          const { useAppStore } = await import('/src/stores/appStore.ts');
+          const editor = useAppStore.getState().editorView;
+          editor.setSelection(editor.line(line).from);
+          editor.focus();
+        }, line);
+        const active = page.locator(`.preview-source-line.is-active-source-block[data-source-line="${line}"]`);
+        await active.waitFor();
+        const geometry = await active.evaluate(node => ({
+          height: node.getBoundingClientRect().height,
+          paragraphHeight: node.closest('p').getBoundingClientRect().height,
+          indicator: getComputedStyle(node, '::before').content,
+        }));
+        assert.ok(geometry.height < geometry.paragraphHeight / 2, JSON.stringify(geometry));
+        assert.equal(geometry.indicator, '""');
+        await page.locator(`.preview-source-line[data-source-line="${7 - line}"]`).click();
+        await page.waitForFunction(async line => {
+          const { useAppStore } = await import('/src/stores/appStore.ts');
+          const editor = useAppStore.getState().editorView;
+          return editor.lineAt(editor.state.selection.main.head).number === line;
+        }, 7 - line);
+      }
+      assert.equal(await getSource(), source);
+      if (process.env.WYSIWYG_TEST_OUTPUT) {
+        await mkdir(process.env.WYSIWYG_TEST_OUTPUT, { recursive: true });
+        await page.screenshot({ path: join(process.env.WYSIWYG_TEST_OUTPUT, 'preview-line-indicator.png') });
+      }
+    } finally {
+      await page.locator('.status-view-state').click();
+      await page.waitForSelector('.wysiwyg-block');
+    }
+  });
+  await test('preview regression: About shows the application version and its release notes', async () => {
+    const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+    await page.locator('.app-menu-trigger').click();
+    await page.getByRole('button', { name: '关于 Zeditor', exact: true }).click();
+    const help = page.locator('.help-content');
+    await help.waitFor();
+    try {
+      const text = await help.innerText();
+      assert.ok(text.includes(`Zeditor v${pkg.version}`));
+      assert.ok(!text.includes('Zeditor v0.6.3'));
+      assert.ok(!text.includes('暂无本版本更新说明'));
+      assert.ok(text.includes('数据恢复与文件保护'));
+      if (process.env.WYSIWYG_TEST_OUTPUT) {
+        await page.screenshot({ path: join(process.env.WYSIWYG_TEST_OUTPUT, 'about-release-notes.png') });
+      }
+    } finally { await page.locator('.modal-close').click(); }
+  });
   await test('line editing: editing rendered soft breaks never doubles LF or CRLF', async () => {
     for (const eol of ['\n', '\r\n']) {
       await setDocument(`第一行${eol}第二行`);
-      await caretIn(page.locator('.wysiwyg-block').first(), '第二行', 3);
+      await caretIn(page.locator('.wysiwyg-block').filter({ hasText: '第二行' }), '第二行', 3);
       await page.keyboard.insertText('修改');
       assert.equal(await getSource(), `第一行${eol}第二行修改`);
     }
@@ -145,7 +240,7 @@ try {
   });
   await test('line editing: CRLF Enter and input after a blank document retain line positions', async () => {
     await setDocument('第一行\r\n第二行');
-    await caretIn(page.locator('.wysiwyg-block').first(), '第二行', 3);
+    await caretIn(page.locator('.wysiwyg-block').filter({ hasText: '第二行' }), '第二行', 3);
     await page.keyboard.press('Enter');
     await page.keyboard.insertText('第三行');
     assert.equal(await getSource(), '第一行\r\n第二行\r\n第三行');
@@ -529,20 +624,20 @@ try {
   });
   await test('paragraph height stays stable across Enter and write-back re-render', async () => {
     await setDocument('');
-    const shellHeight = index => page.locator('.wysiwyg-block-shell').nth(index).evaluate(node => node.getBoundingClientRect().height);
+    const contentHeight = () => page.locator('.wysiwyg-block-shell').evaluateAll(nodes => nodes.reduce((sum, node) => sum + node.getBoundingClientRect().height, 0));
     await page.locator('.wysiwyg-block').first().click();
     await page.keyboard.type('AAA');
     await page.waitForTimeout(400);
-    const typed = await shellHeight(0);
+    const typed = await contentHeight();
     await page.keyboard.press('Enter');
     await page.waitForTimeout(400);
-    const afterEnter = await shellHeight(0);
+    const afterEnter = await contentHeight();
     await page.keyboard.type('BBB');
     await page.waitForTimeout(400);
     assert.equal(await getSource(), 'AAA\nBBB');
     // 输入态与重建后的 <p> 必须同高：此前 21px 会在写回后跳成 25.76px。
     const lineHeight = await page.locator('.wysiwyg-block p').first().evaluate(node => Number.parseFloat(getComputedStyle(node).lineHeight));
-    assert.ok(Math.abs(afterEnter - (await shellHeight(0))) < 0.5, 'typing on the new line must not change its height');
+    assert.ok(Math.abs(afterEnter - (await contentHeight())) < 0.5, 'typing on the new line must not change its height');
     assert.ok(Math.abs(afterEnter - typed - lineHeight) < 0.5, `Enter should add exactly one visual line: ${typed} -> ${afterEnter}`);
   });
   await test('block source editing stays inline and writes back', async () => {
@@ -589,7 +684,7 @@ try {
         useAppStore.setState({ tabs: state.tabs.filter(tab => tab.id === state.activeTabId), sidebarVisible: true });
         useAIStore.setState({ proofreadPanelVisible: false, proofreadResults: [] });
       });
-      await caretIn(page.locator('.wysiwyg-block').first(), '第二行', 3);
+      await caretIn(page.locator('.wysiwyg-block').filter({ hasText: '第二行' }), '第二行', 3);
       await page.screenshot({ path: join(output, 'wysiwyg.png') });
       await page.locator('.status-view-state').click();
       await page.waitForSelector('.monaco-editor');

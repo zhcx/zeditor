@@ -17,7 +17,7 @@ test('preview resolves local media through the desktop command and builds player
   assert.match(rendered, /data-zeditor-media-src="demo\.mp4"/);
   assert.match(rendered, /\[\^note\]:/);
   assert.doesNotMatch(rendered, /zeditor_footnote_prefix/);
-  assert.match(preview, /renderMarkdownToHtml\(deferredContent\)/);
+  assert.match(preview, /renderMarkdownToHtml\(deferredContent(?:,\s*\{[^}]*\})?\)/);
   assert.match(pipeline, /data-zeditor-media-key/);
   assert.match(enhancers, /resolveMediaSources\(options\.documentPath,\s*localSources\)/);
   assert.match(enhancers, /document\.createElement\(placeholder\.kind === 'audio' \? 'audio' : 'video'\)/);

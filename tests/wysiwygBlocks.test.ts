@@ -2,6 +2,36 @@ import { it } from 'node:test';
 import assert from 'node:assert/strict';
 import { splitMarkdownDocument, replaceBlockSource, splitEditableMarkdownDocument, replaceEditableBlockSource } from '../src/utils/wysiwyg/blocks.ts';
 
+it('projects eight ordinary source lines into independent editable blocks without changing source', () => {
+  for (const eol of ['\n', '\r\n']) {
+    const lines = Array.from({ length: 8 }, (_, index) => `正文${index + 1}`);
+    const source = [...lines, '', '', '后段甲', '后段乙'].join(eol);
+    const document = splitEditableMarkdownDocument(source);
+    assert.equal(document.source, source);
+    assert.deepEqual(document.blocks.slice(0, 8).map(block => block.source.replace(/(?:\r\n|\n|\r)+$/, '')), lines);
+    assert.deepEqual(document.blocks.map(block => block.startLine), [1, 2, 3, 4, 5, 6, 7, 8, 11, 12]);
+    for (const block of document.blocks) assert.equal(source.slice(block.offset, block.offset + block.length), block.source);
+    const edited = replaceEditableBlockSource(document, document.blocks[3], '只改第四行');
+    assert.equal(edited.source, source.replace('正文4', '只改第四行'));
+    assert.deepEqual(edited, splitEditableMarkdownDocument(edited.source));
+  }
+});
+
+it('keeps cross-line inline syntax and Markdown structures intact in the editing projection', () => {
+  for (const source of ['**跨行\n加粗**', '[跨行\n链接](https://example.com)', '`跨行\n代码`', '<em>跨行\n文字</em>', '前\\\n后', '前  \n后', '- 项目甲\n- 项目乙', '> 引用甲\n> 引用乙', '```\n代码甲\n代码乙\n```', '| 甲 | 乙 |\n| --- | --- |\n| a | b |']) {
+    const document = splitEditableMarkdownDocument(source);
+    assert.equal(document.blocks.length, 1, source);
+    assert.equal(document.blocks[0].source, source);
+  }
+});
+
+it('rechecks neighboring line projections when editing closes cross-line formatting', () => {
+  const document = splitEditableMarkdownDocument('**前行\n后行');
+  assert.equal(document.blocks.length, 2);
+  const next = replaceEditableBlockSource(document, document.blocks[1], '后行**');
+  assert.deepEqual(next, splitEditableMarkdownDocument('**前行\n后行**'));
+});
+
 it('keeps editable trailing and inter-paragraph lines in the owning paragraph', () => {
   for (const eol of ['\n', '\r\n', '\r']) {
     const source = `前${eol}${eol}后${eol}${eol}`;
