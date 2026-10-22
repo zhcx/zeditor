@@ -60,6 +60,9 @@ jobs:
         with:
           workspaces: ./src-tauri -> target
 
+      - name: Upgrade npm for current registry audit endpoint
+        run: npm install --global npm@11
+
       - name: Install locked frontend dependencies
         run: npm ci
 
@@ -68,7 +71,7 @@ jobs:
           npm run lint
           npm test
           npm run build
-          npm audit --audit-level=high
+          npm audit --package-lock-only --audit-level=high
 
       - name: Check Rust quality
         working-directory: src-tauri
