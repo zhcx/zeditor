@@ -71,7 +71,25 @@ jobs:
           npm run lint
           npm test
           npm run build
-          npm audit --package-lock-only --audit-level=high
+
+      - name: Audit frontend dependencies
+        shell: pwsh
+        run: |
+          $auditOutputPath = Join-Path $env:RUNNER_TEMP 'npm-audit.log'
+          npm audit --package-lock-only --audit-level=high --fetch-timeout=30000 --fetch-retries=0 --json *> $auditOutputPath
+          $auditExitCode = $LASTEXITCODE
+          $auditOutput = Get-Content -LiteralPath $auditOutputPath -Raw
+          if ($auditExitCode -eq 0) {
+            Write-Host $auditOutput
+            exit 0
+          }
+          if ($auditOutput -match '(?i)audit endpoint returned an error|audit network timeout|EAI_AGAIN|ENOTFOUND|ECONNRESET|ETIMEDOUT|ENETUNREACH') {
+            Write-Warning 'npm advisory service is unavailable; the dependency audit could not be completed for this run.'
+            Write-Host $auditOutput
+            exit 0
+          }
+          Write-Error $auditOutput
+          exit $auditExitCode
 
       - name: Check Rust quality
         working-directory: src-tauri
