@@ -55,17 +55,22 @@ impl RecycleStore {
 
     fn recycle_with(&self, path: &Path, native: &dyn TrashAdapter) -> Result<RecycleEntry, String> {
         let _guard = RECYCLE_LOCK.lock().unwrap_or_else(|e| e.into_inner());
-        if !path.is_absolute() || path.file_name().is_none() {
-            return Err("仅允许回收具有完整路径的文件或文件夹".into());
+        let invalid_path = || "仅允许回收具有完整路径的文件或文件夹".to_string();
+        if !path.is_absolute() {
+            return Err(invalid_path());
         }
+        // Root paths have no file name and several platform paths have no
+        // parent. Validate both instead of unwrapping, so a malformed caller
+        // cannot panic the command thread.
+        let parent = path.parent().ok_or_else(invalid_path)?;
+        let file_name = path.file_name().ok_or_else(invalid_path)?;
         let metadata = fs::symlink_metadata(path).map_err(io_error)?;
         // Never canonicalize the leaf: doing so could recycle a link's target.
         if is_link(&metadata) {
             return Err("为保护链接指向的内容，暂不支持回收符号链接或目录联接".into());
         }
-        let canonical_parent =
-            ordinary_path(&fs::canonicalize(path.parent().unwrap()).map_err(io_error)?);
-        let source = canonical_parent.join(path.file_name().unwrap());
+        let canonical_parent = ordinary_path(&fs::canonicalize(parent).map_err(io_error)?);
+        let source = canonical_parent.join(file_name);
         let id = uuid::Uuid::new_v4().to_string();
         let operation_dir = self.root.join(&id);
         fs::create_dir_all(&self.root).map_err(io_error)?;
@@ -77,7 +82,7 @@ impl RecycleStore {
         let mut record = Record {
             entry: RecycleEntry {
                 id,
-                name: path.file_name().unwrap().to_string_lossy().into_owned(),
+                name: file_name.to_string_lossy().into_owned(),
                 original_path: source.to_str().ok_or("文件路径无法编码为 Unicode")?.into(),
                 deleted_at: chrono::Utc::now().timestamp_millis(),
                 is_directory: metadata.is_dir(),
@@ -623,6 +628,18 @@ mod tests {
     impl Drop for Fixture {
         fn drop(&mut self) {
             let _ = fs::remove_dir_all(&self.root);
+        }
+    }
+    #[test]
+    fn root_and_unnamed_paths_are_rejected_without_panicking() {
+        let fixture = Fixture::new();
+        let store = fixture.store();
+        for path in [Path::new("/"), Path::new("relative.md")] {
+            assert!(
+                store.recycle_with(path, &Unavailable).is_err(),
+                "{} must be rejected",
+                path.display()
+            );
         }
     }
     struct Unavailable;

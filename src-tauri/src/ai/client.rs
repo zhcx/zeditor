@@ -1594,6 +1594,7 @@ pub async fn chat_streaming(
     doc_title: Option<String>,
     enable_thinking: bool,
     request_id: String,
+    mut cancel: tokio::sync::watch::Receiver<bool>,
     window: WebviewWindow,
 ) -> Result<(), String> {
     let system_prompt = get_prompt(PromptAction::Chat, "", None, settings);
@@ -1615,6 +1616,7 @@ pub async fn chat_streaming(
             temperature,
             &window,
             &request_id,
+            cancel,
         )
         .await;
     }
@@ -1636,14 +1638,29 @@ pub async fn chat_streaming(
 
     let body = serde_json::to_value(&request).map_err(|e| format!("序列化请求失败: {}", e))?;
 
-    let mut response = client
+    let response_future = client
         .post(&url)
         .header("Authorization", format!("Bearer {}", settings.api_key))
         .header("Content-Type", "application/json")
         .json(&body)
-        .send()
-        .await
-        .map_err(|e| format!("API请求失败: {}", e))?;
+        .send();
+    let mut response = tokio::select! {
+        biased;
+        _ = cancel.changed() => {
+            // Stop while connecting or waiting for response headers, not only
+            // after the first token arrives.
+            window
+                .emit(
+                    "ai-chat-done",
+                    serde_json::json!({ "requestId": &request_id }),
+                )
+                .ok();
+            return Ok(());
+        }
+        response = response_future => {
+            response.map_err(|e| format!("API请求失败: {}", e))?
+        }
+    };
 
     if !response.status().is_success() {
         let status = response.status();
@@ -1660,72 +1677,97 @@ pub async fn chat_streaming(
 
     let mut buffer = String::new();
     let mut reasoning_done = false;
+    let mut cancelled = false;
 
     loop {
-        let chunk = response
-            .chunk()
-            .await
-            .map_err(|e| format!("流读取失败: {}", e))?;
+        tokio::select! {
+            biased;
+            _ = cancel.changed() => {
+                cancelled = true;
+                break;
+            }
+            chunk = response.chunk() => {
+                match chunk.map_err(|e| format!("流读取失败: {}", e))? {
+                    Some(bytes) => {
+                        let text = String::from_utf8_lossy(&bytes);
+                        buffer.push_str(&text);
 
-        match chunk {
-            Some(bytes) => {
-                let text = String::from_utf8_lossy(&bytes);
-                buffer.push_str(&text);
+                        let mut stream_finished = false;
+                        while let Some(pos) = buffer.find("\n\n") {
+                            let event_str = buffer[..pos].to_string();
+                            buffer = buffer[pos + 2..].to_string();
 
-                while let Some(pos) = buffer.find("\n\n") {
-                    let event_str = buffer[..pos].to_string();
-                    buffer = buffer[pos + 2..].to_string();
+                            for line in event_str.lines() {
+                                if let Some(data) = line.strip_prefix("data: ") {
+                                    if data == "[DONE]" {
+                                        // `[DONE]` terminates the protocol. Stop
+                                        // reading even if the server keeps the
+                                        // connection open for keep-alive.
+                                        stream_finished = true;
+                                        break;
+                                    }
+                                    if let Ok(chunk_data) = serde_json::from_str::<serde_json::Value>(data)
+                                    {
+                                        if let Some(choices) = chunk_data["choices"].as_array() {
+                                            if let Some(choice) = choices.first() {
+                                                let delta = &choice["delta"];
 
-                    for line in event_str.lines() {
-                        if let Some(data) = line.strip_prefix("data: ") {
-                            if data == "[DONE]" {
-                                break;
-                            }
-                            if let Ok(chunk_data) = serde_json::from_str::<serde_json::Value>(data)
-                            {
-                                if let Some(choices) = chunk_data["choices"].as_array() {
-                                    if let Some(choice) = choices.first() {
-                                        let delta = &choice["delta"];
-
-                                        if let Some(rc) = delta["reasoning_content"].as_str() {
-                                            if !rc.is_empty() {
-                                                window
-                                                    .emit(
-                                                        "ai-chat-reasoning-chunk",
-                                                        serde_json::json!({ "content": rc, "requestId": &request_id }),
-                                                    )
-                                                    .ok();
-                                            }
-                                        }
-
-                                        if let Some(c) = delta["content"].as_str() {
-                                            if !c.is_empty() {
-                                                if !reasoning_done {
-                                                    reasoning_done = true;
-                                                    window
-                                                        .emit(
-                                                            "ai-chat-reasoning-done",
-                                                            serde_json::json!({ "requestId": &request_id }),
-                                                        )
-                                                        .ok();
+                                                if let Some(rc) = delta["reasoning_content"].as_str() {
+                                                    if !rc.is_empty() {
+                                                        window
+                                                            .emit(
+                                                                "ai-chat-reasoning-chunk",
+                                                                serde_json::json!({ "content": rc, "requestId": &request_id }),
+                                                            )
+                                                            .ok();
+                                                    }
                                                 }
-                                                window
-                                                    .emit(
-                                                        "ai-chat-content-chunk",
-                                                        serde_json::json!({ "content": c, "requestId": &request_id }),
-                                                    )
-                                                    .ok();
+
+                                                if let Some(c) = delta["content"].as_str() {
+                                                    if !c.is_empty() {
+                                                        if !reasoning_done {
+                                                            reasoning_done = true;
+                                                            window
+                                                                .emit(
+                                                                    "ai-chat-reasoning-done",
+                                                                    serde_json::json!({ "requestId": &request_id }),
+                                                                )
+                                                                .ok();
+                                                        }
+                                                        window
+                                                            .emit(
+                                                                "ai-chat-content-chunk",
+                                                                serde_json::json!({ "content": c, "requestId": &request_id }),
+                                                            )
+                                                            .ok();
+                                                    }
+                                                }
                                             }
                                         }
                                     }
                                 }
                             }
                         }
+                        if stream_finished {
+                            break;
+                        }
                     }
+                    None => break,
                 }
             }
-            None => break,
         }
+    }
+
+    if cancelled {
+        // The webview may already have stopped listening; the done event is
+        // still emitted so any remaining listener can release its state.
+        window
+            .emit(
+                "ai-chat-done",
+                serde_json::json!({ "requestId": &request_id }),
+            )
+            .ok();
+        return Ok(());
     }
 
     if !reasoning_done {
@@ -1754,6 +1796,7 @@ async fn chat_streaming_anthropic_fallback(
     temperature: f32,
     window: &WebviewWindow,
     request_id: &str,
+    mut cancel: tokio::sync::watch::Receiver<bool>,
 ) -> Result<(), String> {
     let client = get_client()?;
     let endpoint = get_api_endpoint(settings);
@@ -1775,16 +1818,27 @@ async fn chat_streaming_anthropic_fallback(
         .filter(|m| m.role != "system")
         .collect();
 
-    let text = call_anthropic_with_messages(
-        &client,
-        &endpoint,
-        conv_msgs,
-        system_prompt.as_deref(),
-        settings,
-        max_tokens,
-        temperature,
-    )
-    .await?;
+    let text = tokio::select! {
+        biased;
+        _ = cancel.changed() => {
+            window
+                .emit(
+                    "ai-chat-done",
+                    serde_json::json!({ "requestId": request_id }),
+                )
+                .ok();
+            return Ok(());
+        }
+        result = call_anthropic_with_messages(
+            &client,
+            &endpoint,
+            conv_msgs,
+            system_prompt.as_deref(),
+            settings,
+            max_tokens,
+            temperature,
+        ) => result?,
+    };
 
     window
         .emit(

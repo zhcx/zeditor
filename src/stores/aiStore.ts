@@ -157,6 +157,21 @@ export interface ChatSearchContext {
 let chatRequestSequence = 0;
 let activeChatRequestId: string | null = null;
 
+const isTauriRuntime = () => typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window;
+
+/**
+ * Stop both sides of the stream: clearing the local id prevents stale events
+ * from mutating the next conversation, while the backend command releases the
+ * HTTP request that would otherwise keep consuming tokens invisibly.
+ */
+function cancelActiveChatRequest() {
+  const requestId = activeChatRequestId;
+  activeChatRequestId = null;
+  if (requestId && isTauriRuntime()) {
+    void invoke('cancel_ai_chat', { requestId }).catch(() => undefined);
+  }
+}
+
 export interface ChatMessageAttachment {
   type: 'image' | 'text' | 'file';
   name: string;
@@ -1309,9 +1324,7 @@ ${beforeText.slice(-2000)}`,
   },
 
   stopChatMessage: () => {
-    // The native stream finishes in the background, but its listeners are removed
-    // immediately by the request lifecycle. This releases the composer for the next turn.
-    activeChatRequestId = null;
+    cancelActiveChatRequest();
     set({ chatbotLoading: false, chatbotStreamingPhase: null });
   },
 
@@ -1327,7 +1340,7 @@ ${beforeText.slice(-2000)}`,
   },
 
   newChatConversation: () => {
-    activeChatRequestId = null;
+    cancelActiveChatRequest();
     set({
       chatbotMessages: [],
       activeChatConversationId: null,
@@ -1340,7 +1353,7 @@ ${beforeText.slice(-2000)}`,
   selectChatConversation: (conversationId) => {
     const conversation = get().chatbotConversations.find((item) => item.id === conversationId);
     if (!conversation) return;
-    activeChatRequestId = null;
+    cancelActiveChatRequest();
     set({
       activeChatConversationId: conversation.id,
       chatbotMessages: conversation.messages,

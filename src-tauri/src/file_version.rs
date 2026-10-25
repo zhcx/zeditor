@@ -1,5 +1,8 @@
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
+use tokio::io::{AsyncReadExt, BufReader};
+
+const HASH_BUFFER_BYTES: usize = 64 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -21,9 +24,28 @@ impl FileVersion {
     }
 }
 
+/// Hash a file incrementally so opening large files never duplicates their
+/// entire contents in memory.
+async fn hash_file_streaming(path: &str) -> std::io::Result<(u64, String)> {
+    let file = tokio::fs::File::open(path).await?;
+    let mut reader = BufReader::with_capacity(HASH_BUFFER_BYTES, file);
+    let mut buffer = vec![0_u8; HASH_BUFFER_BYTES];
+    let mut hasher = Sha256::new();
+    let mut total_bytes: u64 = 0;
+    loop {
+        let read = reader.read(&mut buffer).await?;
+        if read == 0 {
+            break;
+        }
+        total_bytes = total_bytes.saturating_add(read as u64);
+        hasher.update(&buffer[..read]);
+    }
+    Ok((total_bytes, hex::encode(hasher.finalize())))
+}
+
 pub async fn read_file_version(path: &str) -> Result<Option<FileVersion>, String> {
-    match tokio::fs::read(path).await {
-        Ok(bytes) => Ok(Some(FileVersion::from_bytes(&bytes))),
+    match hash_file_streaming(path).await {
+        Ok((size, sha256)) => Ok(Some(FileVersion { size, sha256 })),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
         Err(error) => Err(format!("无法读取文件版本：{error}")),
     }
@@ -141,5 +163,24 @@ mod tests {
             read_file_version(path.to_str().unwrap()).await.unwrap(),
             None
         );
+    }
+
+    #[tokio::test]
+    async fn streaming_hash_matches_in_memory_digest_for_large_files() {
+        let root = std::env::temp_dir().join(format!("zeditor-file-hash-{}", uuid::Uuid::new_v4()));
+        tokio::fs::create_dir_all(&root).await.unwrap();
+        let path = root.join("large.bin");
+        let bytes: Vec<u8> = (0..(2 * 1024 * 1024 + 123))
+            .map(|index| (index % 251) as u8)
+            .collect();
+        tokio::fs::write(&path, &bytes).await.unwrap();
+
+        let version = read_file_version(path.to_str().unwrap())
+            .await
+            .unwrap()
+            .expect("file exists");
+
+        assert_eq!(version, FileVersion::from_bytes(&bytes));
+        tokio::fs::remove_dir_all(root).await.unwrap();
     }
 }
