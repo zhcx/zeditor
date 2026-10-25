@@ -23,6 +23,7 @@ import {
 import { sanitizeRenderedHtml } from './safeHtml.ts';
 import { parseWikiLink, WIKI_LINK_PATTERN, wikiLinkDisplayText, type WikiLinkParts } from './wikiLinks.ts';
 import { parseFootnoteDefinitions, type FootnoteDefinition } from './footnotes.ts';
+import { BoundedCache } from './boundedCache.ts';
 
 export const markdownRenderer = new MarkdownIt({
   html: true,
@@ -250,8 +251,39 @@ markdownRenderer.core.ruler.after('inline', 'footnote_references', (state) => {
   }
 });
 
+/**
+ * Highlight and math results depend only on the source string and language.
+ * Long documents re-render on every keystroke, so caching unchanged fences
+ * avoids re-running the lexer (and KaTeX) for the overwhelming majority of the
+ * document. The byte budget keeps pathological files bounded.
+ */
+const RENDER_CACHE_ENTRIES = 500;
+const RENDER_CACHE_BYTES = 8 * 1024 * 1024;
+const highlightCache = new BoundedCache<string, string>(
+  RENDER_CACHE_ENTRIES,
+  RENDER_CACHE_BYTES,
+  value => value.length,
+);
+const katexCache = new BoundedCache<string, string>(
+  RENDER_CACHE_ENTRIES,
+  RENDER_CACHE_BYTES,
+  value => value.length,
+);
+
 /** 代码围栏高亮；特殊围栏保留语言 class，交给预览的二次渲染接管。 */
 function highlightFence(str: string, lang: string): string {
+  // Length-prefix the language so no (lang, source) pair can collide with
+  // another fence whose language/source boundary falls elsewhere.
+  const cacheKey = `${lang.length}:${lang}:${str}`;
+  const cached = highlightCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const rendered = renderHighlightFence(str, lang);
+  highlightCache.set(cacheKey, rendered);
+  return rendered;
+}
+
+function renderHighlightFence(str: string, lang: string): string {
   const escape = markdownRenderer.utils.escapeHtml;
   if (lang === 'mermaid') {
     return `<pre class="hljs"><code class="language-mermaid">${escape(str)}</code></pre>`;
@@ -328,12 +360,19 @@ const escapeAttribute = (value: string) => value
  */
 export const renderFormula = (tex: string, displayMode: boolean): string => {
   const source = tex.trim();
+  const cacheKey = `${displayMode ? 'B' : 'I'}\u0000${source}`;
+  const cached = katexCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const attribute = `data-tex="${escapeAttribute(source)}"`;
+  let rendered: string;
   try {
-    return `<span class="zeditor-math" ${attribute}>${katex.renderToString(source, { displayMode, throwOnError: false, strict: 'warn', trust: false })}</span>`;
+    rendered = `<span class="zeditor-math" ${attribute}>${katex.renderToString(source, { displayMode, throwOnError: false, strict: 'warn', trust: false })}</span>`;
   } catch {
-    return `<span class="zeditor-math" ${attribute}>${displayMode ? `$$${source}$$` : `$${source}$`}</span>`;
+    rendered = `<span class="zeditor-math" ${attribute}>${displayMode ? `$$${source}$$` : `$${source}$`}</span>`;
   }
+  katexCache.set(cacheKey, rendered);
+  return rendered;
 };
 
 // Keep code fences and inline code intact so their dollar signs are never

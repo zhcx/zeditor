@@ -513,12 +513,14 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
     })
     : null;
   const renderMermaid = async (block: Element) => {
+    if (disposed) return;
     const code = block.textContent || '';
+    const renderId = `mermaid-${Date.now()}-${mermaidSequence++}`;
     try {
       const mermaid = await mermaidPromise!;
-      const { svg } = await mermaid.render(`mermaid-${Date.now()}-${mermaidSequence++}`, code);
+      const { svg } = await mermaid.render(renderId, code);
       const pre = block.parentElement;
-      if (!disposed && pre) {
+      if (!disposed && block.isConnected && pre) {
         // Mermaid 输出同样要过一遍净化：它会把节点标签渲染进 SVG。
         const wrapper = document.createElement('div');
         wrapper.innerHTML = sanitizeRenderedHtml(`<figure class="mermaid-container"><figcaption>Mermaid 图表</figcaption>${svg}</figure>`);
@@ -528,13 +530,19 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
     } catch (error) {
       console.error('Mermaid render error:', error);
       const pre = block.parentElement;
-      if (!disposed && pre) {
+      if (!disposed && block.isConnected && pre) {
         const errorBlock = document.createElement('div');
         errorBlock.className = 'mermaid-error';
         errorBlock.innerHTML = `<strong>图表语法错误</strong><pre>${markdownRenderer.utils.escapeHtml(code)}</pre>`;
         pre.replaceWith(errorBlock);
         notify();
       }
+    } finally {
+      // Mermaid creates a temporary `d<id>` container for measurement. On a
+      // parse error (or when the preview was replaced mid-render) it can remain
+      // in the document body. Do NOT remove `#<id>` itself: Mermaid gives the
+      // successfully returned SVG that same id, and it is now inside our DOM.
+      document.getElementById(`d${renderId}`)?.remove();
     }
   };
 
@@ -635,6 +643,7 @@ export function enhanceRenderedMarkdown(root: HTMLElement, options: EnhanceRende
   // （拖动平移、Ctrl + 滚轮缩放、点击圆圈折叠）。与内联工作流图一样先靠近视口
   // 才挂载 React 根，重渲染前必须卸载，否则会随输入不断累积实例。
   const renderMarkmapBlock = (block: HTMLElement) => {
+    if (disposed) return;
     const source = block.textContent || '';
     if (!source.trim()) return;
     const pre = block.parentElement;

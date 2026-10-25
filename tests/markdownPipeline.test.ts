@@ -8,6 +8,16 @@ it('writes source line anchors on block tokens', () => {
   assert.match(html, /<p data-source-line="3">/);
 });
 
+it('keeps cached code highlighting and math output identical across renders', () => {
+  const first = '```javascript\nconst price = "$5";\n```\n\n公式 $V = a^3$ 与 $$x^2$$';
+  const second = '```javascript\nconst price = "$5";\n```\n\n不计入缓存的另一段';
+
+  const expected = renderMarkdownSource(first);
+  assert.equal(renderMarkdownSource(first), expected);
+  assert.equal(renderMarkdownSource(second).includes('language-javascript'), true);
+  assert.equal(renderMarkdownSource(first), expected);
+});
+
 it('locates each of six soft-broken preview lines without changing paragraph semantics', () => {
   for (const eol of ['\n', '\r\n']) {
     const source = ['第一行', '第二行', '第三行', '第四行', '第五行', '第六行', '', '', '', '末段'].join(eol);
