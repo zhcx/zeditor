@@ -6,9 +6,6 @@ use sha2::{Digest, Sha256};
 
 type HmacSha256 = Hmac<Sha256>;
 
-/// The signed request headers the S3 client always includes.
-pub const SIGNED_HEADERS: &str = "host;x-amz-content-sha256;x-amz-date";
-
 /// SHA-256 of an empty payload, used for GET/DELETE/HEAD requests.
 pub const EMPTY_PAYLOAD_HASH: &str =
     "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
@@ -90,6 +87,8 @@ pub fn payload_hash(bytes: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SIGNED_HEADERS: &str = "host;x-amz-content-sha256;x-amz-date";
 
     #[test]
     fn empty_payload_hash_is_the_sha256_of_empty_bytes() {

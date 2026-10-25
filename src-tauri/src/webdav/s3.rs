@@ -3,11 +3,12 @@
 use chrono::Utc;
 use reqwest::StatusCode;
 
-use super::client::{sanitize_webdav_error, RemoteSyncClient};
-use super::model::S3Settings;
-use super::sigv4::{
-    authorization, payload_hash, SigningContext, EMPTY_PAYLOAD_HASH, SIGNED_HEADERS,
+use super::client::{
+    sanitize_webdav_error, strong_etag, PutOutcome, RemoteObject, RemoteSyncClient,
+    WritePrecondition,
 };
+use super::model::S3Settings;
+use super::sigv4::{authorization, payload_hash, SigningContext, EMPTY_PAYLOAD_HASH};
 
 /// S3-compatible object storage client.
 ///
@@ -121,6 +122,21 @@ impl S3Client {
         url: &str,
         body: Option<Vec<u8>>,
     ) -> Result<reqwest::Response, String> {
+        self.send_signed_with_headers(method, url, body, &[]).await
+    }
+
+    /// Send a signed request with extra headers covered by the signature.
+    ///
+    /// SigV4 requires every header named in `SignedHeaders` to appear in the
+    /// canonical request, so conditional headers must be added before signing
+    /// rather than appended to the request afterwards.
+    async fn send_signed_with_headers(
+        &self,
+        method: reqwest::Method,
+        url: &str,
+        body: Option<Vec<u8>>,
+        extra_headers: &[(&str, &str)],
+    ) -> Result<reqwest::Response, String> {
         let timestamp = Utc::now().format("%Y%m%dT%H%M%SZ").to_string();
         let date = Utc::now().format("%Y%m%d").to_string();
         let hash = match &body {
@@ -148,15 +164,32 @@ impl S3Client {
             parsed.path().to_string()
         };
 
-        let canonical_headers = format!(
-            "host:{}\nx-amz-content-sha256:{}\nx-amz-date:{}\n",
-            host, hash, timestamp
-        );
+        let extra: Vec<(String, String)> = extra_headers
+            .iter()
+            .map(|(name, value)| (name.to_ascii_lowercase(), value.trim().to_string()))
+            .collect();
+        let mut headers = vec![
+            ("host".to_string(), host),
+            ("x-amz-content-sha256".to_string(), hash.clone()),
+            ("x-amz-date".to_string(), timestamp.clone()),
+        ];
+        headers.extend(extra.iter().cloned());
+        headers.sort_by(|left, right| left.0.cmp(&right.0));
+        let canonical_headers: String = headers
+            .iter()
+            .map(|(name, value)| format!("{name}:{value}\n"))
+            .collect();
+        let signed_headers = headers
+            .iter()
+            .map(|(name, _)| name.as_str())
+            .collect::<Vec<_>>()
+            .join(";");
+
         let auth = authorization(&SigningContext {
             method: method.as_str(),
             uri: &uri,
             canonical_headers: &canonical_headers,
-            signed_headers: SIGNED_HEADERS,
+            signed_headers: &signed_headers,
             payload_hash: &hash,
             access_key: &self.access_key,
             secret_key: &self.secret_key,
@@ -170,6 +203,9 @@ impl S3Client {
             .header("x-amz-date", &timestamp)
             .header("x-amz-content-sha256", &hash)
             .header("Authorization", auth);
+        for (name, value) in &extra {
+            request = request.header(name, value);
+        }
         if let Some(bytes) = body {
             request = request
                 .header("Content-Type", "application/octet-stream")
@@ -202,6 +238,84 @@ impl S3Client {
             .await?
             .ok_or_else(|| format!("S3 object not found: {path}"))
     }
+
+    /// Read an object and its strong ETag; `None` when the object is absent.
+    ///
+    /// S3 always returns an ETag for a stored object; the value includes the
+    /// quotes required by `If-Match`, so it is passed through unchanged.
+    pub async fn get_optional_with_etag(&self, path: &str) -> Result<Option<RemoteObject>, String> {
+        let key = self.object_key(path);
+        let url = self.url_for(&key);
+        let response = self.send_signed(reqwest::Method::GET, &url, None).await?;
+        let status = response.status();
+        if status == StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        if !status.is_success() {
+            return Err(sanitize_webdav_error(Some(status.as_u16()), ""));
+        }
+        // The ETag must be read before consuming the response body.
+        let etag = strong_etag(&response);
+        let bytes = response
+            .bytes()
+            .await
+            .map_err(|error| format!("Failed to read S3 response: {error}"))?;
+        Ok(Some(RemoteObject {
+            bytes: bytes.to_vec(),
+            etag,
+        }))
+    }
+
+    /// Upload bytes, enforcing an optional optimistic-concurrency precondition.
+    ///
+    /// S3 and MinIO evaluate `If-Match` / `If-None-Match` on PUT. A losing
+    /// writer receives 412, or 409 with `ConditionalRequestConflict` when two
+    /// conditional writes race; both map to `PreconditionFailed` so the sync
+    /// manager can refetch the manifest and merge.
+    pub async fn put_conditional(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        precondition: WritePrecondition<'_>,
+    ) -> Result<PutOutcome, String> {
+        let key = self.object_key(path);
+        let url = self.url_for(&key);
+        let extra_headers: Vec<(&str, &str)> = match precondition {
+            WritePrecondition::Unconditional => Vec::new(),
+            WritePrecondition::MustNotExist => vec![("if-none-match", "*")],
+            WritePrecondition::Match(etag) => vec![("if-match", etag)],
+        };
+        let mut status = self
+            .send_signed_with_headers(
+                reqwest::Method::PUT,
+                &url,
+                Some(bytes.to_vec()),
+                &extra_headers,
+            )
+            .await?
+            .status();
+
+        // Some S3-compatible gateways reject conditional headers with 400 or
+        // 501. Retry once unconditionally so backup still works there; the
+        // lost race window is limited to those servers, as with WebDAV.
+        if matches!(status.as_u16(), 400 | 501) && precondition != WritePrecondition::Unconditional
+        {
+            status = self
+                .send_signed(reqwest::Method::PUT, &url, Some(bytes.to_vec()))
+                .await?
+                .status();
+        }
+
+        if matches!(status.as_u16(), 200 | 201 | 204) {
+            Ok(PutOutcome::Applied)
+        } else if status == StatusCode::PRECONDITION_FAILED
+            || (status == StatusCode::CONFLICT && precondition != WritePrecondition::Unconditional)
+        {
+            Ok(PutOutcome::PreconditionFailed)
+        } else {
+            Err(sanitize_webdav_error(Some(status.as_u16()), ""))
+        }
+    }
 }
 
 impl RemoteSyncClient for S3Client {
@@ -224,22 +338,23 @@ impl RemoteSyncClient for S3Client {
         }
     }
 
+    async fn put_conditional(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        precondition: WritePrecondition<'_>,
+    ) -> Result<PutOutcome, String> {
+        S3Client::put_conditional(self, path, bytes, precondition).await
+    }
+
     async fn get_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
-        let key = self.object_key(path);
-        let url = self.url_for(&key);
-        let response = self.send_signed(reqwest::Method::GET, &url, None).await?;
-        let status = response.status();
-        if status == StatusCode::NOT_FOUND {
-            return Ok(None);
-        }
-        if !status.is_success() {
-            return Err(sanitize_webdav_error(Some(status.as_u16()), ""));
-        }
-        let bytes = response
-            .bytes()
-            .await
-            .map_err(|error| format!("Failed to read S3 response: {error}"))?;
-        Ok(Some(bytes.to_vec()))
+        Ok(S3Client::get_optional_with_etag(self, path)
+            .await?
+            .map(|object| object.bytes))
+    }
+
+    async fn get_optional_with_etag(&self, path: &str) -> Result<Option<RemoteObject>, String> {
+        S3Client::get_optional_with_etag(self, path).await
     }
 
     async fn delete_optional(&self, path: &str) -> Result<(), String> {
@@ -305,6 +420,8 @@ fn classify_s3_error(error: &reqwest::Error) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    const SIGNED_HEADERS: &str = "host;x-amz-content-sha256;x-amz-date";
 
     fn settings_for(endpoint: &str) -> S3Settings {
         S3Settings {
@@ -445,6 +562,123 @@ mod tests {
             date: &timestamp[..8],
         });
         assert_eq!(request.authorization, expected);
+    }
+
+    #[tokio::test]
+    async fn conditional_put_signs_if_match_and_rejects_a_stale_validator() {
+        let server = crate::webdav::client::test_support::TestDavServer::start(vec![]).await;
+        let client = S3Client::new(&settings_for(&server.url)).expect("client");
+
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"first", WritePrecondition::MustNotExist)
+                .await
+                .expect("create"),
+            PutOutcome::Applied
+        );
+        let object = client
+            .get_optional_with_etag("/note.md")
+            .await
+            .expect("read")
+            .expect("present");
+        let etag = object.etag.clone().expect("S3 exposes a strong ETag");
+
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"stale", WritePrecondition::Match("\"stale\""),)
+                .await
+                .expect("stale attempt"),
+            PutOutcome::PreconditionFailed
+        );
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"second", WritePrecondition::Match(&etag))
+                .await
+                .expect("current etag"),
+            PutOutcome::Applied
+        );
+
+        let requests = server.requests().await;
+        let conditional = requests
+            .iter()
+            .find(|request| request.headers.get("if-match") == Some(&etag))
+            .expect("signed If-Match request");
+        assert!(conditional
+            .authorization
+            .contains("SignedHeaders=host;if-match;x-amz-content-sha256;x-amz-date"));
+        let create = requests.first().expect("create request");
+        assert_eq!(
+            create.headers.get("if-none-match").map(String::as_str),
+            Some("*")
+        );
+        assert!(create
+            .authorization
+            .contains("SignedHeaders=host;if-none-match;x-amz-content-sha256;x-amz-date"));
+    }
+
+    #[tokio::test]
+    async fn must_not_exist_is_rejected_once_the_object_appears() {
+        let server = crate::webdav::client::test_support::TestDavServer::start(vec![]).await;
+        let client = S3Client::new(&settings_for(&server.url)).expect("client");
+
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"first", WritePrecondition::MustNotExist)
+                .await
+                .expect("create"),
+            PutOutcome::Applied
+        );
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"second", WritePrecondition::MustNotExist)
+                .await
+                .expect("second create"),
+            PutOutcome::PreconditionFailed
+        );
+
+        let stored = client
+            .get_optional("/note.md")
+            .await
+            .expect("read")
+            .expect("present");
+        assert_eq!(stored, b"first");
+    }
+
+    #[tokio::test]
+    async fn remote_client_enforces_s3_preconditions() {
+        let server = crate::webdav::client::test_support::TestDavServer::start(vec![]).await;
+        let client = crate::webdav::RemoteClient::S3(
+            S3Client::new(&settings_for(&server.url)).expect("client"),
+        );
+
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"first", WritePrecondition::MustNotExist)
+                .await
+                .expect("create"),
+            PutOutcome::Applied
+        );
+        let etag = client
+            .get_optional_with_etag("/note.md")
+            .await
+            .expect("read")
+            .expect("present")
+            .etag
+            .expect("strong etag");
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"stale", WritePrecondition::Match("\"stale\""))
+                .await
+                .expect("stale attempt"),
+            PutOutcome::PreconditionFailed
+        );
+        assert_eq!(
+            client
+                .put_conditional("/note.md", b"second", WritePrecondition::Match(&etag))
+                .await
+                .expect("current etag"),
+            PutOutcome::Applied
+        );
     }
 
     #[tokio::test]

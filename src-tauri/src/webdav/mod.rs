@@ -1,6 +1,8 @@
 use base64::{engine::general_purpose, Engine as _};
 mod assets;
 mod client;
+#[cfg(test)]
+mod live_tests;
 mod manager;
 mod manifest;
 mod model;
@@ -9,7 +11,10 @@ mod queue;
 mod s3;
 mod sigv4;
 
-pub use client::{sanitize_webdav_error, RemoteClient, RemoteSyncClient, WebDavClient};
+pub use client::{
+    sanitize_webdav_error, PutOutcome, RemoteClient, RemoteObject, RemoteSyncClient, WebDavClient,
+    WritePrecondition,
+};
 pub use manager::{S3SyncManager, SyncProvider, WebDavEventSink, WebDavSyncManager};
 pub use manifest::{
     parse_index, parse_manifest, validate_index_namespace, validate_manifest_namespace,

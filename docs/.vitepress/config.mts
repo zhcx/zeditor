@@ -116,6 +116,7 @@ export default defineConfig({
             { text: 'MCP 集成完整指南', link: '/mcp-support' },
             { text: 'Agent 使用与安全说明', link: '/agent-support' },
             { text: '转换模块说明', link: '/converter-modules' },
+            { text: '真实云同步集成测试', link: '/testing-live-sync' },
             { text: '单页完整教程', link: '/usage-guide' }
           ]
         }
