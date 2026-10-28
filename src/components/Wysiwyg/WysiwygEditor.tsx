@@ -19,6 +19,7 @@ import { escapeInlineText } from '../../utils/wysiwyg/inlineSerialize';
 import { nextBlockRenderBudget } from '../../utils/wysiwyg/renderBudget';
 import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
 import { hasTrailingEmptyQuoteLine } from '../../utils/wysiwyg/blockOps';
+import { renderInlinePasteFragment } from '../../utils/wysiwyg/inlinePaste';
 import { findInlineTargetAt, type InlineTarget } from '../../utils/inlineTargets';
 import type { ImageSpec } from '../../utils/imageSyntax';
 import { ImagePropertiesModal } from '../Editor/ImagePropertiesModal';
@@ -453,6 +454,7 @@ export function WysiwygEditor() {
         if (tabId) useAppStore.getState().updateTabContent(tabId, source);
       },
       insertClipboardImage,
+      renderInlinePaste: renderInlinePasteFragment,
     });
   });
   const [snapshot, setSnapshot] = useState<WysiwygSessionSnapshot>(() => session.getSnapshot());

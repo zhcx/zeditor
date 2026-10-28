@@ -37,7 +37,7 @@ import {
 import { createUndoStack } from '../../utils/wysiwyg/undoStack.ts';
 import { extractFenceInfo, extractFenceLanguage, extractFenceMarker, formatFence, withFenceLanguage } from '../../utils/wysiwyg/codeFence.ts';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown.ts';
-import { prepareMarkdownPaste } from '../../utils/markdownPaste.ts';
+import { inlinePasteMarkdown, prepareMarkdownPaste } from '../../utils/markdownPaste.ts';
 import { pointInContainer, rangeInContainer, snapRangeAroundInlineAtoms } from './domCaret.ts';
 import { navigateTableCell, parseTableAt } from '../../utils/markdownTable.ts';
 import { caretAtVisualEdge, caretOnVisualLine } from './caretGeometry.ts';
@@ -62,6 +62,8 @@ export interface WysiwygSessionOptions {
   onSourceChange: (source: string) => void;
   /** 粘贴图片的落地方（镜像编辑器里已有的图床 / .assets 链路）。 */
   insertClipboardImage: (file: File) => Promise<boolean>;
+  /** 行内粘贴的 Markdown → DOM 渲染器；未注入时回退到源码替换。 */
+  renderInlinePaste?: (markdown: string) => DocumentFragment | null;
 }
 
 /** DOM 访问器：外壳挂载后才注入（外壳在渲染期不能读 ref，构造时会话拿不到元素）。 */
@@ -112,6 +114,200 @@ function pathToNode(element: HTMLElement, path: number[]): Node | null {
  */
 function focusMovedToAnotherTarget(relatedTarget: Node | null | undefined): boolean {
   return Boolean(relatedTarget && relatedTarget.nodeType === 1);
+}
+
+const ELEMENT_NODE = 1;
+const TEXT_NODE = 3;
+
+/** 光标 / 选区端点所在的块宿主。 */
+function closestBlockHost(node: Node): HTMLElement | null {
+  const element = node.nodeType === ELEMENT_NODE ? node as Element : node.parentElement;
+  return element?.closest<HTMLElement>('[data-block-index]') ?? null;
+}
+
+/** 行内包装标签 → 粘贴时可能重复的同类选择器。 */
+const SAME_FORMAT_SELECTORS: Record<string, string> = {
+  strong: 'strong, b',
+  b: 'strong, b',
+  em: 'em, i',
+  i: 'em, i',
+  del: 'del, s, strike',
+  s: 'del, s, strike',
+  strike: 'del, s, strike',
+  u: 'u',
+  mark: 'mark',
+  sub: 'sub',
+  a: 'a',
+};
+
+function unwrapFormat(fragment: DocumentFragment, selector: string): void {
+  fragment.querySelectorAll(selector).forEach(element => {
+    element.replaceWith(...Array.from(element.childNodes));
+  });
+}
+
+/**
+ * 粘贴内容落入已有格式时去掉重复的同名包装。
+ *
+ * 例如在粗体里粘贴粗体文字，若保留嵌套的 `<strong>`，序列化会写成
+ * `**粗**新**体**`，重新解析已经不是原来的嵌套结构。去掉内层包装后，
+ * 新文字自然继承外层格式，与浏览器原生输入一致。
+ */
+function adaptPasteFormats(fragment: DocumentFragment, point: Element | null): void {
+  const unwrapped = new Set<string>();
+  for (let element: Element | null = point; element; element = element.parentElement) {
+    const selector = SAME_FORMAT_SELECTORS[element.tagName.toLowerCase()];
+    if (selector && !unwrapped.has(selector)) {
+      unwrapped.add(selector);
+      unwrapFormat(fragment, selector);
+    }
+  }
+}
+
+/** 可以被安全移除的空行内包装（原子元素不在其中）。 */
+const EMPTY_INLINE_SELECTOR = 'strong, b, em, i, del, s, strike, code, a, u, sub, mark';
+
+function hasSubstantialContent(element: Element): boolean {
+  return element.textContent !== ''
+    || Boolean(element.querySelector('img, br, input, svg, video, audio, iframe, span[data-tex], .wiki-link, .footnote-ref'));
+}
+
+/**
+ * 删除选区后清理因此变空的包装元素。
+ *
+ * 只处理与选区相交过的元素：源区间无法表达「删掉粗体文字但保留闭合标记」，
+ * 空 `**` 会写回源码变成残留符号；空链接更会写成 `[](url)`。
+ * 插入点所在的包装不能删——它会接收粘贴内容。
+ */
+function removeEmptyInlineWrappers(wrappers: Element[], insertionPoint: Node | null): void {
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const element of wrappers) {
+      if (!element.isConnected) continue;
+      if (insertionPoint && element.contains(insertionPoint)) continue;
+      if (hasSubstantialContent(element)) continue;
+      element.remove();
+      changed = true;
+    }
+  }
+}
+
+/** 选区在删除前相交的行内包装，删除后只清理这些元素。 */
+function intersectingInlineWrappers(range: Range, host: HTMLElement): Element[] {
+  const wrappers: Element[] = [];
+  host.querySelectorAll(EMPTY_INLINE_SELECTOR).forEach(element => {
+    try {
+      if (range.intersectsNode(element)) wrappers.push(element);
+    } catch {
+      // 已脱离文档的节点不参与清理。
+    }
+  });
+  return wrappers;
+}
+
+function childIndex(node: Node): number {
+  return node.parentNode ? Array.prototype.indexOf.call(node.parentNode.childNodes, node) : -1;
+}
+
+/**
+ * 空文本节点不会显示，却会占据 DOM 路径下标。
+ *
+ * 把光标或插入点留在空文本节点上时，`normalizePoint` 会把位置映射到这个节点，
+ * 而序列化和偏移映射只关心有内容的节点，映射于是返回 null（粘贴会退回源码替换，
+ * 留下重复标记）。删除内容后、插入前把边界上的空文本节点清掉。
+ */
+function removeEmptyTextNode(node: Node | null): void {
+  if (node?.nodeType === TEXT_NODE && (node.textContent?.length ?? 0) === 0) node.parentNode?.removeChild(node);
+}
+
+/**
+ * 删除选区后回到选区起点插入，保持起点一侧的行内格式（与浏览器原生替换一致）。
+ *
+ * `Range.deleteContents()` 会把 Range 折叠到删除内容的末尾，直接使用会丢起点格式；
+ * 起点节点在删除中失效时（整段被删）才退回折叠位置。
+ */
+function insertionRangeAfterDelete(doc: Document, startNode: Node, startOffset: number, fallback: Range): Range {
+  const range = doc.createRange();
+  const parent = startNode.parentNode;
+  if (startNode.isConnected && parent) {
+    if (startNode.nodeType === TEXT_NODE) {
+      const length = startNode.textContent?.length ?? 0;
+      if (startOffset <= length) {
+        if (length > 0) {
+          range.setStart(startNode, startOffset);
+          range.collapse(true);
+          return range;
+        }
+        const index = childIndex(startNode);
+        if (index >= 0) {
+          range.setStart(parent, index);
+          range.collapse(true);
+          parent.removeChild(startNode);
+          return range;
+        }
+      }
+    } else if (startOffset <= startNode.childNodes.length) {
+      removeEmptyTextNode(startNode.childNodes[startOffset] ?? null);
+      range.setStart(startNode, Math.min(startOffset, startNode.childNodes.length));
+      range.collapse(true);
+      return range;
+    }
+  }
+  let container = fallback.startContainer;
+  let offset = fallback.startOffset;
+  if (container.nodeType === TEXT_NODE && (container.textContent?.length ?? 0) === 0) {
+    const host = container.parentNode;
+    const index = childIndex(container);
+    if (host && index >= 0) {
+      offset = index;
+      host.removeChild(container);
+      container = host;
+    }
+  }
+  if (container.nodeType !== TEXT_NODE) {
+    removeEmptyTextNode(container.childNodes[offset] ?? null);
+    offset = Math.min(offset, container.childNodes.length);
+  }
+  range.setStart(container, offset);
+  range.collapse(true);
+  return range;
+}
+
+function leadingRun(text: string, char: string): number {
+  let count = 0;
+  while (count < text.length && text[count] === char) count += 1;
+  return count;
+}
+
+function trailingRun(text: string, char: string): number {
+  let count = 0;
+  for (let index = text.length - 1; index >= 0 && text[index] === char; index -= 1) count += 1;
+  return count;
+}
+
+/**
+ * 合并被跨块选区截断的两段段落源码。
+ *
+ * 选区从粗体中间跨到下一段时，起点段以 `**` 收尾、终点段以 `**` 开头；
+ * 直接拼接会得到 `****`，Markdown 会把它当字面量。两个同类强调恰好相接时
+ * 合并成一对标记，其余可能冲突的相邻标记用空行隔开，避免产生错误的行内结构。
+ */
+function mergeParagraphSources(start: string, end: string): string {
+  if (!start) return end;
+  if (!end) return start;
+  for (const char of ['*', '~']) {
+    const tail = trailingRun(start, char);
+    const head = leadingRun(end, char);
+    if (tail === 0 || head === 0) continue;
+    const allowed = char === '*' ? tail === 1 || tail === 2 : tail === 2;
+    if (allowed && tail === head && !start.endsWith(`\\${char.repeat(tail)}`)) {
+      return start.slice(0, -tail) + end.slice(head);
+    }
+    return `${start}\n\n${end}`;
+  }
+  if (trailingRun(start, '`') > 0 && leadingRun(end, '`') > 0) return `${start}\n\n${end}`;
+  return start + end;
 }
 
 interface CollectedBlock {
@@ -841,21 +1037,272 @@ export class WysiwygSession {
       return true;
     }
 
-    const { from, to } = this.getSelectionOffsets();
     const html = data.getData('text/html');
     const text = data.getData('text/plain');
+    if (!text && !html) return false;
+    const markdown = html && shouldConvertHtmlToMarkdown(html, text) ? htmlToMarkdown(html) : text;
+    if (!markdown) return false;
+
+    const { from, to } = this.getSelectionOffsets();
+    // 有选区时优先在 DOM 里就地替换：源码区间无法表达跨过 `**`、反引号或公式的选区，
+    // 直接拼接会在原文里留下孤立的标记字符。DOM 替换与浏览器原生输入共享同一套
+    // 行内结构，选区两侧未选中的内容会保留原来的格式。这里不再用 from !== to 判断：
+    // 端点落在无法映射的节点里时，两个偏移都会退回 lastCaret，但 DOM 选区确实存在。
+    if (this.pasteOverSelection(markdown, text)) return true;
+
     const index = this.blockIndexAtOffset(from);
     if (text && index !== null && this.document.blocks[index]?.kind === 'table') {
-      this.replaceRange(from, to, escapeInlineText(text.replace(/\r?\n/g, ' '), { escapeLineStart: false, escapePipes: true }));
+      this.replaceRange(from, to, escapeInlineText(text.replace(/[\r\n]+/g, ' '), { escapeLineStart: false, escapePipes: true }));
       return true;
     }
-    if (html && shouldConvertHtmlToMarkdown(html, text)) {
-      this.replaceRange(from, to, prepareMarkdownPaste(htmlToMarkdown(html), this.document.source, from, to));
-      return true;
-    }
-    if (!text) return false;
-    this.replaceRange(from, to, prepareMarkdownPaste(text, this.document.source, from, to));
+    this.replaceRange(from, to, withEol(prepareMarkdownPaste(markdown, this.document.source, from, to), this.document.eol));
     return true;
+  }
+
+  /**
+   * 选区粘贴的 DOM 路径。返回 false 表示当前形态不支持（块级内容、表格跨格等），
+   * 调用方退回源码替换。
+   */
+  private pasteOverSelection(markdown: string, plainText: string): boolean {
+    const surface = this.accessors.getSurface();
+    const selection = surface?.ownerDocument.getSelection();
+    if (!surface || !selection?.rangeCount || this.awaitingRender) return false;
+    const range = selection.getRangeAt(0);
+    if (range.collapsed) return false;
+    const startHost = closestBlockHost(range.startContainer);
+    const endHost = closestBlockHost(range.endContainer);
+    if (!startHost || !endHost) return false;
+    const startIndex = Number(startHost.dataset.blockIndex);
+    const endIndex = Number(endHost.dataset.blockIndex);
+    if (!Number.isInteger(startIndex) || !Number.isInteger(endIndex)) return false;
+    if (startHost === endHost) return this.pasteWithinBlock(startIndex, markdown, plainText);
+    if (endIndex <= startIndex) return false;
+    return this.pasteAcrossBlocks(startIndex, endIndex, markdown, plainText);
+  }
+
+  /** 粘贴内容 → 可插入编辑 DOM 的节点；表格与行内代码沿用纯文本语义。 */
+  private pasteNodeFor(index: number, range: Range, markdown: string, plainText: string): Node | null {
+    const block = this.document.blocks[index];
+    if (!block || (!block.editable && block.kind !== 'table')) return null;
+    const doc = range.startContainer.ownerDocument;
+    if (block.kind === 'table') {
+      const text = plainText.replace(/[\r\n]+/g, ' ');
+      return text ? doc.createTextNode(text) : null;
+    }
+    const point = range.startContainer.nodeType === ELEMENT_NODE
+      ? range.startContainer as Element
+      : range.startContainer.parentElement;
+    // 行内代码要显示字面文本，不能把 Markdown 折叠成排版。
+    if (point?.closest('code, pre')) return plainText ? doc.createTextNode(plainText) : null;
+    const inline = inlinePasteMarkdown(markdown);
+    if (inline === null) return null;
+    const fragment = this.options.renderInlinePaste?.(inline);
+    if (!fragment) return null;
+    adaptPasteFormats(fragment, point);
+    return fragment;
+  }
+
+  /** 同一块内替换选区：直接在 DOM 上删除并按块写回，标记由序列化自然补齐。 */
+  private pasteWithinBlock(index: number, markdown: string, plainText: string): boolean {
+    const surface = this.accessors.getSurface();
+    const selection = surface?.ownerDocument.getSelection();
+    const host = this.accessors.getBlockElement(index);
+    const block = this.document.blocks[index];
+    if (!surface || !selection?.rangeCount || !host || !block) return false;
+    const range = selection.getRangeAt(0);
+    if (range.collapsed || !host.contains(range.startContainer) || !host.contains(range.endContainer)) return false;
+    // 表格只处理同一单元格；跨格删除会移走单元格结构，交给源码路径。
+    if (block.kind === 'table' && !this.sameTableCell(range, host)) return false;
+
+    // 端点可能落在 Wiki/脚注/公式原子内部（例如双击公式文字）。先把端点吸附到
+    // 原子边界，再做偏移映射和删除；否则会删掉半个原子，映射失败还会退回文档开头。
+    snapRangeAroundInlineAtoms(range, host);
+    const startNode = range.startContainer;
+    const startOffset = range.startOffset;
+    const from = this.offsetOfDomPoint(range.startContainer, range.startOffset);
+    const to = this.offsetOfDomPoint(range.endContainer, range.endOffset);
+    const insertion = this.pasteNodeFor(index, range, markdown, plainText);
+    if (!insertion || from === null || to === null) return false;
+
+    this.pushUndo({ coalesce: false });
+    const doc = range.startContainer.ownerDocument;
+    const wrappers = intersectingInlineWrappers(range, host);
+    const last = insertion.nodeType === 11 ? insertion.lastChild : insertion;
+    range.deleteContents();
+    const insertAt = insertionRangeAfterDelete(doc, startNode, startOffset, range);
+    // 插入点所在的空包装要保留，粘贴内容应继承它的格式；其余空包装删除。
+    removeEmptyInlineWrappers(wrappers, insertAt.startContainer);
+    insertAt.insertNode(insertion);
+    // 在文本节点中间插入会拆出空的一半；把光标落在空节点上会破坏路径映射。
+    let next = last?.nextSibling ?? null;
+    while (next && next.nodeType === TEXT_NODE && (next.textContent?.length ?? 0) === 0) {
+      const following = next.nextSibling;
+      next.parentNode?.removeChild(next);
+      next = following;
+    }
+
+    const caret = doc.createRange();
+    if (last?.parentNode) caret.setStartAfter(last);
+    else caret.setStart(insertAt.startContainer, insertAt.startOffset);
+    caret.collapse(true);
+    selection.removeAllRanges();
+    selection.addRange(caret);
+    this.finishDomPaste(index, caret, from, to, markdown);
+    return true;
+  }
+
+  /**
+   * 跨块替换选区。
+   *
+   * 不能整段调用 `Range.deleteContents()`：中间块的宿主元素由 React 管理，被移除后
+   * 后续渲染会与 DOM 状态不一致。这里只清空起点块选区之后的 DOM 和终点块选区之前的
+   * DOM，再把两块重新序列化后拼接；中间块由源码替换自然丢弃。
+   */
+  private pasteAcrossBlocks(startIndex: number, endIndex: number, markdown: string, plainText: string): boolean {
+    const surface = this.accessors.getSurface();
+    const selection = surface?.ownerDocument.getSelection();
+    const startHost = this.accessors.getBlockElement(startIndex);
+    const endHost = this.accessors.getBlockElement(endIndex);
+    const startBlock = this.document.blocks[startIndex];
+    const endBlock = this.document.blocks[endIndex];
+    if (!surface || !selection?.rangeCount || !startHost || !endHost || !startBlock || !endBlock) return false;
+    if (!startBlock.editable || !endBlock.editable) return false;
+    // 表格端点会删掉单元格结构；代码围栏的编辑面不是文本 DOM。交给源码路径。
+    if (startBlock.kind === 'table' || endBlock.kind === 'table') return false;
+    const range = selection.getRangeAt(0);
+    if (range.collapsed || !startHost.contains(range.startContainer) || !endHost.contains(range.endContainer)) return false;
+    // 两端都先吸附到原子边界：起点落在公式/Wiki 内时，直接删到块尾会留下半个原子，
+    // 终点同理。吸附会改写 Range，之后的偏移映射必须使用吸附后的端点。
+    snapRangeAroundInlineAtoms(range, startHost);
+    snapRangeAroundInlineAtoms(range, endHost);
+
+    const point = range.startContainer.nodeType === ELEMENT_NODE
+      ? range.startContainer as Element
+      : range.startContainer.parentElement;
+    const inCode = Boolean(point?.closest('code, pre'));
+    const inline = inCode ? null : inlinePasteMarkdown(markdown);
+    let insertion: Node | null = null;
+    let blockPaste: string | null = null;
+    if (inCode) {
+      if (!plainText) return false;
+      insertion = range.startContainer.ownerDocument.createTextNode(plainText);
+    } else if (inline !== null) {
+      const fragment = this.options.renderInlinePaste?.(inline);
+      if (!fragment) return false;
+      adaptPasteFormats(fragment, point);
+      insertion = fragment;
+    } else {
+      if (!markdown.trim()) return false;
+      blockPaste = withEol(markdown.trim(), this.document.eol);
+    }
+
+    const from = this.offsetOfDomPoint(range.startContainer, range.startOffset);
+    const to = this.offsetOfDomPoint(range.endContainer, range.endOffset);
+    if (from === null || to === null) return false;
+
+    const doc = range.startContainer.ownerDocument;
+    const endContainer = range.endContainer;
+    const endOffset = range.endOffset;
+    this.pushUndo({ coalesce: false });
+
+    // 起点块：删除选区在块内的尾部，守住尚未选中的前缀。
+    const startWrappers = intersectingInlineWrappers(range, startHost);
+    const startNode = range.startContainer;
+    const startOffset = range.startOffset;
+    const startDelete = doc.createRange();
+    startDelete.setStart(startNode, startOffset);
+    startDelete.setEnd(startHost, startHost.childNodes.length);
+    startDelete.deleteContents();
+    let caret: Range | null = null;
+    if (insertion) {
+      const insertAt = insertionRangeAfterDelete(doc, startNode, startOffset, range);
+      removeEmptyInlineWrappers(startWrappers, insertAt.startContainer);
+      const last = insertion.nodeType === 11 ? insertion.lastChild : insertion;
+      insertAt.insertNode(insertion);
+      let next = last?.nextSibling ?? null;
+      while (next && next.nodeType === TEXT_NODE && (next.textContent?.length ?? 0) === 0) {
+        const following = next.nextSibling;
+        next.parentNode?.removeChild(next);
+        next = following;
+      }
+      caret = doc.createRange();
+      if (last?.parentNode) caret.setStartAfter(last);
+      else caret.setStart(insertAt.startContainer, insertAt.startOffset);
+      caret.collapse(true);
+      selection.removeAllRanges();
+      selection.addRange(caret);
+    } else {
+      removeEmptyInlineWrappers(startWrappers, null);
+    }
+
+    // 终点块：删除选区在块内的头部，保留尚未选中的后缀。
+    const endWrappers = intersectingInlineWrappers(range, endHost);
+    const endDelete = doc.createRange();
+    endDelete.setStart(endHost, 0);
+    endDelete.setEnd(endContainer, endOffset);
+    endDelete.deleteContents();
+    removeEmptyInlineWrappers(endWrappers, null);
+
+    const startAfter = this.collectBlock(startIndex);
+    const endAfter = this.collectBlock(endIndex);
+    if (!startAfter || !endAfter) {
+      // DOM 已改写；源码替换后重新渲染会覆盖这两块 DOM。
+      this.replaceRange(from, to, withEol(prepareMarkdownPaste(markdown, this.document.source, from, to), this.document.eol));
+      return true;
+    }
+
+    const eol = this.document.eol;
+    const startSource = startAfter.serialized.markdown;
+    const startMarkdown = withEol(startSource, eol);
+    const endMarkdown = withEol(endAfter.serialized.markdown, eol);
+    let merged: string;
+    let caretLocal: number;
+    if (blockPaste !== null) {
+      const gap = eol + eol;
+      merged = [startMarkdown, blockPaste, endMarkdown].filter(part => part.length > 0).join(gap);
+      caretLocal = startMarkdown.length + (startMarkdown ? gap.length : 0) + blockPaste.length;
+    } else {
+      merged = startBlock.kind === 'paragraph' && endBlock.kind === 'paragraph'
+        ? mergeParagraphSources(startMarkdown, endMarkdown)
+        : [startMarkdown, endMarkdown].filter(part => part.length > 0).join(eol + eol);
+      const local = caret
+        ? this.containerOffsetOfPoint(startAfter, caret.startContainer, caret.startOffset)
+        : null;
+      caretLocal = local === null ? startMarkdown.length : withEol(startSource.slice(0, local), eol).length;
+    }
+
+    const before = this.document.source.slice(0, startBlock.offset);
+    const after = this.document.source.slice(endBlock.offset + endBlock.length);
+    this.applySource(
+      before + merged + after,
+      startBlock.offset + Math.max(0, Math.min(caretLocal, merged.length)),
+    );
+    return true;
+  }
+
+  /** DOM 粘贴后的统一收尾：按新 DOM 序列化并重建该块。 */
+  private finishDomPaste(index: number, caret: Range, from: number, to: number, markdown: string): void {
+    const collected = this.collectBlock(index);
+    if (collected) {
+      const local = this.containerOffsetOfPoint(collected, caret.startContainer, caret.startOffset);
+      if (local !== null) {
+        this.applyBlockSource(collected.block, collected.serialized.markdown, collected.block.offset + local);
+        return;
+      }
+    }
+    // 极少数无法映射的 DOM（例如媒体岛内部）：退回源码替换，重新渲染会覆盖 DOM。
+    this.replaceRange(from, to, withEol(prepareMarkdownPaste(markdown, this.document.source, from, to), this.document.eol));
+  }
+
+  /** 选区两端是否在同一个表格单元格内。 */
+  private sameTableCell(range: Range, host: HTMLElement): boolean {
+    const cellOf = (node: Node): Element | null => {
+      const element = node.nodeType === ELEMENT_NODE ? node as Element : node.parentElement;
+      const cell = element?.closest('td, th') ?? null;
+      return cell && host.contains(cell) ? cell : null;
+    };
+    const start = cellOf(range.startContainer);
+    return Boolean(start && start === cellOf(range.endContainer));
   }
 
   // ── 选区与映射 ─────────────────────────────────────────────

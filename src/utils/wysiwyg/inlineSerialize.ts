@@ -154,7 +154,9 @@ function emitNode(node: InlineNode, path: number[], options: SerializeOptions, o
   }
 
   if (node.tag === 'span' && node.attrs['data-tex'] !== undefined) {
-    out.push({ text: `$${node.attrs['data-tex']}$`, path, kind: 'syntax' });
+    // 公式内部是 KaTeX 生成的多层 DOM，无法逐字映射；作为一个原子对待，
+    // 光标落在公式内时吸附到公式两侧，避免选区截断公式或映射失败回落到文档开头。
+    out.push({ text: `$${node.attrs['data-tex']}$`, path, kind: 'syntax', atomic: true });
     return;
   }
 
@@ -179,14 +181,32 @@ function emitNode(node: InlineNode, path: number[], options: SerializeOptions, o
   }
 
   if (node.tag === 'code') {
-    // 行内代码内容不做转义，整体作为一个片段输出：内容里的反引号由围栏长度处理。
+    // 行内代码内容不做转义：内容里的反引号由围栏长度处理。
     // 例外：表格单元格里的竖线必须转义，否则会被当成列分隔符（GFM 要求含行内代码在内一起转义）。
+    // 内容拆成可映射的文本片段，光标落在行内代码里时才能得到准确偏移；
+    // 开闭围栏单独输出，保证拼接结果与整体输出完全一致。
     const raw = textContentOf(node.children);
     if (raw.length === 0) return;
-    const escaped = options.escapePipes ? raw.replace(/\|/g, '\\|') : raw;
     const delimiter = codeDelimiter(raw);
     const pad = raw.startsWith('`') || raw.endsWith('`') ? ' ' : '';
-    out.push({ text: `${delimiter}${pad}${escaped}${pad}${delimiter}`, path, kind: 'syntax' });
+    out.push({ text: `${delimiter}${pad}`, path, kind: 'syntax' });
+    node.children.forEach((child, index) => {
+      const text = child.type === 'text' ? child.text : textContentOf([child]);
+      if (text.length === 0) return;
+      const steps = Array.from(text, (char, charIndex) => ({
+        from: charIndex,
+        escaped: options.escapePipes && char === '|' ? '\\|' : char,
+      }));
+      out.push({
+        text: steps.map(step => step.escaped).join(''),
+        path: [...path, index],
+        kind: 'text',
+        textFrom: 0,
+        textTo: text.length,
+        steps,
+      });
+    });
+    out.push({ text: `${pad}${delimiter}`, path, kind: 'syntax' });
     return;
   }
 

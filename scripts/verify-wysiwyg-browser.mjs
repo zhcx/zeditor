@@ -53,6 +53,34 @@ try {
     document.getSelection().removeAllRanges();
     document.getSelection().addRange(range);
   }, { text, offset });
+  // 跨块选区要同时引用两个块里的文本节点，因此按整篇文档查找。
+  const selectRange = (fromText, fromOffset, toText, toOffset, fromOccurrence = 0, toOccurrence = fromOccurrence) => page.evaluate(
+    ({ fromText, fromOffset, toText, toOffset, fromOccurrence, toOccurrence }) => {
+      const root = document.querySelector('.wysiwyg-document');
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let node;
+      while ((node = walker.nextNode())) nodes.push(node);
+      const find = (text, occurrence) => {
+        const target = nodes.filter(item => item.textContent === text)[occurrence];
+        if (!target) throw new Error(`Text not found: ${text}`);
+        return target;
+      };
+      const range = document.createRange();
+      range.setStart(find(fromText, fromOccurrence), fromOffset);
+      range.setEnd(find(toText, toOccurrence), toOffset);
+      const selection = document.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    },
+    { fromText, fromOffset, toText, toOffset, fromOccurrence, toOccurrence },
+  );
+  const pasteText = async text => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.evaluate(value => navigator.clipboard.writeText(value), text);
+    await page.keyboard.press('Control+V');
+    await page.waitForTimeout(250);
+  };
   await test('line editing: Enter at the end accepts typing on the following line immediately', async () => {
     await setDocument('');
     await page.locator('.wysiwyg-block').first().click();
@@ -330,6 +358,101 @@ try {
       assert.equal(await getSource(), 'al拼音ta');
       assert.equal(await page.locator('.wysiwyg-block').innerText(), 'al拼音ta');
     } finally { await ime.detach(); }
+  });
+  await test('paste: replacing a formatted selection keeps its markers balanced', async () => {
+    const cases = [
+      ['aa **bold** bb', ['bold', 0, ' bb', 1], 'aa **NEW**bb'],
+      ['aa **bold** bb', ['bold', 1, 'bold', 3], 'aa **bNEWd** bb'],
+      ['aa **bold** bb', ['bold', 2, ' bb', 3], 'aa **boNEW**'],
+      ['x ~~gone~~ y', ['gone', 0, ' y', 1], 'x ~~NEW~~y'],
+      ['a `some code` b', ['some code', 0, 'some code', 5], 'a `NEWcode` b'],
+      ['see [label](https://x.test) now', ['label', 1, 'label', 5], 'see [lNEW](https://x.test) now'],
+      ['see [label](https://x.test) now', ['label', 0, 'label', 5], 'see [NEW](https://x.test) now'],
+      ['see [[note]] now', ['note', 0, 'note', 4], 'see NEW now'],
+      ['# hello there', ['hello there', 0, 'hello there', 6], '# NEWthere'],
+      ['- alpha beta\n- gamma', ['alpha beta', 0, 'alpha beta', 10], '- NEW\n- gamma'],
+      ['> quoted text', ['quoted text', 0, 'quoted text', 11], '> NEW'],
+      ['line one\nline two', ['line one', 0, 'line one', 8], 'NEW\nline two'],
+      ['| abc | def |\n| --- | --- |\n| ghi | jkl |', ['abc', 1, 'abc', 3], '| aNEW | def |\n| --- | --- |\n| ghi | jkl |'],
+    ];
+    for (const [source, [fromText, fromOffset, toText, toOffset], expected] of cases) {
+      await setDocument(source);
+      await selectRange(fromText, fromOffset, toText, toOffset);
+      await pasteText('NEW');
+      assert.equal(await getSource(), expected, source);
+    }
+  });
+  await test('paste: replacing a formula selection removes the whole atom', async () => {
+    await setDocument('x $a+b$ y');
+    await page.waitForSelector('.wysiwyg-document span[data-tex]');
+    await page.locator('.wysiwyg-document span[data-tex]').first().evaluate(math => {
+      const walker = document.createTreeWalker(math, NodeFilter.SHOW_TEXT);
+      const node = walker.nextNode();
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, Math.min(1, node.textContent.length));
+      const selection = document.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await pasteText('NEW');
+    assert.equal(await getSource(), 'x NEW y');
+  });
+  await test('paste: cross-block replacement keeps unselected formatting on both sides', async () => {
+    const cases = [
+      { source: 'aa **bold** bb\n\ncc dd', from: ['bold', 2], to: ['cc dd', 3], expected: 'aa **boNEW**dd' },
+      { source: 'aa bb\n\ncc **bold** dd', from: ['aa bb', 1], to: ['bold', 2], expected: 'aNEW**ld** dd' },
+      { source: 'aa **bold** bb\n\ncc **bold** dd', from: ['bold', 2], to: ['bold', 2, 1], expected: 'aa **boNEWld** dd' },
+    ];
+    for (const { source, from, to, expected } of cases) {
+      await setDocument(source);
+      await selectRange(from[0], from[1], to[0], to[1], from[2] ?? 0, to[2] ?? 0);
+      await pasteText('NEW');
+      assert.equal(await getSource(), expected, source);
+    }
+  });
+  await test('paste: multiline text uses the document line ending', async () => {
+    const cases = [
+      ['alpha beta', ['alpha beta', 6, 'alpha beta', 10], 'alpha one\ntwo'],
+      ['aa\r\n\r\nbb', ['bb', 0, 'bb', 2], 'aa\r\n\r\none\r\ntwo'],
+    ];
+    for (const [source, [fromText, fromOffset, toText, toOffset], expected] of cases) {
+      await setDocument(source);
+      await selectRange(fromText, fromOffset, toText, toOffset);
+      await pasteText('one\ntwo');
+      assert.equal(await getSource(), expected, source);
+    }
+  });
+  await test('paste: markdown clipboard text becomes inline formatting over a selection', async () => {
+    await setDocument('aa cc bb');
+    await selectRange('aa cc bb', 3, 'aa cc bb', 5);
+    await pasteText('**bold**');
+    assert.equal(await getSource(), 'aa **bold** bb');
+  });
+  await test('paste: bold text inside bold does not create nested markers', async () => {
+    await setDocument('aa **cc** bb');
+    await selectRange('cc', 0, 'cc', 2);
+    await pasteText('**bold**');
+    assert.equal(await getSource(), 'aa **bold** bb');
+  });
+  await test('paste: block clipboard text replaces across blocks as separate blocks', async () => {
+    await setDocument('aa **bold** bb\n\ncc dd');
+    await selectRange('bold', 2, 'cc dd', 3);
+    await pasteText('one\n\ntwo');
+    assert.equal(await getSource(), 'aa **bo**\n\none\n\ntwo\n\ndd');
+  });
+  await test('paste: undo restores the source and DOM after a formatted replacement', async () => {
+    await setDocument('aa **bold** bb');
+    await selectRange('bold', 0, ' bb', 1);
+    await pasteText('NEW');
+    assert.equal(await getSource(), 'aa **NEW**bb');
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(200);
+    assert.equal(await getSource(), 'aa **bold** bb');
+    assert.equal(await page.locator('.wysiwyg-block').innerText(), 'aa bold bb');
+    await page.keyboard.press('Control+Shift+z');
+    await page.waitForTimeout(200);
+    assert.equal(await getSource(), 'aa **NEW**bb');
   });
   await test('table arrows move only at cell edges and can leave the table', async () => {
     await setDocument('前段\n\n| A | B |\n| --- | --- |\n| abc | def |\n\n后段');
