@@ -182,34 +182,32 @@ Agent 默认关闭，需要先在“设置 → AI 助手”中启用。Zeditor �
 
 ## 🚀 快速开始
 
-## v0.6.7 更新
+## v0.6.8 更新
 
 ### 更新日志
 
-- **云备份并发安全**：WebDAV / S3 版本备份使用远端 ETag 条件写入；多台设备同时保存同一文稿时会重新读取远端清单并合并，不再静默覆盖其他设备的备份。
-- **文件与恢复可靠性**：回收站与文件恢复校验根路径和文件名；旧编码文本解码失败时明确报错；文件哈希改为流式读取，恢复快照替换改为原子操作。
-- **转换与 AI 流式响应**：文档转换器持续排空子进程输出、增加超时并回收子进程；AI 流式响应在停止生成或离开页面时取消。
-- **渲染稳定性**：Mermaid 与 Markmap 块替换时销毁旧实例；KaTeX 与代码高亮缓存按条目数和字节权重设置上限，并修复缓存键碰撞。
-- **所见即所得粘贴**：选中部分文字后粘贴替换，不再残留原来的 `**`、`~~`、反引号等标记；跨段替换、公式 / Wiki 链接 / 脚注等原子内容以及嵌套粗体一并修复。
-- **保存与源码对照**：新文件首次保存不再等待 AI 命名请求；修复连续普通文本行切回所见即所得、源码对照逐行错位与定位条覆盖整段的问题；“关于 Zeditor”改为读取应用版本与对应版本日志。
+- **中文排版**：支持选区或全文预览并整理中英文间距、中文标点、全角字符和引号；保守跳过代码、链接、公式等内容。
+- **大文档轻量模式**：按文件大小和结构复杂度自动进入单栏源码编辑，可按标签切换回完整视图。
+- **编辑历史与位置**：源码和所见即所得共享撤销、重做历史，切换模式跟随光标，切换标签恢复阅读位置。
+- **导航与稳定性**：修复所见即所得大纲跳转、菜单撤销焦点及无变化替换清除重做记录的问题；优化密集行内语法处理。
 
-### v0.6.7 平台安装包对照
+### v0.6.8 平台安装包对照
 
-> 以下链接指向 v0.6.7 Release 资产，由 GitHub Actions 依据 `v0.6.7` 标签源码构建。Windows 安装包未签名，首次运行可能出现 SmartScreen 提示；macOS 安装包未签名、未公证，首次打开需右键「打开」放行；Linux AppImage 需要 WebKitGTK 4.1。
+> 以下链接指向 v0.6.8 Release 资产，由 GitHub Actions 依据 `v0.6.8` 标签源码构建。Windows 安装包未签名，首次运行可能出现 SmartScreen 提示；macOS 安装包未签名、未公证，首次打开需右键「打开」放行；Linux AppImage 需要 WebKitGTK 4.1。
 
 | 操作系统 | 架构 | 最低系统版本 | 推荐安装包 | 适用场景 |
 | --- | --- | --- | --- | --- |
-| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_0.6.7_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
-| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_0.6.7_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_0.6.7_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
-| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
-| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_0.6.7_x64.dmg) | Intel 芯片 Mac |
-| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
-| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_0.6.7_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
-| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor-0.6.7-1.x86_64.rpm) | RPM 系发行版 |
-| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.7/Zeditor_0.6.7_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
+| Windows | x86_64 | Windows 10 1809+ | [NSIS `.exe`](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_0.6.8_x64-setup.exe) | 推荐大多数用户使用，按向导安装 |
+| Windows | x86_64 | Windows 10 1809+ | [MSI](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_0.6.8_x64_en-US.msi) | 企业部署、系统管理或静默安装 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_0.6.8_aarch64.dmg) | M1、M2、M3、M4 等 Apple 芯片 |
+| macOS Apple Silicon | arm64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_aarch64.app.tar.gz) | 手动解压或更新 |
+| macOS Intel | x86_64 | macOS 12+ | [DMG](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_0.6.8_x64.dmg) | Intel 芯片 Mac |
+| macOS Intel | x86_64 | macOS 12+ | [APP 压缩包](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_x64.app.tar.gz) | 手动解压或更新 |
+| Ubuntu / Debian | x86_64 | Ubuntu 20.04+ / Debian 11+ | [DEB](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_0.6.8_amd64.deb) | Ubuntu、Debian、Linux Mint 等 |
+| Fedora / RHEL / openSUSE | x86_64 | Fedora 38+ / RHEL 9+ | [RPM](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor-0.6.8-1.x86_64.rpm) | RPM 系发行版 |
+| 通用 Linux | x86_64 | 需 webkit2gtk-4.1 | [AppImage](https://github.com/zhcx/zeditor/releases/download/v0.6.8/Zeditor_0.6.8_amd64.AppImage) | 无需安装，赋予执行权限后运行 |
 
-完整更新说明见 [`docs/releases/v0.6.7.md`](docs/releases/v0.6.7.md)；转换模块的在线安装与离线导入见[文档转换指南](docs/guide/converter.md)。
+完整更新说明见 [`docs/releases/v0.6.8.md`](docs/releases/v0.6.8.md)；转换模块的在线安装与离线导入见[文档转换指南](docs/guide/converter.md)。
 
 ## Contributors
 
