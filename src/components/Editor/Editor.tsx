@@ -12,6 +12,7 @@ import { useAIStore, type ProofreadResult } from '../../stores/aiStore';
 import type { EditorController, EditorDispatchSpec, EditorLine } from '../../types/editor';
 import { EDITOR_OVERFLOW_OPTIONS, EDITOR_UNICODE_HIGHLIGHT_OPTIONS } from '../../utils/editorLayout';
 import { resolveEditorDisplay } from '../../utils/editorDisplay';
+import { installMarkdownIndentGuides } from './markdownIndentGuides';
 import { autoCompleteOptions } from '../../utils/editorSuggestions';
 import { markdownFoldingRanges } from '../../utils/markdownFolding';
 import { isNativeMenuActive, isPrimaryModifier } from '../../utils/platform';
@@ -385,6 +386,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
   const inlinePopupClosedAtRef = useRef(0);
   // 表格动作需要访问 Monaco 控制器，用 ref 把闭包里的实现暴露给渲染层与菜单事件。
   const activateTabRef = useRef<(id: string | null) => void>(() => {});
+  const indentGuidesRef = useRef<ReturnType<typeof installMarkdownIndentGuides> | null>(null);
   const tableActionRef = useRef<(action: TableAction) => void>(() => {});
   // 斜杠命令的实际插入同样在编辑器实例里执行：表格命令复用统一的 3 × 3 模板。
   const slashCommandRunRef = useRef<(command: SlashCommand) => void>(() => {});
@@ -628,7 +630,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       showFoldingControls: initialDisplay.foldHeadings || initialDisplay.foldIndentation ? 'mouseover' : 'never',
       unfoldOnClickAfterEndOfLine: false,
       // 缩进参考线：列表的 2 空格缩进由模型的 tabSize 决定（见 prepareMarkdownModel）。
-      guides: { indentation: initialDisplay.indentGuides, bracketPairs: false },
+      guides: { indentation: false, bracketPairs: false },
       ...EDITOR_OVERFLOW_OPTIONS,
       smoothScrolling: false,
       padding: { top: 24, bottom: 40 },
@@ -671,6 +673,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     // 否则首次输入的撤销点会记成文首偏移。
     historyCaret = controller.getSelection().from;
     monacoRef.current = editor;
+    const indentationGuides = installMarkdownIndentGuides(editor, root, () => resolveEditorDisplay(useAppStore.getState().settings.editor).indentGuides);
+    indentGuidesRef.current = indentationGuides;
     modelRef.current = model;
     controllerRef.current = controller;
     setEditorView(controller);
@@ -1423,6 +1427,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     };
 
     return () => {
+      indentationGuides.dispose();
+      indentGuidesRef.current = null;
       const view = editor.saveViewState();
       if (view) documentViewStates.set(currentTabId, view);
       activateTabRef.current = () => {};
@@ -1504,8 +1510,9 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     editor.updateOptions({
       folding,
       showFoldingControls: folding ? 'mouseover' : 'never',
-      guides: { indentation: display.indentGuides, bracketPairs: false },
+      guides: { indentation: false, bracketPairs: false },
     });
+    indentGuidesRef.current?.refresh();
     if (!folding) editor.trigger('zeditor-display', 'editor.unfoldAll', null);
     foldingRangesChanged.fire(markdownFoldingProvider);
   }, [foldHeadings, foldIndentation, indentGuides]);

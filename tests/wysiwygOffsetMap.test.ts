@@ -91,6 +91,29 @@ it('maps wiki and footnote atoms to their own source boundaries without falling 
   }
 });
 
+it('maps a caret inside inline code through the code delimiters', () => {
+  const nodes = [textNode('a '), elementNode('code', {}, [textNode('x y')]), textNode(' b')];
+  const block = serializeBlockMarkdown('paragraph', nodes);
+  assert.equal(block.markdown, 'a `x y` b');
+  const container = { nodes, path: [] };
+  assert.equal(blockOffsetFromPoint(block, container, { path: [1, 0], offset: 0 }), 3);
+  assert.equal(blockOffsetFromPoint(block, container, { path: [1, 0], offset: 2 }), 5);
+  assert.deepEqual(pointFromBlockOffset(block, container, 5), { path: [1, 0], offset: 2 });
+});
+
+it('maps a caret inside a math atom to the atom boundaries', () => {
+  const nodes = [textNode('x '), elementNode('span', { 'data-tex': 'a+b' }, [textNode('a+b')]), textNode(' y')];
+  const block = serializeBlockMarkdown('paragraph', nodes);
+  assert.equal(block.markdown, 'x $a+b$ y');
+  const container = { nodes, path: [] };
+  assert.equal(blockOffsetFromPoint(block, container, { path: [1, 0], offset: 0 }), 2);
+  assert.equal(blockOffsetFromPoint(block, container, { path: [1, 0], offset: 3 }), 7);
+  assert.equal(blockOffsetFromPoint(block, container, { path: [1], offset: 0 }), 2);
+  assert.equal(blockOffsetFromPoint(block, container, { path: [1], offset: 1 }), 7);
+  // 原子片段之后的位置按「父节点 + 子节点下标」表示；与 (原子元素, 1) 等价。
+  assert.deepEqual(pointFromBlockOffset(block, container, 7), { path: [], offset: 2 });
+});
+
 it('preserves an editable footnote definition and maps its raw prefix consistently', () => {
   const nodes = [textNode('[^n]: 定义')];
   const block = serializeBlockMarkdown('paragraph', nodes, { allowBlockMarkers: true });

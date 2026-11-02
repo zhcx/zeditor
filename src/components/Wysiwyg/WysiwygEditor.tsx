@@ -22,6 +22,7 @@ import { escapeInlineText } from '../../utils/wysiwyg/inlineSerialize';
 import { nextBlockRenderBudget } from '../../utils/wysiwyg/renderBudget';
 import { extractFenceCode, extractFenceLanguage } from '../../utils/wysiwyg/codeFence';
 import { hasTrailingEmptyQuoteLine } from '../../utils/wysiwyg/blockOps';
+import { renderInlinePasteFragment } from '../../utils/wysiwyg/inlinePaste';
 import { findInlineTargetAt, type InlineTarget } from '../../utils/inlineTargets';
 import type { ImageSpec } from '../../utils/imageSyntax';
 import { ImagePropertiesModal } from '../Editor/ImagePropertiesModal';
@@ -331,7 +332,8 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
   };
 
   return (
-    <div className={`wysiwyg-block-shell${kind === 'fence' ? ' has-code' : ''}${foldKey ? ' has-fold' : ''}${folded ? ' is-folded-heading' : ''}`}>
+    <div className={`wysiwyg-block-shell${kind === 'fence' ? ' has-code' : ''}${foldKey ? ' has-fold' : ''}${folded ? ' is-folded-heading' : ''}`}
+      data-paragraph-line={kind === 'paragraph' && !/[\r\n]/.test(source.trimEnd()) ? 'true' : undefined}>
       {foldKey && (
         <button
           type="button"
@@ -474,6 +476,7 @@ export function WysiwygEditor() {
         if (tabId) useAppStore.getState().updateTabContent(tabId, source, 'editor');
       },
       insertClipboardImage,
+      renderInlinePaste: renderInlinePasteFragment,
     });
     if (initialView) next.setSelectionOffsets(initialView.from, initialView.to);
     return next;
@@ -525,6 +528,37 @@ export function WysiwygEditor() {
   }, []);
 
   const display = useMemo(() => resolveEditorDisplay(settings.editor), [settings.editor]);
+
+  useEffect(() => {
+    const surface = surfaceRef.current;
+    if (!surface) return;
+    let frame = 0;
+    let active: HTMLElement[] = [];
+    const update = () => {
+      frame = 0;
+      active.forEach(list => list.classList.remove('is-active-indent-guide'));
+      active = [];
+      if (!display.indentGuides) return;
+      const node = surface.ownerDocument.getSelection()?.focusNode;
+      const element = node?.nodeType === 1 ? node as Element : node?.parentElement;
+      let list = element?.closest<HTMLElement>('ul, ol') ?? null;
+      while (list && surface.contains(list)) {
+        const parent = list.parentElement?.closest<HTMLElement>('ul, ol');
+        if (!parent) break;
+        list.classList.add('is-active-indent-guide');
+        active.push(list);
+        list = parent;
+      }
+    };
+    const schedule = () => { if (!frame) frame = requestAnimationFrame(update); };
+    surface.ownerDocument.addEventListener('selectionchange', schedule);
+    schedule();
+    return () => {
+      cancelAnimationFrame(frame);
+      surface.ownerDocument.removeEventListener('selectionchange', schedule);
+      active.forEach(list => list.classList.remove('is-active-indent-guide'));
+    };
+  }, [display.indentGuides, snapshot.version]);
 
   // DOM 访问器与变更监听都在挂载后注入：渲染期读 ref 会触发 react-hooks/refs。
   useLayoutEffect(() => {

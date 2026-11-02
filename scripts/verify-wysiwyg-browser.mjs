@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { pathToFileURL } from 'node:url';
-import { mkdir, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 
 // 可选的浏览器回归：先启动开发服务器，运行环境需提供 Playwright。
@@ -53,6 +53,34 @@ try {
     document.getSelection().removeAllRanges();
     document.getSelection().addRange(range);
   }, { text, offset });
+  // 跨块选区要同时引用两个块里的文本节点，因此按整篇文档查找。
+  const selectRange = (fromText, fromOffset, toText, toOffset, fromOccurrence = 0, toOccurrence = fromOccurrence) => page.evaluate(
+    ({ fromText, fromOffset, toText, toOffset, fromOccurrence, toOccurrence }) => {
+      const root = document.querySelector('.wysiwyg-document');
+      const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+      const nodes = [];
+      let node;
+      while ((node = walker.nextNode())) nodes.push(node);
+      const find = (text, occurrence) => {
+        const target = nodes.filter(item => item.textContent === text)[occurrence];
+        if (!target) throw new Error(`Text not found: ${text}`);
+        return target;
+      };
+      const range = document.createRange();
+      range.setStart(find(fromText, fromOccurrence), fromOffset);
+      range.setEnd(find(toText, toOccurrence), toOffset);
+      const selection = document.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    },
+    { fromText, fromOffset, toText, toOffset, fromOccurrence, toOccurrence },
+  );
+  const pasteText = async text => {
+    await page.context().grantPermissions(['clipboard-read', 'clipboard-write']);
+    await page.evaluate(value => navigator.clipboard.writeText(value), text);
+    await page.keyboard.press('Control+V');
+    await page.waitForTimeout(250);
+  };
   await test('line editing: Enter at the end accepts typing on the following line immediately', async () => {
     await setDocument('');
     await page.locator('.wysiwyg-block').first().click();
@@ -69,6 +97,37 @@ try {
       assert.equal(await getSource(), '第一行\n第二行');
     }
   });
+  await test('line blocks: eight ordinary lines remain independent through mode switches and block deletion', async () => {
+    for (const eol of ['\n', '\r\n']) {
+      const lines = Array.from({ length: 8 }, (_, index) => `正文第${index + 1}行`);
+      const source = [...lines, '', '', ' 后段甲', ' 后段乙'].join(eol);
+      await setDocument(source);
+      for (let cycle = 0; cycle < 3; cycle++) {
+        assert.deepEqual(await page.locator('.wysiwyg-block').evaluateAll(nodes => nodes.slice(0, 8).map(node => node.textContent.trim())), lines);
+        assert.deepEqual(await page.locator('.wysiwyg-block').evaluateAll(nodes => nodes.slice(0, 8).map(node => Number(node.dataset.sourceLine))), [1, 2, 3, 4, 5, 6, 7, 8]);
+        await page.locator('.status-view-state').click();
+        await page.locator('.monaco-editor').waitFor();
+        assert.equal(await getSource(), source);
+        await page.locator('.status-view-state').click();
+        await page.locator('.wysiwyg-block').first().waitFor();
+      }
+      await caretIn(page.locator('.wysiwyg-block').nth(3), lines[3], lines[3].length);
+      await page.keyboard.insertText('修改');
+      assert.equal(await getSource(), source.replace(lines[3], `${lines[3]}修改`));
+      const shell = page.locator('.wysiwyg-block-shell').nth(3);
+      await shell.hover();
+      await shell.locator('.wysiwyg-block-handle').click();
+      await shell.locator('.wysiwyg-block-menu .is-danger').click();
+      const removed = source.replace(`${lines[3]}${eol}`, '');
+      assert.equal(await getSource(), removed);
+      await page.keyboard.press('Control+z');
+      assert.equal(await getSource(), source.replace(lines[3], `${lines[3]}修改`));
+      if (process.env.WYSIWYG_TEST_OUTPUT) {
+        await mkdir(process.env.WYSIWYG_TEST_OUTPUT, { recursive: true });
+        await page.screenshot({ path: join(process.env.WYSIWYG_TEST_OUTPUT, 'independent-line-blocks.png') });
+      }
+    }
+  });
   await test('line editing: repeated Enter creates exactly one source newline per key', async () => {
     await setDocument('第一行');
     await caretIn(page.locator('.wysiwyg-block').first(), '第一行', 3);
@@ -76,10 +135,74 @@ try {
     await page.keyboard.insertText('最后一行');
     assert.equal(await getSource(), '第一行\n\n\n\n最后一行');
   });
+  await test('preview regression: six WYSIWYG lines locate independently in source mode', async () => {
+    await setDocument('');
+    await page.locator('.wysiwyg-block').first().click();
+    const lines = ['第一行内容', '第二行内容', '第三行内容', '第四行内容', '第五行内容', '第六行内容'];
+    for (const [index, text] of lines.entries()) {
+      if (index) await page.keyboard.press('Enter');
+      await page.keyboard.insertText(text);
+    }
+    const source = lines.join('\n');
+    assert.equal(await getSource(), source);
+    await page.locator('.status-view-state').click();
+    try {
+      await page.waitForSelector('.monaco-editor');
+      await page.waitForFunction(() => document.querySelectorAll('.preview-source-line').length === 6);
+      for (let line = 1; line <= 6; line++) {
+        await page.evaluate(async line => {
+          const { useAppStore } = await import('/src/stores/appStore.ts');
+          const editor = useAppStore.getState().editorView;
+          editor.setSelection(editor.line(line).from);
+          editor.focus();
+        }, line);
+        const active = page.locator(`.preview-source-line.is-active-source-block[data-source-line="${line}"]`);
+        await active.waitFor();
+        const geometry = await active.evaluate(node => ({
+          height: node.getBoundingClientRect().height,
+          paragraphHeight: node.closest('p').getBoundingClientRect().height,
+          indicator: getComputedStyle(node, '::before').content,
+        }));
+        assert.ok(geometry.height < geometry.paragraphHeight / 2, JSON.stringify(geometry));
+        assert.equal(geometry.indicator, '""');
+        await page.locator(`.preview-source-line[data-source-line="${7 - line}"]`).click();
+        await page.waitForFunction(async line => {
+          const { useAppStore } = await import('/src/stores/appStore.ts');
+          const editor = useAppStore.getState().editorView;
+          return editor.lineAt(editor.state.selection.main.head).number === line;
+        }, 7 - line);
+      }
+      assert.equal(await getSource(), source);
+      if (process.env.WYSIWYG_TEST_OUTPUT) {
+        await mkdir(process.env.WYSIWYG_TEST_OUTPUT, { recursive: true });
+        await page.screenshot({ path: join(process.env.WYSIWYG_TEST_OUTPUT, 'preview-line-indicator.png') });
+      }
+    } finally {
+      await page.locator('.status-view-state').click();
+      await page.waitForSelector('.wysiwyg-block');
+    }
+  });
+  await test('preview regression: About shows the application version and its release notes', async () => {
+    const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+    await page.locator('.app-menu-trigger').click();
+    await page.getByRole('button', { name: '关于 Zeditor', exact: true }).click();
+    const help = page.locator('.help-content');
+    await help.waitFor();
+    try {
+      const text = await help.innerText();
+      assert.ok(text.includes(`Zeditor v${pkg.version}`));
+      assert.ok(!text.includes('Zeditor v0.6.3'));
+      assert.ok(!text.includes('暂无本版本更新说明'));
+      assert.ok(text.includes('数据恢复与文件保护'));
+      if (process.env.WYSIWYG_TEST_OUTPUT) {
+        await page.screenshot({ path: join(process.env.WYSIWYG_TEST_OUTPUT, 'about-release-notes.png') });
+      }
+    } finally { await page.locator('.modal-close').click(); }
+  });
   await test('line editing: editing rendered soft breaks never doubles LF or CRLF', async () => {
     for (const eol of ['\n', '\r\n']) {
       await setDocument(`第一行${eol}第二行`);
-      await caretIn(page.locator('.wysiwyg-block').first(), '第二行', 3);
+      await caretIn(page.locator('.wysiwyg-block').filter({ hasText: '第二行' }), '第二行', 3);
       await page.keyboard.insertText('修改');
       assert.equal(await getSource(), `第一行${eol}第二行修改`);
     }
@@ -145,7 +268,7 @@ try {
   });
   await test('line editing: CRLF Enter and input after a blank document retain line positions', async () => {
     await setDocument('第一行\r\n第二行');
-    await caretIn(page.locator('.wysiwyg-block').first(), '第二行', 3);
+    await caretIn(page.locator('.wysiwyg-block').filter({ hasText: '第二行' }), '第二行', 3);
     await page.keyboard.press('Enter');
     await page.keyboard.insertText('第三行');
     assert.equal(await getSource(), '第一行\r\n第二行\r\n第三行');
@@ -235,6 +358,101 @@ try {
       assert.equal(await getSource(), 'al拼音ta');
       assert.equal(await page.locator('.wysiwyg-block').innerText(), 'al拼音ta');
     } finally { await ime.detach(); }
+  });
+  await test('paste: replacing a formatted selection keeps its markers balanced', async () => {
+    const cases = [
+      ['aa **bold** bb', ['bold', 0, ' bb', 1], 'aa **NEW**bb'],
+      ['aa **bold** bb', ['bold', 1, 'bold', 3], 'aa **bNEWd** bb'],
+      ['aa **bold** bb', ['bold', 2, ' bb', 3], 'aa **boNEW**'],
+      ['x ~~gone~~ y', ['gone', 0, ' y', 1], 'x ~~NEW~~y'],
+      ['a `some code` b', ['some code', 0, 'some code', 5], 'a `NEWcode` b'],
+      ['see [label](https://x.test) now', ['label', 1, 'label', 5], 'see [lNEW](https://x.test) now'],
+      ['see [label](https://x.test) now', ['label', 0, 'label', 5], 'see [NEW](https://x.test) now'],
+      ['see [[note]] now', ['note', 0, 'note', 4], 'see NEW now'],
+      ['# hello there', ['hello there', 0, 'hello there', 6], '# NEWthere'],
+      ['- alpha beta\n- gamma', ['alpha beta', 0, 'alpha beta', 10], '- NEW\n- gamma'],
+      ['> quoted text', ['quoted text', 0, 'quoted text', 11], '> NEW'],
+      ['line one\nline two', ['line one', 0, 'line one', 8], 'NEW\nline two'],
+      ['| abc | def |\n| --- | --- |\n| ghi | jkl |', ['abc', 1, 'abc', 3], '| aNEW | def |\n| --- | --- |\n| ghi | jkl |'],
+    ];
+    for (const [source, [fromText, fromOffset, toText, toOffset], expected] of cases) {
+      await setDocument(source);
+      await selectRange(fromText, fromOffset, toText, toOffset);
+      await pasteText('NEW');
+      assert.equal(await getSource(), expected, source);
+    }
+  });
+  await test('paste: replacing a formula selection removes the whole atom', async () => {
+    await setDocument('x $a+b$ y');
+    await page.waitForSelector('.wysiwyg-document span[data-tex]');
+    await page.locator('.wysiwyg-document span[data-tex]').first().evaluate(math => {
+      const walker = document.createTreeWalker(math, NodeFilter.SHOW_TEXT);
+      const node = walker.nextNode();
+      const range = document.createRange();
+      range.setStart(node, 0);
+      range.setEnd(node, Math.min(1, node.textContent.length));
+      const selection = document.getSelection();
+      selection.removeAllRanges();
+      selection.addRange(range);
+    });
+    await pasteText('NEW');
+    assert.equal(await getSource(), 'x NEW y');
+  });
+  await test('paste: cross-block replacement keeps unselected formatting on both sides', async () => {
+    const cases = [
+      { source: 'aa **bold** bb\n\ncc dd', from: ['bold', 2], to: ['cc dd', 3], expected: 'aa **boNEW**dd' },
+      { source: 'aa bb\n\ncc **bold** dd', from: ['aa bb', 1], to: ['bold', 2], expected: 'aNEW**ld** dd' },
+      { source: 'aa **bold** bb\n\ncc **bold** dd', from: ['bold', 2], to: ['bold', 2, 1], expected: 'aa **boNEWld** dd' },
+    ];
+    for (const { source, from, to, expected } of cases) {
+      await setDocument(source);
+      await selectRange(from[0], from[1], to[0], to[1], from[2] ?? 0, to[2] ?? 0);
+      await pasteText('NEW');
+      assert.equal(await getSource(), expected, source);
+    }
+  });
+  await test('paste: multiline text uses the document line ending', async () => {
+    const cases = [
+      ['alpha beta', ['alpha beta', 6, 'alpha beta', 10], 'alpha one\ntwo'],
+      ['aa\r\n\r\nbb', ['bb', 0, 'bb', 2], 'aa\r\n\r\none\r\ntwo'],
+    ];
+    for (const [source, [fromText, fromOffset, toText, toOffset], expected] of cases) {
+      await setDocument(source);
+      await selectRange(fromText, fromOffset, toText, toOffset);
+      await pasteText('one\ntwo');
+      assert.equal(await getSource(), expected, source);
+    }
+  });
+  await test('paste: markdown clipboard text becomes inline formatting over a selection', async () => {
+    await setDocument('aa cc bb');
+    await selectRange('aa cc bb', 3, 'aa cc bb', 5);
+    await pasteText('**bold**');
+    assert.equal(await getSource(), 'aa **bold** bb');
+  });
+  await test('paste: bold text inside bold does not create nested markers', async () => {
+    await setDocument('aa **cc** bb');
+    await selectRange('cc', 0, 'cc', 2);
+    await pasteText('**bold**');
+    assert.equal(await getSource(), 'aa **bold** bb');
+  });
+  await test('paste: block clipboard text replaces across blocks as separate blocks', async () => {
+    await setDocument('aa **bold** bb\n\ncc dd');
+    await selectRange('bold', 2, 'cc dd', 3);
+    await pasteText('one\n\ntwo');
+    assert.equal(await getSource(), 'aa **bo**\n\none\n\ntwo\n\ndd');
+  });
+  await test('paste: undo restores the source and DOM after a formatted replacement', async () => {
+    await setDocument('aa **bold** bb');
+    await selectRange('bold', 0, ' bb', 1);
+    await pasteText('NEW');
+    assert.equal(await getSource(), 'aa **NEW**bb');
+    await page.keyboard.press('Control+z');
+    await page.waitForTimeout(200);
+    assert.equal(await getSource(), 'aa **bold** bb');
+    assert.equal(await page.locator('.wysiwyg-block').innerText(), 'aa bold bb');
+    await page.keyboard.press('Control+Shift+z');
+    await page.waitForTimeout(200);
+    assert.equal(await getSource(), 'aa **NEW**bb');
   });
   await test('table arrows move only at cell edges and can leave the table', async () => {
     await setDocument('前段\n\n| A | B |\n| --- | --- |\n| abc | def |\n\n后段');
@@ -529,20 +747,20 @@ try {
   });
   await test('paragraph height stays stable across Enter and write-back re-render', async () => {
     await setDocument('');
-    const shellHeight = index => page.locator('.wysiwyg-block-shell').nth(index).evaluate(node => node.getBoundingClientRect().height);
+    const contentHeight = () => page.locator('.wysiwyg-block-shell').evaluateAll(nodes => nodes.reduce((sum, node) => sum + node.getBoundingClientRect().height, 0));
     await page.locator('.wysiwyg-block').first().click();
     await page.keyboard.type('AAA');
     await page.waitForTimeout(400);
-    const typed = await shellHeight(0);
+    const typed = await contentHeight();
     await page.keyboard.press('Enter');
     await page.waitForTimeout(400);
-    const afterEnter = await shellHeight(0);
+    const afterEnter = await contentHeight();
     await page.keyboard.type('BBB');
     await page.waitForTimeout(400);
     assert.equal(await getSource(), 'AAA\nBBB');
     // 输入态与重建后的 <p> 必须同高：此前 21px 会在写回后跳成 25.76px。
     const lineHeight = await page.locator('.wysiwyg-block p').first().evaluate(node => Number.parseFloat(getComputedStyle(node).lineHeight));
-    assert.ok(Math.abs(afterEnter - (await shellHeight(0))) < 0.5, 'typing on the new line must not change its height');
+    assert.ok(Math.abs(afterEnter - (await contentHeight())) < 0.5, 'typing on the new line must not change its height');
     assert.ok(Math.abs(afterEnter - typed - lineHeight) < 0.5, `Enter should add exactly one visual line: ${typed} -> ${afterEnter}`);
   });
   await test('block source editing stays inline and writes back', async () => {
@@ -589,7 +807,7 @@ try {
         useAppStore.setState({ tabs: state.tabs.filter(tab => tab.id === state.activeTabId), sidebarVisible: true });
         useAIStore.setState({ proofreadPanelVisible: false, proofreadResults: [] });
       });
-      await caretIn(page.locator('.wysiwyg-block').first(), '第二行', 3);
+      await caretIn(page.locator('.wysiwyg-block').filter({ hasText: '第二行' }), '第二行', 3);
       await page.screenshot({ path: join(output, 'wysiwyg.png') });
       await page.locator('.status-view-state').click();
       await page.waitForSelector('.monaco-editor');

@@ -13,7 +13,9 @@ test('显示设置：源码模式注册 Markdown 折叠 provider 并启用缩进
   assert.match(editor, /markdownFoldingRanges\(model\.getLinesContent\(\)/);
   assert.match(editor, /foldingRangesChanged\.fire\(markdownFoldingProvider\)/);
   // 缩进参考线与折叠开关随设置即时同步到现有实例。
-  assert.match(editor, /guides: \{ indentation: display\.indentGuides, bracketPairs: false \}/);
+  assert.match(editor, /guides: \{ indentation: false, bracketPairs: false \}/);
+  assert.match(editor, /installMarkdownIndentGuides\(editor/);
+  assert.match(editor, /indentGuidesRef\.current\?\.refresh\(\)/);
   assert.match(editor, /showFoldingControls: folding \? 'mouseover' : 'never'/);
   // 折行仍按视口宽度（限制行宽靠 CSS 收窄文档卡片，不改折行列）。
   assert.match(editor, /wordWrap: 'on'/);

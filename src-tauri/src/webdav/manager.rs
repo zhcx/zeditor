@@ -10,8 +10,56 @@ use super::queue::PendingTaskStore;
 use super::{
     deterministic_version_id, history_index_path, map_remote_document, normalize_remote_root,
     parse_index, parse_manifest, sha256_hex, validate_index_namespace, validate_manifest_namespace,
-    RemoteClient, RemoteSyncClient,
+    PutOutcome, RemoteClient, RemoteSyncClient, WritePrecondition,
 };
+
+/// A manifest or index write can lose a race with another device. Whole-sync
+/// retries are safe because snapshots use deterministic ids and the manifest
+/// de-duplicates identical content.
+const SYNC_MAX_ATTEMPTS: usize = 3;
+const SYNC_RETRY_BASE_DELAY: std::time::Duration = std::time::Duration::from_millis(150);
+/// Waiting for the worker lock is bounded so a hung sync cannot wedge the
+/// queue forever. The value is deliberately generous: a large attachment
+/// bundle can legitimately take minutes.
+const SYNC_LOCK_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(5 * 60);
+/// Hard ceiling for one whole transaction, including conflict retries.
+const SYNC_OPERATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(10 * 60);
+
+async fn acquire_worker_lock<'a, T>(
+    lock: &'a tokio::sync::Mutex<T>,
+    timeout: std::time::Duration,
+) -> Result<tokio::sync::MutexGuard<'a, T>, String> {
+    tokio::time::timeout(timeout, lock.lock())
+        .await
+        .map_err(|_| {
+            "Another backup sync is still running. This document remains queued; retry shortly."
+                .to_string()
+        })
+}
+
+/// Distinguishes a retryable optimistic-concurrency loss from a hard failure.
+#[derive(Debug)]
+enum SyncAttemptError {
+    Conflict(String),
+    Failed(String),
+}
+
+impl From<String> for SyncAttemptError {
+    fn from(error: String) -> Self {
+        Self::Failed(error)
+    }
+}
+
+impl SyncAttemptError {
+    fn into_message(self) -> String {
+        match self {
+            Self::Failed(error) => error,
+            Self::Conflict(path) => format!(
+                "Sync conflict on {path}: another device changed it concurrently. Please retry."
+            ),
+        }
+    }
+}
 
 /// Which remote backup backend a manager instance drives.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -239,7 +287,24 @@ async fn process_impl(
     remote_root: String,
     client: RemoteClient,
 ) -> Result<(), String> {
-    let _guard = inner.worker.lock().await;
+    let _guard = match acquire_worker_lock(&inner.worker, SYNC_LOCK_TIMEOUT).await {
+        Ok(guard) => guard,
+        Err(error) => {
+            emit(
+                inner,
+                WebDavSyncEvent {
+                    provider: inner.provider.label().to_string(),
+                    document_id: task.document_id.clone(),
+                    local_path: task.local_path.clone(),
+                    phase: "error".to_string(),
+                    progress: None,
+                    timestamp: now_rfc3339(),
+                    error: Some(sanitize_error(&error)),
+                },
+            );
+            return Err(error);
+        }
+    };
     // sync_task refreshes byte/attachment fingerprints. Completion must still
     // compare the persisted enqueue identity, not those refreshed fields.
     let queued_task = task.clone();
@@ -257,7 +322,18 @@ async fn process_impl(
         },
     );
 
-    let result = sync_task(&client, &mut task, &remote_root).await;
+    let result = match tokio::time::timeout(
+        SYNC_OPERATION_TIMEOUT,
+        sync_with_retries(&client, &mut task, &remote_root),
+    )
+    .await
+    {
+        Ok(result) => result,
+        Err(_) => Err(format!(
+            "Backup sync timed out after {} seconds. The pending task was kept for a later retry.",
+            SYNC_OPERATION_TIMEOUT.as_secs()
+        )),
+    };
     match result {
         Ok(()) => {
             if let Err(error) = inner.queue.complete(&queued_task) {
@@ -307,11 +383,35 @@ async fn process_impl(
     }
 }
 
-async fn sync_task(
+/// Retry the whole transaction when another device wins a manifest/index
+/// write. A fresh attempt re-reads both documents, so the new base version is
+/// used instead of overwriting the concurrent update.
+async fn sync_with_retries(
     client: &RemoteClient,
     task: &mut PendingBackupTask,
     remote_root: &str,
 ) -> Result<(), String> {
+    let mut attempt = 0;
+    loop {
+        attempt += 1;
+        match sync_task(client, task, remote_root).await {
+            Ok(()) => return Ok(()),
+            Err(SyncAttemptError::Failed(error)) => return Err(error),
+            Err(SyncAttemptError::Conflict(path)) => {
+                if attempt >= SYNC_MAX_ATTEMPTS {
+                    return Err(SyncAttemptError::Conflict(path).into_message());
+                }
+                tokio::time::sleep(SYNC_RETRY_BASE_DELAY * attempt as u32).await;
+            }
+        }
+    }
+}
+
+async fn sync_task(
+    client: &RemoteClient,
+    task: &mut PendingBackupTask,
+    remote_root: &str,
+) -> Result<(), SyncAttemptError> {
     // 1. Read the latest local bytes.
     let bytes = std::fs::read(&task.local_path)
         .map_err(|error| format!("Failed to read local file '{}': {error}", task.local_path))?;
@@ -339,10 +439,19 @@ async fn sync_task(
     };
 
     // 2. Read and validate the remote manifest, never trusting its paths.
-    let manifest_bytes = client.get_optional(&task.manifest_path).await?;
-    let mut manifest = match &manifest_bytes {
-        Some(bytes) => {
-            let parsed = parse_manifest(bytes)?;
+    //    The ETag (when the server provides a strong one) becomes the
+    //    precondition for the write below.
+    let manifest_object = client.get_optional_with_etag(&task.manifest_path).await?;
+    let manifest_precondition = match &manifest_object {
+        Some(object) => match object.etag.as_deref() {
+            Some(etag) => WritePrecondition::Match(etag),
+            None => WritePrecondition::Unconditional,
+        },
+        None => WritePrecondition::MustNotExist,
+    };
+    let mut manifest = match &manifest_object {
+        Some(object) => {
+            let parsed = parse_manifest(&object.bytes)?;
             validate_manifest_namespace(&parsed, &expected, &remote_root)?;
             parsed
         }
@@ -389,15 +498,28 @@ async fn sync_task(
         });
         let manifest_json = serde_json::to_vec_pretty(&manifest)
             .map_err(|error| format!("Failed to serialize WebDAV manifest: {error}"))?;
-        client.put(&task.manifest_path, &manifest_json).await?;
+        if client
+            .put_conditional(&task.manifest_path, &manifest_json, manifest_precondition)
+            .await?
+            == PutOutcome::PreconditionFailed
+        {
+            return Err(SyncAttemptError::Conflict(task.manifest_path.clone()));
+        }
     }
 
     // 7. Read and validate the global index, then upsert this document.
     let index_path = history_index_path(&remote_root);
-    let index_bytes = client.get_optional(&index_path).await?;
-    let mut index = match &index_bytes {
-        Some(bytes) => {
-            let parsed = parse_index(bytes)?;
+    let index_object = client.get_optional_with_etag(&index_path).await?;
+    let index_precondition = match &index_object {
+        Some(object) => match object.etag.as_deref() {
+            Some(etag) => WritePrecondition::Match(etag),
+            None => WritePrecondition::Unconditional,
+        },
+        None => WritePrecondition::MustNotExist,
+    };
+    let mut index = match &index_object {
+        Some(object) => {
+            let parsed = parse_index(&object.bytes)?;
             validate_index_namespace(&parsed, &remote_root)?;
             parsed
         }
@@ -412,7 +534,13 @@ async fn sync_task(
     });
     let index_json = serde_json::to_vec_pretty(&index)
         .map_err(|error| format!("Failed to serialize WebDAV index: {error}"))?;
-    client.put(&index_path, &index_json).await?;
+    if client
+        .put_conditional(&index_path, &index_json, index_precondition)
+        .await?
+        == PutOutcome::PreconditionFailed
+    {
+        return Err(SyncAttemptError::Conflict(index_path));
+    }
 
     // 8. Upload the current remote copy after its parent collections exist.
     let current_parent = parent_path(&task.current_path);
@@ -553,6 +681,81 @@ mod tests {
             .await
             .expect("retry");
         assert_eq!(fixture.visible_manifest_versions().await, 1);
+    }
+
+    #[tokio::test]
+    async fn worker_lock_wait_is_bounded_so_a_hung_sync_cannot_block_the_queue() {
+        let lock = tokio::sync::Mutex::new(());
+        let _held = lock.lock().await;
+        let error = match acquire_worker_lock(&lock, std::time::Duration::from_millis(10)).await {
+            Ok(_) => panic!("the lock must not be acquired while another guard is held"),
+            Err(error) => error,
+        };
+        assert!(error.contains("still running"), "unexpected error: {error}");
+    }
+
+    #[tokio::test]
+    async fn etag_conflict_refetches_the_manifest_and_merges_instead_of_overwriting() {
+        let document_id = "a".repeat(24);
+        let versions_dir = format!("/Zeditor/.zeditor-history/documents/{document_id}/versions");
+        let manifest_path =
+            format!("/Zeditor/.zeditor-history/documents/{document_id}/manifest.json");
+
+        // A second device publishes a version while our first PUT is in flight.
+        let other_id = "b".repeat(24);
+        let mut concurrent =
+            DocumentManifest::new(&document_id, "note.md", "/Zeditor/notes/note.md");
+        concurrent.insert_version(WebDavVersion {
+            encoding: None,
+            id: other_id.clone(),
+            created_at: "2026-08-19T14:31:00Z".into(),
+            size: 12,
+            sha256: "c".repeat(64),
+            snapshot_path: format!("{versions_dir}/{other_id}.md"),
+            assets: Some(Vec::new()),
+        });
+        let fixture = TestDavServer::conflict_once(
+            &manifest_path,
+            serde_json::to_vec_pretty(&concurrent).unwrap(),
+        )
+        .await;
+
+        let root = test_temp_dir();
+        let manager = manager_for(root.join("pending.json"));
+        let task = task_for(&root.join("note.md"), b"version one");
+        manager
+            .process(task.clone(), settings_for(&fixture.url))
+            .await
+            .expect("a manifest conflict should be retried");
+
+        let puts: Vec<_> = fixture
+            .requests()
+            .await
+            .into_iter()
+            .filter(|request| request.method == "PUT" && request.path == manifest_path)
+            .collect();
+        assert_eq!(puts.len(), 2, "the rejected manifest write must be retried");
+        assert_eq!(
+            puts[0].headers.get("if-none-match").map(String::as_str),
+            Some("*")
+        );
+        let retry_validator = puts[1].headers.get("if-match").expect("If-Match");
+        assert!(
+            retry_validator.starts_with('"'),
+            "unexpected validator: {retry_validator}"
+        );
+        assert!(
+            !puts[1].headers.contains_key("if-none-match"),
+            "an existing manifest must be updated with If-Match, not If-None-Match"
+        );
+
+        // Both the concurrent version and ours survive the merge.
+        assert_eq!(fixture.visible_manifest_versions().await, 2);
+        assert_eq!(
+            fixture.resource("/Zeditor/notes/note.md").await.unwrap(),
+            b"version one"
+        );
+        assert!(manager.inner.queue.load().unwrap().is_empty());
     }
 
     #[tokio::test]

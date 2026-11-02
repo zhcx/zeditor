@@ -35,7 +35,7 @@ export function useTabClose() {
       if (action === 'save') {
         savingRef.current = true;
         setSaving(true);
-        const baseName = tab.path ? '' : await resolveSaveBaseName(tab.title, tab.content);
+        const baseName = tab.path ? '' : resolveSaveBaseName(tab.title, tab.content);
         if (epoch !== closeEpoch.current) return;
         const path = tab.path ?? await save({
           title: `保存“${tab.title}”`,

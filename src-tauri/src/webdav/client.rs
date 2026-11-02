@@ -2,6 +2,49 @@ use reqwest::StatusCode;
 
 use super::model::WebDavSettings;
 
+/// A remote resource together with the validator needed for optimistic writes.
+///
+/// Servers that omit `ETag` (or return a weak validator) yield `etag: None`;
+/// callers then fall back to an unconditional write instead of failing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RemoteObject {
+    pub bytes: Vec<u8>,
+    pub etag: Option<String>,
+}
+
+/// Precondition for replacing a remote resource.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WritePrecondition<'a> {
+    /// Preserve the legacy behavior for servers without usable validators.
+    Unconditional,
+    /// Fail when the resource already exists (creation races).
+    MustNotExist,
+    /// Fail unless the current validator matches.
+    Match(&'a str),
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum PutOutcome {
+    Applied,
+    PreconditionFailed,
+}
+
+/// Extract a strong ETag. Weak validators never satisfy `If-Match` per RFC
+/// 9110, so they are intentionally discarded.
+pub(super) fn strong_etag(response: &reqwest::Response) -> Option<String> {
+    let value = response
+        .headers()
+        .get(reqwest::header::ETAG)?
+        .to_str()
+        .ok()?
+        .trim();
+    if value.is_empty() || value.starts_with("W/") {
+        None
+    } else {
+        Some(value.to_string())
+    }
+}
+
 /// Authenticated WebDAV protocol client.
 ///
 /// Provides HTTP methods for WebDAV operations: MKCOL, PUT, GET, DELETE, PROPFIND.
@@ -51,6 +94,7 @@ impl WebDavClient {
         let client = reqwest::Client::builder()
             .connect_timeout(std::time::Duration::from_secs(10))
             .timeout(std::time::Duration::from_secs(45))
+            .pool_idle_timeout(std::time::Duration::from_secs(30))
             .default_headers(headers)
             .build()
             .map_err(|error| format!("Failed to build WebDAV client: {error}"))?;
@@ -121,42 +165,100 @@ impl WebDavClient {
         match status {
             // 201: created. 301: redirected to the canonical collection URL.
             StatusCode::CREATED | StatusCode::MOVED_PERMANENTLY => Ok(()),
-            // 405 is ambiguous: the collection may already exist, or the server
-            // may refuse automatic directory creation (common on NAS WebDAV).
-            // Verify with PROPFIND instead of guessing.
-            StatusCode::METHOD_NOT_ALLOWED => match self.propfind_exists(&collection_path).await {
+            // A concurrent device may create the same collection between our
+            // MKCOL and the server's answer. Servers report that race as 405,
+            // but WsgiDAV on Windows surfaces it as 500; PROPFIND is the only
+            // reliable way to tell "already exists" from a real failure.
+            _ => match self.propfind_exists(&collection_path).await {
                 Ok(true) => Ok(()),
-                Ok(false) => Err(format!(
+                Ok(false) if status == StatusCode::METHOD_NOT_ALLOWED => Err(format!(
                     "服务器不支持自动创建目录（MKCOL 405）：{path} 不存在。请先在 NAS 文件管理器中手动创建该目录，再重新测试连接"
                 )),
-                Err(_) => Err(
+                _ if status == StatusCode::METHOD_NOT_ALLOWED => Err(
                     "服务器不支持创建远端目录（MKCOL 405），且无法验证目录是否已存在".to_string(),
                 ),
+                _ => Err(sanitize_webdav_error(Some(status.as_u16()), "")),
             },
-            _ => Err(sanitize_webdav_error(Some(status.as_u16()), "")),
         }
     }
 
-    /// Upload bytes to a resource path, replacing an existing resource.
-    pub async fn put(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
-        let url = self.request_url(path)?;
-        let request = self.client.put(url).body(bytes.to_vec());
+    async fn send_put(
+        &self,
+        url: reqwest::Url,
+        bytes: &[u8],
+        precondition: WritePrecondition<'_>,
+    ) -> Result<StatusCode, String> {
+        let mut request = self.client.put(url).body(bytes.to_vec());
+        match precondition {
+            WritePrecondition::Unconditional => {}
+            WritePrecondition::MustNotExist => {
+                request = request.header(reqwest::header::IF_NONE_MATCH, "*");
+            }
+            WritePrecondition::Match(etag) => {
+                request = request.header(reqwest::header::IF_MATCH, etag);
+            }
+        }
         let response = self
             .apply_auth(request)
             .send()
             .await
             .map_err(|error| classify_network_error(&error))?;
+        Ok(response.status())
+    }
 
-        let status = response.status();
+    /// Upload bytes, enforcing an optional optimistic-concurrency precondition.
+    ///
+    /// A stale `If-Match` (or an existing resource with `If-None-Match: *`)
+    /// maps to `PreconditionFailed`, letting the sync manager refetch and
+    /// retry instead of silently overwriting another device's manifest.
+    pub async fn put_conditional(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        precondition: WritePrecondition<'_>,
+    ) -> Result<PutOutcome, String> {
+        let url = self.request_url(path)?;
+        let mut status = self.send_put(url.clone(), bytes, precondition).await?;
+
+        // A few minimal WebDAV implementations reject conditional headers they
+        // do not understand. Retry once without one so sync keeps working there;
+        // the lost race window is limited to those servers.
+        if matches!(status.as_u16(), 400 | 501) && precondition != WritePrecondition::Unconditional
+        {
+            status = self
+                .send_put(url, bytes, WritePrecondition::Unconditional)
+                .await?;
+        }
+
         if matches!(status.as_u16(), 200 | 201 | 204) {
-            Ok(())
+            Ok(PutOutcome::Applied)
+        } else if status == StatusCode::PRECONDITION_FAILED
+            || (status == StatusCode::CONFLICT && precondition != WritePrecondition::Unconditional)
+        {
+            // RFC 9110 specifies 412, but a few WebDAV servers report a
+            // conditional write race as 409. Treat both as retryable.
+            Ok(PutOutcome::PreconditionFailed)
         } else {
             Err(sanitize_webdav_error(Some(status.as_u16()), ""))
         }
     }
 
-    /// Read a resource; returns `None` when the server responds with 404.
-    pub async fn get_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+    /// Upload bytes to a resource path, replacing an existing resource.
+    pub async fn put(&self, path: &str, bytes: &[u8]) -> Result<(), String> {
+        match self
+            .put_conditional(path, bytes, WritePrecondition::Unconditional)
+            .await?
+        {
+            PutOutcome::Applied => Ok(()),
+            PutOutcome::PreconditionFailed => {
+                Err("WebDAV upload was rejected by a write precondition".to_string())
+            }
+        }
+    }
+
+    /// Read a resource and its strong ETag; `None` when the server responds
+    /// with 404.
+    pub async fn get_optional_with_etag(&self, path: &str) -> Result<Option<RemoteObject>, String> {
         let url = self.request_url(path)?;
         let request = self.client.get(url);
         let response = self
@@ -173,11 +275,24 @@ impl WebDavClient {
             return Err(sanitize_webdav_error(Some(status.as_u16()), ""));
         }
 
+        // The ETag must be read before consuming the response body.
+        let etag = strong_etag(&response);
         let bytes = response
             .bytes()
             .await
             .map_err(|error| format!("Failed to read WebDAV response: {error}"))?;
-        Ok(Some(bytes.to_vec()))
+        Ok(Some(RemoteObject {
+            bytes: bytes.to_vec(),
+            etag,
+        }))
+    }
+
+    /// Read a resource; returns `None` when the server responds with 404.
+    pub async fn get_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
+        Ok(self
+            .get_optional_with_etag(path)
+            .await?
+            .map(|object| object.bytes))
     }
 
     /// Read a resource; returns an error when the resource is absent.
@@ -293,8 +408,30 @@ pub trait RemoteSyncClient: Send + Sync {
     /// Upload bytes to a resource path, replacing an existing resource.
     async fn put(&self, path: &str, bytes: &[u8]) -> Result<(), String>;
 
+    /// Upload with an optimistic-concurrency precondition.
+    ///
+    /// Backends without conditional-write support fall back to an
+    /// unconditional write instead of failing the whole sync.
+    async fn put_conditional(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        _precondition: WritePrecondition<'_>,
+    ) -> Result<PutOutcome, String> {
+        self.put(path, bytes).await?;
+        Ok(PutOutcome::Applied)
+    }
+
     /// Read a resource; `Ok(None)` when the resource is absent.
     async fn get_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String>;
+
+    /// Read a resource together with a strong validator when available.
+    async fn get_optional_with_etag(&self, path: &str) -> Result<Option<RemoteObject>, String> {
+        Ok(self
+            .get_optional(path)
+            .await?
+            .map(|bytes| RemoteObject { bytes, etag: None }))
+    }
 
     /// Delete a resource; absence is not an error.
     async fn delete_optional(&self, path: &str) -> Result<(), String>;
@@ -312,8 +449,21 @@ impl RemoteSyncClient for WebDavClient {
         self.put(path, bytes).await
     }
 
+    async fn put_conditional(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        precondition: WritePrecondition<'_>,
+    ) -> Result<PutOutcome, String> {
+        WebDavClient::put_conditional(self, path, bytes, precondition).await
+    }
+
     async fn get_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
         self.get_optional(path).await
+    }
+
+    async fn get_optional_with_etag(&self, path: &str) -> Result<Option<RemoteObject>, String> {
+        WebDavClient::get_optional_with_etag(self, path).await
     }
 
     async fn delete_optional(&self, path: &str) -> Result<(), String> {
@@ -351,10 +501,29 @@ impl RemoteSyncClient for RemoteClient {
         }
     }
 
+    async fn put_conditional(
+        &self,
+        path: &str,
+        bytes: &[u8],
+        precondition: WritePrecondition<'_>,
+    ) -> Result<PutOutcome, String> {
+        match self {
+            Self::WebDav(client) => client.put_conditional(path, bytes, precondition).await,
+            Self::S3(client) => client.put_conditional(path, bytes, precondition).await,
+        }
+    }
+
     async fn get_optional(&self, path: &str) -> Result<Option<Vec<u8>>, String> {
         match self {
             Self::WebDav(client) => client.get_optional(path).await,
             Self::S3(client) => client.get_optional(path).await,
+        }
+    }
+
+    async fn get_optional_with_etag(&self, path: &str) -> Result<Option<RemoteObject>, String> {
+        match self {
+            Self::WebDav(client) => client.get_optional_with_etag(path).await,
+            Self::S3(client) => client.get_optional_with_etag(path).await,
         }
     }
 
@@ -455,12 +624,17 @@ pub(crate) mod test_support {
         pub headers: HashMap<String, String>,
     }
 
+    /// Path plus the bytes a simulated concurrent writer publishes before the
+    /// fixture server rejects our first PUT with 412.
+    type ConflictInjection = Arc<Mutex<Option<(String, Vec<u8>)>>>;
+
     pub(crate) struct TestDavServer {
         pub url: String,
         requests: Arc<Mutex<Vec<RecordedRequest>>>,
         resources: Arc<Mutex<HashMap<String, Vec<u8>>>>,
         statuses: Arc<Mutex<VecDeque<u16>>>,
         fail_once_path: Arc<Mutex<Option<String>>>,
+        conflict_once_path: ConflictInjection,
         _shutdown: tokio::sync::watch::Sender<bool>,
     }
 
@@ -478,6 +652,7 @@ pub(crate) mod test_support {
                 Arc::new(Mutex::new(VecDeque::from(statuses))),
                 Arc::new(Mutex::new(HashMap::new())),
                 Arc::new(Mutex::new(None)),
+                Arc::new(Mutex::new(None)),
             )
             .await
         }
@@ -487,6 +662,7 @@ pub(crate) mod test_support {
             Self::start_inner(
                 Arc::new(Mutex::new(VecDeque::new())),
                 Arc::new(Mutex::new(HashMap::new())),
+                Arc::new(Mutex::new(None)),
                 Arc::new(Mutex::new(None)),
             )
             .await
@@ -499,6 +675,7 @@ pub(crate) mod test_support {
                 Arc::new(Mutex::new(VecDeque::new())),
                 Arc::new(Mutex::new(HashMap::new())),
                 Arc::new(Mutex::new(Some("/Zeditor/notes/note.md".to_string()))),
+                Arc::new(Mutex::new(None)),
             )
             .await
         }
@@ -509,6 +686,20 @@ pub(crate) mod test_support {
                 Arc::new(Mutex::new(VecDeque::new())),
                 Arc::new(Mutex::new(resources)),
                 Arc::new(Mutex::new(None)),
+                Arc::new(Mutex::new(None)),
+            )
+            .await
+        }
+
+        /// Start a server that rejects the first PUT to `path` with a 412,
+        /// installing `replacement` first, as if another device had written the
+        /// resource between our GET and PUT.
+        pub async fn conflict_once(path: &str, replacement: Vec<u8>) -> Self {
+            Self::start_inner(
+                Arc::new(Mutex::new(VecDeque::new())),
+                Arc::new(Mutex::new(HashMap::new())),
+                Arc::new(Mutex::new(None)),
+                Arc::new(Mutex::new(Some((path.to_string(), replacement)))),
             )
             .await
         }
@@ -517,6 +708,7 @@ pub(crate) mod test_support {
             statuses: Arc<Mutex<VecDeque<u16>>>,
             resources: Arc<Mutex<HashMap<String, Vec<u8>>>>,
             fail_once_path: Arc<Mutex<Option<String>>>,
+            conflict_once_path: ConflictInjection,
         ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0")
                 .await
@@ -531,6 +723,7 @@ pub(crate) mod test_support {
             let resources_clone = resources.clone();
             let statuses_clone = statuses.clone();
             let fail_once_clone = fail_once_path.clone();
+            let conflict_once_clone = conflict_once_path.clone();
 
             tokio::spawn(async move {
                 loop {
@@ -547,9 +740,10 @@ pub(crate) mod test_support {
                             let resources = resources_clone.clone();
                             let statuses = statuses_clone.clone();
                             let fail_once = fail_once_clone.clone();
+                            let conflict_once = conflict_once_clone.clone();
 
                             tokio::spawn(async move {
-                                handle_connection(&mut stream, &requests, &resources, &statuses, &fail_once).await;
+                                handle_connection(&mut stream, &requests, &resources, &statuses, &fail_once, &conflict_once).await;
                             });
                         }
                     }
@@ -562,12 +756,18 @@ pub(crate) mod test_support {
                 resources,
                 statuses,
                 fail_once_path,
+                conflict_once_path,
                 _shutdown: shutdown_tx,
             }
         }
 
         pub async fn requests(&self) -> Vec<RecordedRequest> {
             self.requests.lock().await.clone()
+        }
+
+        /// Queue a one-shot status code for the next request.
+        pub async fn queue_status(&self, status: u16) {
+            self.statuses.lock().await.push_back(status);
         }
 
         /// Return the paths of all PUT requests, in order.
@@ -616,6 +816,7 @@ pub(crate) mod test_support {
         resources: &Arc<Mutex<HashMap<String, Vec<u8>>>>,
         statuses: &Arc<Mutex<VecDeque<u16>>>,
         fail_once: &Arc<Mutex<Option<String>>>,
+        conflict_once: &ConflictInjection,
     ) {
         // Read the request line and headers
         let mut reader = BufReader::new(stream);
@@ -691,7 +892,7 @@ pub(crate) mod test_support {
                 authorization,
                 depth,
                 body: body.clone(),
-                headers,
+                headers: headers.clone(),
             });
         }
 
@@ -724,6 +925,43 @@ pub(crate) mod test_support {
                 write_response(stream, 201, "").await;
             }
             "PUT" => {
+                let current_etag = {
+                    let guard = resources.lock().await;
+                    guard.get(&path).map(|bytes| resource_etag(bytes))
+                };
+                let if_match = headers.get("if-match").map(String::as_str);
+                let if_none_match = headers.get("if-none-match").map(String::as_str);
+                let if_match_ok = match if_match {
+                    Some(expected) => current_etag.as_deref() == Some(expected),
+                    None => true,
+                };
+                let if_none_match_ok = match if_none_match {
+                    Some(value) => value == "*" && current_etag.is_none(),
+                    None => true,
+                };
+                if !(if_match_ok && if_none_match_ok) {
+                    write_response(stream, 412, "").await;
+                    return;
+                }
+
+                // Simulate another writer landing between our GET and PUT.
+                let injected_conflict = {
+                    let mut guard = conflict_once.lock().await;
+                    match guard.as_ref() {
+                        Some((conflict_path, replacement)) if conflict_path == &path => {
+                            let replacement = replacement.clone();
+                            *guard = None;
+                            Some(replacement)
+                        }
+                        _ => None,
+                    }
+                };
+                if let Some(replacement) = injected_conflict {
+                    resources.lock().await.insert(path, replacement);
+                    write_response(stream, 412, "").await;
+                    return;
+                }
+
                 {
                     let mut guard = resources.lock().await;
                     guard.insert(path, body);
@@ -736,7 +974,10 @@ pub(crate) mod test_support {
                     guard.get(&path).cloned()
                 };
                 match resource {
-                    Some(data) => write_response_with_body(stream, 200, &data).await,
+                    Some(data) => {
+                        let etag = resource_etag(&data);
+                        write_response_with_body_and_etag(stream, 200, &data, &etag).await;
+                    }
                     None => write_response(stream, 404, "").await,
                 }
             }
@@ -777,15 +1018,26 @@ pub(crate) mod test_support {
         let _ = stream.flush().await;
     }
 
-    async fn write_response_with_body(
+    /// Deterministic content validator for the fixture server (FNV-1a).
+    fn resource_etag(bytes: &[u8]) -> String {
+        let mut hash = 0xcbf2_9ce4_8422_2325_u64;
+        for byte in bytes {
+            hash ^= u64::from(*byte);
+            hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+        }
+        format!("\"{hash:016x}\"")
+    }
+
+    async fn write_response_with_body_and_etag(
         stream: &mut tokio::net::TcpStream,
         status: u16,
         body: &[u8],
+        etag: &str,
     ) {
         let reason = status_reason(status);
         // 同上：单请求连接，需显式关闭，避免连接池复用已关闭的 socket。
         let header = format!(
-            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+            "HTTP/1.1 {status} {reason}\r\nContent-Length: {}\r\nETag: {etag}\r\nConnection: close\r\n\r\n",
             body.len()
         );
         let _ = stream.write_all(header.as_bytes()).await;
@@ -870,6 +1122,97 @@ mod tests {
             .expect("put");
         let bytes = client.get("/Zeditor/notes/note.md").await.expect("get");
         assert_eq!(bytes.as_slice(), b"hello world");
+    }
+
+    #[tokio::test]
+    async fn conditional_put_rejects_a_stale_etag_and_accepts_the_current_one() {
+        let server = TestDavServer::success().await;
+        let client = WebDavClient::new(&settings_for(&server.url)).expect("client");
+        client
+            .put("/Zeditor/notes/note.md", b"version one")
+            .await
+            .expect("seed");
+
+        let object = client
+            .get_optional_with_etag("/Zeditor/notes/note.md")
+            .await
+            .expect("read with etag")
+            .expect("resource exists");
+        assert_eq!(object.bytes.as_slice(), b"version one");
+        let etag = object.etag.expect("test server emits a strong etag");
+
+        let stale = client
+            .put_conditional(
+                "/Zeditor/notes/note.md",
+                b"lost update",
+                WritePrecondition::Match("\"stale\""),
+            )
+            .await
+            .expect("stale conditional put");
+        assert_eq!(stale, PutOutcome::PreconditionFailed);
+        assert_eq!(
+            client
+                .get("/Zeditor/notes/note.md")
+                .await
+                .unwrap()
+                .as_slice(),
+            b"version one",
+            "a rejected write must not modify the remote resource"
+        );
+
+        let applied = client
+            .put_conditional(
+                "/Zeditor/notes/note.md",
+                b"version two",
+                WritePrecondition::Match(&etag),
+            )
+            .await
+            .expect("matching conditional put");
+        assert_eq!(applied, PutOutcome::Applied);
+        assert_eq!(
+            client
+                .get("/Zeditor/notes/note.md")
+                .await
+                .unwrap()
+                .as_slice(),
+            b"version two"
+        );
+    }
+
+    #[tokio::test]
+    async fn creating_with_must_not_exist_fails_once_the_resource_appears() {
+        let server = TestDavServer::success().await;
+        let client = WebDavClient::new(&settings_for(&server.url)).expect("client");
+        assert_eq!(
+            client
+                .put_conditional(
+                    "/Zeditor/notes/new.md",
+                    b"first",
+                    WritePrecondition::MustNotExist,
+                )
+                .await
+                .unwrap(),
+            PutOutcome::Applied
+        );
+        assert_eq!(
+            client
+                .put_conditional(
+                    "/Zeditor/notes/new.md",
+                    b"second",
+                    WritePrecondition::MustNotExist,
+                )
+                .await
+                .unwrap(),
+            PutOutcome::PreconditionFailed
+        );
+        assert_eq!(
+            client
+                .get("/Zeditor/notes/new.md")
+                .await
+                .unwrap()
+                .as_slice(),
+            b"first"
+        );
     }
 
     #[tokio::test]
@@ -1009,6 +1352,26 @@ mod tests {
             .await
             .expect_err("automatic creation refused");
         assert!(error.contains("手动创建"));
+    }
+
+    #[tokio::test]
+    async fn ensure_collection_tolerates_a_concurrent_mkcol_race_reported_as_500() {
+        // WsgiDAV on Windows reports "directory already exists" as 500 when
+        // another device created the collection between our MKCOL and the
+        // response. PROPFIND settles the ambiguity without hiding real errors.
+        let resources = std::collections::HashMap::from([("/Zeditor/".to_string(), Vec::new())]);
+        let server = TestDavServer::with_resources(resources).await;
+        server.queue_status(500).await;
+        let client = WebDavClient::new(&settings_for(&server.url)).expect("client");
+
+        client
+            .ensure_collection("/Zeditor")
+            .await
+            .expect("the concurrent MKCOL race is tolerated");
+
+        let requests = server.requests().await;
+        assert_eq!(requests[0].method, "MKCOL");
+        assert_eq!(requests[1].method, "PROPFIND");
     }
 
     #[test]

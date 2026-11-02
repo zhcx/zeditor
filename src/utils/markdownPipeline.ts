@@ -23,6 +23,7 @@ import {
 import { sanitizeRenderedHtml } from './safeHtml.ts';
 import { parseWikiLink, WIKI_LINK_PATTERN, wikiLinkDisplayText, type WikiLinkParts } from './wikiLinks.ts';
 import { parseFootnoteDefinitions, type FootnoteDefinition } from './footnotes.ts';
+import { BoundedCache } from './boundedCache.ts';
 
 export const markdownRenderer = new MarkdownIt({
   html: true,
@@ -250,8 +251,39 @@ markdownRenderer.core.ruler.after('inline', 'footnote_references', (state) => {
   }
 });
 
+/**
+ * Highlight and math results depend only on the source string and language.
+ * Long documents re-render on every keystroke, so caching unchanged fences
+ * avoids re-running the lexer (and KaTeX) for the overwhelming majority of the
+ * document. The byte budget keeps pathological files bounded.
+ */
+const RENDER_CACHE_ENTRIES = 500;
+const RENDER_CACHE_BYTES = 8 * 1024 * 1024;
+const highlightCache = new BoundedCache<string, string>(
+  RENDER_CACHE_ENTRIES,
+  RENDER_CACHE_BYTES,
+  value => value.length,
+);
+const katexCache = new BoundedCache<string, string>(
+  RENDER_CACHE_ENTRIES,
+  RENDER_CACHE_BYTES,
+  value => value.length,
+);
+
 /** 代码围栏高亮；特殊围栏保留语言 class，交给预览的二次渲染接管。 */
 function highlightFence(str: string, lang: string): string {
+  // Length-prefix the language so no (lang, source) pair can collide with
+  // another fence whose language/source boundary falls elsewhere.
+  const cacheKey = `${lang.length}:${lang}:${str}`;
+  const cached = highlightCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
+  const rendered = renderHighlightFence(str, lang);
+  highlightCache.set(cacheKey, rendered);
+  return rendered;
+}
+
+function renderHighlightFence(str: string, lang: string): string {
   const escape = markdownRenderer.utils.escapeHtml;
   if (lang === 'mermaid') {
     return `<pre class="hljs"><code class="language-mermaid">${escape(str)}</code></pre>`;
@@ -328,12 +360,19 @@ const escapeAttribute = (value: string) => value
  */
 export const renderFormula = (tex: string, displayMode: boolean): string => {
   const source = tex.trim();
+  const cacheKey = `${displayMode ? 'B' : 'I'}\u0000${source}`;
+  const cached = katexCache.get(cacheKey);
+  if (cached !== undefined) return cached;
+
   const attribute = `data-tex="${escapeAttribute(source)}"`;
+  let rendered: string;
   try {
-    return `<span class="zeditor-math" ${attribute}>${katex.renderToString(source, { displayMode, throwOnError: false, strict: 'warn', trust: false })}</span>`;
+    rendered = `<span class="zeditor-math" ${attribute}>${katex.renderToString(source, { displayMode, throwOnError: false, strict: 'warn', trust: false })}</span>`;
   } catch {
-    return `<span class="zeditor-math" ${attribute}>${displayMode ? `$$${source}$$` : `$${source}$`}</span>`;
+    rendered = `<span class="zeditor-math" ${attribute}>${displayMode ? `$$${source}$$` : `$${source}$`}</span>`;
   }
+  katexCache.set(cacheKey, rendered);
+  return rendered;
 };
 
 // Keep code fences and inline code intact so their dollar signs are never
@@ -352,8 +391,51 @@ export const renderMath = (source: string) => source
     }).join('');
   }).join('');
 
+export interface MarkdownRenderOptions {
+  /** 只读预览的段内行定位；编辑 DOM 和导出沿用原有块结构。 */
+  sourceLineAnchors?: boolean;
+}
+
+markdownRenderer.core.ruler.push('preview_source_lines', state => {
+  if (!state.env.sourceLineAnchors) return;
+  state.tokens.forEach((token, index) => {
+    const paragraph = state.tokens[index - 1];
+    if (token.type !== 'inline' || !token.map || !token.children
+      || paragraph?.type !== 'paragraph_open' || paragraph.level !== 0) return;
+    const children = token.children;
+    const breaks = children.filter(child => child.type === 'softbreak' || child.type === 'hardbreak').length;
+    // 原始 HTML 可跨行开闭标签；多行行内代码会折叠换行。无法逐行映射时保持块定位。
+    if (!breaks || breaks !== (token.content.match(/\n/g) ?? []).length
+      || children.some(child => child.type === 'html_inline')) return;
+    let line = token.map[0] + 1;
+    const html = (content: string) => {
+      const marker = new state.Token('html_inline', '', 0);
+      marker.content = content;
+      return marker;
+    };
+    const startLine = () => html(`<span class="preview-source-line" data-source-line="${line}">`);
+    const anchored = [startLine()];
+    const open: typeof children = [];
+    for (const child of children) {
+      if (child.type === 'softbreak' || child.type === 'hardbreak') {
+        // 格式可跨源码行：每行内闭合再重开，避免生成交叉嵌套的 HTML。
+        for (const opening of [...open].reverse()) anchored.push(html(`</${opening.tag}>`));
+        anchored.push(html('</span>'), child);
+        line += 1;
+        anchored.push(startLine(), ...open);
+      } else {
+        anchored.push(child);
+        if (child.nesting === 1) open.push(child);
+        else if (child.nesting === -1) open.pop();
+      }
+    }
+    anchored.push(html('</span>'));
+    token.children = anchored;
+  });
+});
+
 /** 源码 → 未消毒 HTML：媒体占位 → 公式 → markdown-it 渲染。 */
-export function renderMarkdownSource(source: string): string {
+export function renderMarkdownSource(source: string, options: MarkdownRenderOptions = {}): string {
   const zeditorFootnotes = source.includes('[^') ? parseFootnoteDefinitions(source) : new Map<string, FootnoteDefinition>();
   let protectedSource = source;
   const prefixes: string[] = [];
@@ -367,10 +449,10 @@ export function renderMarkdownSource(source: string): string {
   }
   let prepared = renderMath(renderMediaPlaceholders(protectedSource));
   if (prefixes.length) prepared = prepared.replace(new RegExp(`${marker}(\\d+)${marker}`, 'g'), (_, index) => prefixes[Number(index)]);
-  return markdownRenderer.render(prepared, { zeditorFootnotes });
+  return markdownRenderer.render(prepared, { zeditorFootnotes, sourceLineAnchors: options.sourceLineAnchors });
 }
 
 /** 源码 → 可写入 DOM 的 HTML（调用方负责再跑增强管线）。 */
-export function renderMarkdownToHtml(source: string): string {
-  return sanitizeRenderedHtml(renderMarkdownSource(source));
+export function renderMarkdownToHtml(source: string, options: MarkdownRenderOptions = {}): string {
+  return sanitizeRenderedHtml(renderMarkdownSource(source, options));
 }

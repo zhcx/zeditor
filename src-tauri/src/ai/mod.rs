@@ -1,3 +1,4 @@
+mod cancel;
 mod client;
 pub mod genies;
 mod prompts;
@@ -152,6 +153,7 @@ pub async fn ai_chat_streaming(
     }
 
     // chat_streaming 也用 spawn 隔离，防止 panic 传播
+    let (cancel_rx, _cancel_guard) = cancel::register(&request_id);
     let handle = tokio::task::spawn(async move {
         client::chat_streaming(
             &content,
@@ -163,6 +165,7 @@ pub async fn ai_chat_streaming(
             doc_title,
             enable_thinking.unwrap_or(false),
             request_id,
+            cancel_rx,
             window,
         )
         .await
@@ -181,6 +184,13 @@ pub async fn ai_chat_streaming(
             Err(msg)
         }
     }
+}
+
+/// Stop a running chat stream. The id is the `requestId` sent with
+/// `ai_chat_streaming`; unknown or already-finished ids are ignored.
+#[tauri::command]
+pub fn cancel_ai_chat(request_id: String) -> bool {
+    cancel::cancel(&request_id)
 }
 
 #[tauri::command]

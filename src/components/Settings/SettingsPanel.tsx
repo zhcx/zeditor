@@ -349,6 +349,7 @@ export function SettingsPanel() {
 
   const previewContentFontSize = (fontSize: number, fontFamily = localSettings.appearance.font_family) => {
     document.documentElement.style.setProperty('--font-content-size', `${fontSize}px`);
+    document.documentElement.style.setProperty('--font-content-line-height-px', `${Math.round(fontSize * settings.appearance.line_height)}px`);
     // 同时广播 fontFamily 变更：预览与 AI 面板是普通 DOM（沿用 --font-content
     // 变量，随设置实时更新），但 Monaco 的折行测量以 fontFamily 字符串为缓存
     // 键，必须用真实字体名重新测量，否则换字体后行文字会按旧字体宽度折行、
@@ -744,7 +745,7 @@ export function SettingsPanel() {
               />
               <SettingToggle
                 label="缩进参考线"
-                description="在缩进的行之间显示参考线，层级结构更清晰"
+                description="在嵌套列表中显示层级参考线，突出光标所在的列表层级"
                 checked={editorDisplay.indentGuides}
                 onChange={(checked) => applyEditorDisplay({ indent_guides: checked })}
               />

@@ -263,6 +263,7 @@
 .wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="table"]),
 .wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="fence"]),
 .wysiwyg-document .wysiwyg-block-shell:not(:first-child):has(> .wysiwyg-block[data-block-kind="blockquote"]) { margin-top: .7em; }
+.wysiwyg-document .wysiwyg-block-shell[data-paragraph-line="true"] { margin-block: 0; }
 .wysiwyg-block[data-block-kind="table"] { content-visibility: visible; }
 /*
    表格与阅读预览（.preview-container table）保持一致：内容宽度、合并边框、外框

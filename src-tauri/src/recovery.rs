@@ -141,6 +141,19 @@ impl RecoveryStore {
     }
 
     fn write_unlocked(&self, snapshots: &[RecoverySnapshot]) -> Result<(), String> {
+        self.write_unlocked_with_rename(snapshots, replace_file_with_retry)
+    }
+
+    /// The replacement strategy is injectable so tests can prove that a failed
+    /// swap still removes the sibling temporary file.
+    fn write_unlocked_with_rename<F>(
+        &self,
+        snapshots: &[RecoverySnapshot],
+        replace: F,
+    ) -> Result<(), String>
+    where
+        F: FnOnce(&Path, &Path) -> std::io::Result<()>,
+    {
         for snapshot in snapshots {
             validate_snapshot(snapshot)?;
         }
@@ -185,7 +198,7 @@ impl RecoveryStore {
                     )
                 })?;
             drop(file);
-            fs::rename(&temporary, &self.path).map_err(|error| {
+            replace(&temporary, &self.path).map_err(|error| {
                 format!(
                     "Failed to replace recovery snapshot store '{}': {error}",
                     self.path.display()
@@ -197,6 +210,33 @@ impl RecoveryStore {
             let _ = fs::remove_file(&temporary);
         }
         result
+    }
+}
+
+/// Windows antivirus/indexing can briefly hold a handle on the destination,
+/// making an otherwise atomic replace fail with a transient sharing error.
+/// Retry a few times before reporting the failure; the temporary file remains
+/// intact and is removed by the caller on final failure.
+fn replace_file_with_retry(source: &Path, destination: &Path) -> std::io::Result<()> {
+    #[cfg(target_os = "windows")]
+    {
+        let mut last_error = None;
+        for attempt in 0..3_u64 {
+            match fs::rename(source, destination) {
+                Ok(()) => return Ok(()),
+                Err(error) => {
+                    last_error = Some(error);
+                    if attempt < 2 {
+                        std::thread::sleep(std::time::Duration::from_millis(25 * (attempt + 1)));
+                    }
+                }
+            }
+        }
+        Err(last_error.expect("at least one rename attempt ran"))
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        fs::rename(source, destination)
     }
 }
 
@@ -529,6 +569,36 @@ mod tests {
             store.list().expect("list unchanged snapshots"),
             vec![current]
         );
+        fs::remove_dir_all(root).expect("remove disposable fixture");
+    }
+
+    #[test]
+    fn failed_atomic_replace_removes_the_temporary_file() {
+        let root = test_dir();
+        let path = root.join("recovery-snapshots.json");
+        let store = RecoveryStore::new(path.clone());
+        let now = current_time_millis();
+
+        let result =
+            store.write_unlocked_with_rename(&[snapshot("tab-a", now, "content")], |_, _| {
+                Err(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    "injected replace failure",
+                ))
+            });
+
+        assert!(result.is_err());
+        let leftovers: Vec<String> = fs::read_dir(&root)
+            .expect("list fixture directory")
+            .filter_map(|entry| entry.ok())
+            .map(|entry| entry.file_name().to_string_lossy().into_owned())
+            .filter(|name| name.contains(".tmp-"))
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "temporary files must not survive a failed replace: {leftovers:?}"
+        );
+        assert!(!path.exists(), "a failed replace must not leave a store");
         fs::remove_dir_all(root).expect("remove disposable fixture");
     }
 }

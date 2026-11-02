@@ -12,7 +12,7 @@ test('application and converter version sources stay synchronized', () => {
   const converterResourceVersion = read('src-tauri/resources/converter_version.txt').trim()
 
   assert.equal(packageJson.name, 'zeditor')
-  assert.equal(packageJson.version, '0.6.6')
+  assert.equal(packageJson.version, '0.6.7')
   assert.equal(tauriConfig.version, packageJson.version)
   assert.equal(tauriConfig.productName, 'Zeditor')
   assert.equal(tauriConfig.identifier, 'com.zeditor.desktop')
@@ -110,7 +110,7 @@ test('release builds wait for the locked quality gate', () => {
   assert.match(workflow, /needs: quality-checks/)
   assert.match(workflow, /npm ci/)
   assert.match(workflow, /npm run lint/)
-  assert.match(workflow, /npm audit --audit-level=high/)
+  assert.match(workflow, /npm audit --package-lock-only --audit-level=high --fetch-timeout=30000 --fetch-retries=0 --json/)
   assert.doesNotMatch(workflow, /document_converter\.exe/)
   assert.match(workflow, /cargo fmt --check/)
   assert.match(workflow, /cargo clippy --locked --all-targets -- -D warnings/)

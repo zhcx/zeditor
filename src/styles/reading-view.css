@@ -136,11 +136,27 @@
 
 /* ── 缩进参考线 ─────────────────────────────────────────────── */
 
+:root {
+  --indentation-guide-width: 1px;
+  --indentation-guide-width-active: 1px;
+  --indentation-guide-color: color-mix(in srgb, var(--text-muted) 30%, transparent);
+  --indentation-guide-color-active: color-mix(in srgb, var(--text-muted) 65%, transparent);
+}
+
+.monaco-host { position: relative; }
+.markdown-indent-guides { position: absolute; inset: 0; overflow: hidden; pointer-events: none; z-index: 4; }
+.markdown-indent-guide { position: absolute; width: var(--indentation-guide-width); background: var(--indentation-guide-color); }
+.markdown-indent-guide.is-active { width: var(--indentation-guide-width-active); background: var(--indentation-guide-color-active); }
+
 /* 嵌套列表左缘画一条竖线：位置正好与父级列表项的文字起始对齐。
    边框占 1px，缩进宽度相应减 1px，层级间距保持不变。 */
 [data-indent-guides="on"] .wysiwyg-document :is(ul, ol) :is(ul, ol) {
-  border-left: 1px solid var(--border-soft, var(--border-color));
-  padding-left: calc(1.6em - 1px);
+  border-left: var(--indentation-guide-width) solid var(--indentation-guide-color);
+  padding-left: calc(1.6em - var(--indentation-guide-width));
+}
+
+[data-indent-guides="on"] .wysiwyg-document :is(ul, ol) .is-active-indent-guide {
+  border-left-color: var(--indentation-guide-color-active);
 }
 
 /* ── 状态栏视图状态按钮 ─────────────────────────────────────── */

@@ -9,10 +9,10 @@ import { nodeAtPath, pathOfNode, type InlinePoint } from '../../utils/wysiwyg/in
 const TEXT_NODE = 3;
 const ELEMENT_NODE = 1;
 
-/** Enter 不能把 Wiki/脚注原子克隆成两个半节点（空 Wiki 克隆也会生成完整链接）。 */
+/** Enter 不能把 Wiki/脚注/公式原子克隆成两个半节点（空 Wiki 克隆也会生成完整链接）。 */
 export function snapRangeAroundInlineAtoms(range: Range, host: HTMLElement): void {
   if (typeof range.setStartBefore !== 'function') return;
-  const selector = '.wiki-link[data-wiki-target], .footnote-ref[data-footnote-name]';
+  const selector = '.wiki-link[data-wiki-target], .footnote-ref[data-footnote-name], span[data-tex]';
   const atomOf = (node: Node): Element | null => {
     const element = node.nodeType === ELEMENT_NODE ? node as Element : node.parentElement;
     const atom = element?.closest?.(selector);

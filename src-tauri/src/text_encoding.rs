@@ -202,6 +202,17 @@ mod tests {
     }
 
     #[test]
+    fn legacy_decoding_never_silently_inserts_replacement_characters() {
+        // 0x81 is a GBK lead byte followed by an invalid trail byte. Decoding
+        // must fail instead of returning U+FFFD, which an autosave would write
+        // back over the original bytes.
+        let error =
+            decode_text(&[0x81, 0x20], Some("gbk")).expect_err("invalid GBK must not decode");
+        assert!(error.contains("gbk"), "unexpected error: {error}");
+        assert!(!error.contains('\u{FFFD}'));
+    }
+
+    #[test]
     fn unrepresentable_characters_are_not_replaced() {
         assert!(encode_text("😀", "gbk").is_err());
         assert!(encode_text("中文", "windows-1252").is_err());

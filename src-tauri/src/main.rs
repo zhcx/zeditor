@@ -273,6 +273,7 @@ fn main() {
             ai::ai_request,
             ai::ai_streaming,
             ai::ai_chat_streaming,
+            ai::cancel_ai_chat,
             ai::fetch_ai_models,
             ai::read_ai_env_key,
             ai::genies::list_custom_genies,

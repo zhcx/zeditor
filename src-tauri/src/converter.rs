@@ -6,7 +6,7 @@ use sha2::{Digest, Sha256};
 use std::fs::File;
 use std::io::{Read, Write};
 use std::path::{Component, Path, PathBuf};
-use std::process::Command;
+use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -20,6 +20,12 @@ const MANIFEST_URL: &str =
     "https://github.com/zhcx/zeditor/releases/download/converter-stable/converter-manifest.json";
 const MANIFEST_SIGNATURE_URL: &str =
     "https://github.com/zhcx/zeditor/releases/download/converter-stable/converter-manifest.sig";
+/// Conversion is CPU/IO bound and may legitimately take minutes for large
+/// documents, but a corrupted input must never leave a child process running
+/// forever. Override with ZEDITOR_CONVERTER_TIMEOUT_SECS in seconds.
+const DEFAULT_CONVERTER_TIMEOUT: Duration = Duration::from_secs(10 * 60);
+const MIN_CONVERTER_TIMEOUT: Duration = Duration::from_secs(5);
+const MAX_CONVERTER_TIMEOUT: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Default)]
 pub struct ConverterManager {
@@ -875,6 +881,107 @@ fn hide_converter_window(command: &mut Command) {
     let _ = command;
 }
 
+fn converter_timeout() -> Duration {
+    std::env::var("ZEDITOR_CONVERTER_TIMEOUT_SECS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u64>().ok())
+        .map(Duration::from_secs)
+        .unwrap_or(DEFAULT_CONVERTER_TIMEOUT)
+        .clamp(MIN_CONVERTER_TIMEOUT, MAX_CONVERTER_TIMEOUT)
+}
+
+/// Run an external converter with drained pipes and a hard timeout.
+///
+/// Reading stdout and stderr on dedicated threads prevents the classic pipe
+/// deadlock where a chatty child fills the OS buffer while the parent waits.
+/// On timeout the child is killed and reaped, so it cannot survive as a zombie
+/// or keep writing after the conversion was reported as failed.
+fn run_command_with_timeout(mut command: Command, timeout: Duration) -> Result<Output, String> {
+    command.stdout(Stdio::piped()).stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| format!("无法启动外部转换进程：{error}"))?;
+
+    let Some(stdout) = child.stdout.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("外部转换进程未提供标准输出管道。".into());
+    };
+    let Some(stderr) = child.stderr.take() else {
+        let _ = child.kill();
+        let _ = child.wait();
+        return Err("外部转换进程未提供标准错误管道。".into());
+    };
+    let stdout_reader = std::thread::spawn(move || {
+        let mut pipe = stdout;
+        let mut bytes = Vec::new();
+        let _ = pipe.read_to_end(&mut bytes);
+        bytes
+    });
+    let stderr_reader = std::thread::spawn(move || {
+        let mut pipe = stderr;
+        let mut bytes = Vec::new();
+        let _ = pipe.read_to_end(&mut bytes);
+        bytes
+    });
+
+    let started = Instant::now();
+    let outcome = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) if started.elapsed() >= timeout => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(format!(
+                    "文档转换超过 {} 秒未完成，已强制结束转换进程。",
+                    timeout.as_secs()
+                ));
+            }
+            Ok(None) => std::thread::sleep(Duration::from_millis(25)),
+            Err(error) => {
+                let _ = child.kill();
+                let _ = child.wait();
+                break Err(format!("等待外部转换进程失败：{error}"));
+            }
+        }
+    };
+
+    let (stdout, stderr) = match &outcome {
+        Ok(_) => (
+            stdout_reader.join().unwrap_or_default(),
+            stderr_reader.join().unwrap_or_default(),
+        ),
+        Err(_) => {
+            // The direct child was killed, but a descendant may still hold the
+            // inherited pipe handles. Waiting for EOF there would reintroduce
+            // the hang the timeout is meant to prevent, so detach the readers;
+            // they exit on their own once the last handle closes.
+            drop(stdout_reader);
+            drop(stderr_reader);
+            (Vec::new(), Vec::new())
+        }
+    };
+    match outcome {
+        Ok(status) => Ok(Output {
+            status,
+            stdout,
+            stderr,
+        }),
+        Err(message) => {
+            let detail: String = String::from_utf8_lossy(&stderr)
+                .trim()
+                .chars()
+                .take(500)
+                .collect();
+            if detail.is_empty() {
+                Err(message)
+            } else {
+                Err(format!("{message}（{detail}）"))
+            }
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn convert_document(app: AppHandle, path: String) -> Result<String, String> {
     let source = PathBuf::from(&path);
@@ -919,11 +1026,8 @@ pub async fn convert_document(app: AppHandle, path: String) -> Result<String, St
         let _cleanup = TempCleanup(&markdown_path);
         let mut command = Command::new(executable);
         hide_converter_window(&mut command);
-        let output = command
-            .arg(&source)
-            .arg(&markdown_path)
-            .output()
-            .map_err(|error| format!("无法启动 Zeditor AnyDoc 转换模块：{error}"))?;
+        command.arg(&source).arg(&markdown_path);
+        let output = run_command_with_timeout(command, converter_timeout())?;
         markdown_from_converter_output(output, &markdown_path, source_size, started.elapsed())
     })
     .await
@@ -933,11 +1037,57 @@ pub async fn convert_document(app: AppHandle, path: String) -> Result<String, St
 #[cfg(test)]
 mod tests {
     use super::{
-        target_triple, validate_metadata, verify_signature_with_key, ModuleMetadata,
-        SUPPORTED_PROTOCOL,
+        run_command_with_timeout, target_triple, validate_metadata, verify_signature_with_key,
+        ModuleMetadata, SUPPORTED_PROTOCOL,
     };
     use base64::{engine::general_purpose, Engine as _};
     use ed25519_dalek::{Signer, SigningKey};
+    use std::process::Command;
+    use std::time::{Duration, Instant};
+
+    #[cfg(windows)]
+    fn shell_command(script: &str) -> Command {
+        let mut command = Command::new("cmd");
+        command.args(["/C", script]);
+        command
+    }
+
+    #[cfg(unix)]
+    fn shell_command(script: &str) -> Command {
+        let mut command = Command::new("sh");
+        command.args(["-c", script]);
+        command
+    }
+
+    #[test]
+    fn external_process_output_is_captured() {
+        let output = run_command_with_timeout(
+            shell_command("echo zeditor-converter-ok"),
+            Duration::from_secs(10),
+        )
+        .expect("command should succeed");
+
+        assert!(output.status.success());
+        assert!(String::from_utf8_lossy(&output.stdout).contains("zeditor-converter-ok"));
+    }
+
+    #[test]
+    fn external_process_timeout_terminates_the_child() {
+        #[cfg(windows)]
+        let command = shell_command("ping -n 10 127.0.0.1 >nul");
+        #[cfg(unix)]
+        let command = shell_command("sleep 5");
+
+        let started = Instant::now();
+        let error = run_command_with_timeout(command, Duration::from_millis(200))
+            .expect_err("command must time out");
+
+        assert!(error.contains("强制结束"), "unexpected error: {error}");
+        assert!(
+            started.elapsed() < Duration::from_secs(4),
+            "timed-out child was not reaped promptly"
+        );
+    }
 
     fn metadata(target: &str) -> ModuleMetadata {
         ModuleMetadata {

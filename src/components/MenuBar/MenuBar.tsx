@@ -22,6 +22,11 @@ import { buildMacAppMenu, type SystemMenuLabels } from '../../utils/nativeMenu';
 import { createMenuDispatcher, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
 import { THEMES, resolveThemePreference } from '../../themes/apply';
+import appPackage from '../../../package.json';
+import changelog from '../../../CHANGELOG.md?raw';
+import { getReleaseNotes } from '../../utils/releaseNotes';
+
+const currentReleaseNotes = getReleaseNotes(changelog, appPackage.version) ?? '暂无本版本更新说明。';
 
 function runHistoryCommand(action: 'undo' | 'redo') {
   const active = document.activeElement;
@@ -249,7 +254,7 @@ graph TD
     about: {
       title: '关于 Zeditor',
       body: `
-**Zeditor v0.6.3**
+**Zeditor v${appPackage.version}**
 
 一款现代化的 Markdown 编辑器
 
@@ -270,9 +275,7 @@ graph TD
 - GitHub Release 自动检查更新
 
 **本版本更新**
-- 修复预览跳转：点击编辑器任意位置时，对应内容现在出现在预览窗格的同一相对位置，不再被一律顶到窗格最上方
-- 修复长行文字溢出编辑框：折行改为按真实字形测量宽度，字间距不再让长行超出窗格
-- 文档站导航栏版本号改为自动读取应用版本，不再需要每次发版手工同步
+${currentReleaseNotes}
 
 **技术栈**
 Tauri 2.0 + React 18 + TypeScript + Monaco Editor + markdown-it
@@ -636,20 +639,14 @@ export function MenuBar() {
   };
 
   const handleSaveAs = async () => {
+    useAppStore.getState().editorView?.flushPendingEdits?.();
     const targetTab = getActiveTab();
     if (!targetTab) return;
     try {
-      // 尚无文件路径的未命名文档先请求 AI 文件名建议（未启用 AI 时立即回退）。
-      let suggestedBaseName: string | null = null;
-      if (!targetTab.path) {
-        const activeTab = targetTab;
-        if (activeTab) {
-          suggestedBaseName = await resolveSaveBaseName(activeTab.title, activeTab.content);
-        }
-      }
+      const baseName = targetTab.path ? '' : resolveSaveBaseName(targetTab.title, targetTab.content);
       const selected = await save({
         filters: [{ name: 'Markdown', extensions: ['md'] }],
-        defaultPath: targetTab.path || `${suggestedBaseName || 'untitled'}.md`,
+        defaultPath: targetTab.path || `${baseName}.md`,
       });
       if (selected) {
         await saveTab(targetTab.id, selected as string);

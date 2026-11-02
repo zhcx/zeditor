@@ -106,6 +106,8 @@
 
 /* 文档保持既有字号和主题，只整理标题节奏与正文对比度。 */
 .preview-document.markdown-body { padding: 28px clamp(22px, 3vw, 42px) 56px; }
+/* 源码对照与 Monaco 的正文起点一致。 */
+.main-content.split .preview-document.markdown-body { padding-top: 24px; }
 .preview-document.markdown-body h1 { margin-bottom: 1em; font-size: 2em; letter-spacing: -.02em; }
 .preview-document.markdown-body h2 { margin-top: 1.6em; margin-bottom: .65em; padding-bottom: .38em; font-size: 1.45em; border-bottom-color: var(--border-soft); }
 .preview-document.markdown-body h3 { margin-top: 1.5em; margin-bottom: .6em; }
