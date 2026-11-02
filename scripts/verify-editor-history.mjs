@@ -218,6 +218,28 @@ try {
   assert.equal(await text(), '单次外部更改前', 'external synchronization must not create duplicate history steps');
   await action('redo');
   assert.equal(await text(), '单次外部更改后');
+
+  await addTab('无变化');
+  await page.waitForFunction(() => window.__historyStore.getState().editorView?.getValue() === '无变化');
+  await edit('修改');
+  await action('undo');
+  await state(() => window.__historyStore.getState().editorView.replaceRange(0, 3, '无变化'));
+  await setMode('split');
+  await action('redo');
+  assert.equal(await text(), '无变化修改', 'an identical replacement must retain cross-mode redo');
+
+  // A menu click must retain the input that owns the undo operation.
+  await page.getByRole('button', { name: '搜索当前文档', exact: true }).click();
+  const query = page.getByRole('textbox', { name: '查找正文内容', exact: true });
+  await query.click();
+  await page.keyboard.insertText('query');
+  await page.getByRole('button', { name: '功能', exact: true }).click();
+  await page.getByText('撤销', { exact: true }).last().click();
+  assert.equal(await text(), '无变化修改', 'undo in a search input must not change the document');
+  assert.equal(await query.inputValue(), '', 'the search input owns this undo');
+  await page.getByRole('button', { name: '功能', exact: true }).click();
+  await page.getByText('重做', { exact: true }).last().click();
+  assert.equal(await query.inputValue(), 'query');
   assert.deepEqual(errors, []);
   console.log('Cross-mode undo, redo, cursor transfer and per-tab reading position passed.');
 } finally { await browser.close(); }

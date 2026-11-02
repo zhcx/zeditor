@@ -120,10 +120,11 @@ function protectedCharacters(source: string): Uint8Array {
       offset += line.length; continue;
     }
     if (marker) { fence = { char: marker[1][0], length: marker[1].length }; mark(offset, offset + line.length); offset += line.length; continue; }
-    if (/^\s*\$\$/.test(body)) {
+    const content = stripContainerPrefixes(body);
+    if (/^\s*\$\$/.test(content)) {
       mark(offset, offset + line.length);
       if (mathBlock) mathBlock = false;
-      else if (!/\$\$\s*$/.test(body.trim().slice(2))) mathBlock = true;
+      else if (!/\$\$\s*$/.test(content.trim().slice(2))) mathBlock = true;
       offset += line.length; continue;
     }
     if (mathBlock) { mark(offset, offset + line.length); offset += line.length; continue; }
@@ -139,7 +140,6 @@ function protectedCharacters(source: string): Uint8Array {
       if (body.toLowerCase().includes(htmlBlock)) htmlBlock = null;
       offset += line.length; continue;
     }
-    const content = stripContainerPrefixes(body);
     if (/^(?: {4}|\t)/.test(content) || /^\s*\[[^\]]+\]:/.test(content)) mark(offset, offset + line.length);
     offset += line.length;
   }
@@ -152,7 +152,18 @@ function protectedCharacters(source: string): Uint8Array {
   }
 
   // Ranges are based on the original document, so a selection inside a construct is safe.
-  const brackets = bracketMatches(source);
+  // Ordinary prose, formulas and code-only documents need no full-size pair table.
+  const brackets = source.includes('[') ? bracketMatches(source) : null;
+  // Many inline spans may share one long line. Find that line's end once,
+  // rather than scanning its remaining characters for every span.
+  let inlineLineEnd = -1;
+  const lineEndAt = (start: number) => {
+    if (start > inlineLineEnd) {
+      inlineLineEnd = start;
+      while (inlineLineEnd < source.length && source[inlineLineEnd] !== '\n' && source[inlineLineEnd] !== '\r') inlineLineEnd++;
+    }
+    return inlineLineEnd;
+  };
   for (let i = 0; i < source.length;) {
     if (mask[i]) { i++; continue; }
     const texClose = source.startsWith('\\(' , i) ? '\\)' : source.startsWith('\\[', i) ? '\\]' : null;
@@ -184,14 +195,13 @@ function protectedCharacters(source: string): Uint8Array {
       while (source[end] === char) end++;
       const delimiter = source.slice(i, end);
       const close = source.indexOf(delimiter, end);
-      let limit = end;
-      while (limit < source.length && source[limit] !== '\n' && source[limit] !== '\r') limit++;
+      const limit = char === '`' && close >= 0 ? close : lineEndAt(end);
       const finish = close >= 0 && (char === '`' || close < limit) ? close + delimiter.length : limit;
       mark(i, finish); i = Math.max(finish, end); continue;
     }
     const linkStart = source[i] === '[' ? i : source[i] === '!' && source[i + 1] === '[' ? i + 1 : -1;
     if (linkStart >= 0) {
-      const closing = brackets[linkStart];
+      const closing = brackets![linkStart];
       if (closing < 0) {
         // Fail closed for the rest of the line only: an unmatched opener is more
         // likely prose than a link, and rescanning further lines would be quadratic.
@@ -208,7 +218,7 @@ function protectedCharacters(source: string): Uint8Array {
           if (source[j] === ')') nesting--;
         }
       } else if (source[j] === '[') {
-        const close = brackets[j]; j = close < 0 ? source.length : close + 1;
+        const close = brackets![j]; j = close < 0 ? source.length : close + 1;
       }
       mark(i, j); i = j; continue;
     }

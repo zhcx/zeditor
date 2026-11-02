@@ -1135,6 +1135,9 @@ export function MenuBar() {
 
           return (
             <div key={menu.label} className="menu-item"
+              // Menu commands act on the existing editor/input selection.
+              // Keep pointer clicks from moving focus to the menu buttons.
+              onMouseDown={event => event.preventDefault()}
               onMouseEnter={() => { if (menuOpen) setActiveMenu(menu.label); }}
             >
               <button

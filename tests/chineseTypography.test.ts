@@ -116,3 +116,19 @@ test('protects MathML and preserves Windows line endings', () => {
   const source = '开始ABC\r\n<math><mtext>中文DEF</mtext></math>\r\n结束GHI';
   assert.equal(formatChineseTypography(source).content, '开始 ABC\r\n<math><mtext>中文DEF</mtext></math>\r\n结束 GHI');
 });
+
+test('preserves multiline math inside quote and list containers', () => {
+  for (const prefix of ['> ', '> > ', '- ']) {
+    const source = `正文ABC\n\n${prefix}$$\n${prefix}\\text{中文ABC}\n${prefix}$$\n\n末尾DEF`;
+    assert.equal(formatChineseTypography(source).content, source.replace('正文ABC', '正文 ABC').replace('末尾DEF', '末尾 DEF'));
+  }
+});
+
+test('dense inline code and math do not repeatedly scan the entire line', () => {
+  for (const token of ['`中文ABC` ', '$中文ABC$ ']) {
+    const source = token.repeat(16000) + '正文DEF';
+    const started = performance.now();
+    assert.equal(formatChineseTypography(source).content, token.repeat(16000) + '正文 DEF');
+    assert.ok(performance.now() - started < 1000, `dense inline syntax took too long: ${token}`);
+  }
+});

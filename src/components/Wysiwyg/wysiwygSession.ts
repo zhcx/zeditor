@@ -915,6 +915,10 @@ export class WysiwygSession {
   /** 区间替换：工具栏、AI、图床插入、粘贴都走这里。 */
   replaceRange(from: number, to: number, text: string, caret?: number): void {
     this.prepareExternalEdit();
+    if (this.document.source.slice(from, to) === text) {
+      this.setSelectionOffsets(caret ?? from + text.length);
+      return;
+    }
     this.pushUndo({ coalesce: false });
     this.applySource(this.document.source.slice(0, from) + text + this.document.source.slice(to), caret ?? from + text.length);
   }

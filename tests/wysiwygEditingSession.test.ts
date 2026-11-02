@@ -30,6 +30,28 @@ function editingFixture(source = '原文') {
   return { session, controller, persisted, setText: (text: string) => { domText = text; } };
 }
 
+it('identical range replacements preserve redo and do not add an undo step', () => {
+  const session = new WysiwygSession('原文', { onSourceChange: () => undefined, insertClipboardImage: async () => false });
+  session.replaceRange(2, 2, '修改');
+  session.handleUndo();
+  assert.equal(session.canRedo(), true);
+  session.replaceRange(0, 2, '原文');
+  assert.equal(session.canUndo(), false);
+  assert.equal(session.canRedo(), true);
+  session.handleRedo();
+  assert.equal(session.getSource(), '原文修改');
+});
+
+it('saving an unchanged block preserves redo', () => {
+  const session = new WysiwygSession('原文', { onSourceChange: () => undefined, insertClipboardImage: async () => false });
+  session.replaceRange(2, 2, '修改');
+  session.handleUndo();
+  assert.equal(session.replaceBlock(0, session.getBlocks()[0].source), false);
+  assert.equal(session.canRedo(), true);
+  session.handleRedo();
+  assert.equal(session.getSource(), '原文修改');
+});
+
 it('writes IME text when the final input event precedes compositionend', async () => {
   const fixture = editingFixture();
   fixture.session.markComposing(true, 0);
