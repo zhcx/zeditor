@@ -26,6 +26,8 @@ export interface EditorDispatchSpec {
 }
 
 export interface EditorController {
+  /** The tab whose text and selection this controller currently represents. */
+  tabId?: string | null;
   scrollDOM: HTMLElement;
   getScrollTop: () => number;
   getScrollHeight: () => number;

@@ -19,6 +19,24 @@ import { normalizeAgentBackend } from '../utils/agentSettings';
 import { isTextEncoding, type TextEncoding, type TextDocument, type EncodingDialogRequest } from '../utils/textEncoding';
 import { restoreRecoverySnapshot as createRestoredTab, type RecoverySnapshot } from '../utils/recovery';
 import { fileVersionsMatch, type FileVersion } from '../utils/fileVersion';
+import { assessLargeDocument, modeForDocument, type DocumentPerformance } from '../utils/largeDocument';
+import { documentHistory } from '../utils/documentHistory';
+import { editorSurface, editorViewMemory } from '../utils/editorViewMemory';
+
+function assessDocumentPerformance(content: string, bytes?: number, previous?: DocumentPerformance): DocumentPerformance | undefined {
+  const assessment = assessLargeDocument(content, bytes);
+  return assessment.recommended ? { assessment, lightweight: previous?.lightweight ?? true } : undefined;
+}
+
+function rememberEditorPosition(id: string | null, mode: WorkspaceMode, editor: EditorController | null, nextMode?: WorkspaceMode): void {
+  const surface = editorSurface(mode);
+  if (!id || !editor || !surface || (editor.tabId !== undefined && editor.tabId !== id)) return;
+  documentHistory.get(id).boundary();
+  const selection = editor.getSelection();
+  editorViewMemory.capture(id, surface, { from: selection.from, to: selection.to, scrollTop: editor.getScrollTop() });
+  const target = nextMode ? editorSurface(nextMode) : null;
+  if (target && target !== surface) editorViewMemory.follow(id, surface, target);
+}
 
 let pendingSaves = 0;
 let fileOpenSequence = 0;
@@ -266,6 +284,7 @@ export interface Tab {
   recoveryId?: string;
   fileVersion?: FileVersion;
   externalChangePending?: boolean;
+  performance?: DocumentPerformance;
 }
 
 export interface TimelineEntry {
@@ -350,8 +369,9 @@ interface AppState {
   setTabEncoding: (tabId: string, encoding: TextEncoding) => void;
   reopenTabWithEncoding: (tabId: string, encoding: TextEncoding, cancelled?: () => boolean) => Promise<void>;
 
-  setContent: (content: string) => void;
+  setContent: (content: string, origin?: 'editor' | 'external') => void;
   setMode: (mode: WorkspaceMode) => void;
+  setLightweightMode: (enabled: boolean) => void;
   setSplitRatio: (ratio: number) => void;
   setCurrentFile: (file: string | null) => void;
   setSettings: (settings: Settings) => void;
@@ -395,7 +415,7 @@ interface AppState {
   closeTab: (id: string) => void;
   detachDeletedTab: (id: string) => void;
   setActiveTab: (id: string) => void;
-  updateTabContent: (id: string, content: string) => void;
+  updateTabContent: (id: string, content: string, origin?: 'editor' | 'external') => void;
   updateTabTitle: (id: string, path: string) => void;
   restoreTimelineEntry: (tabId: string, entryId: string) => void;
   deleteTimelineEntry: (tabId: string, entryId: string) => void;
@@ -692,21 +712,31 @@ export const useAppStore = create<AppState>((set, get) => ({
     if (!latest || latest.modified || latest.path !== tab.path || latest.content !== tab.content || latest.encoding !== tab.encoding) {
       throw new Error('读取期间文档已变化，未覆盖当前修改');
     }
-    if (get().activeTabId === tabId && get().editorView?.getValue() === tab.content) {
+    const performance = assessDocumentPerformance(loaded.content, loaded.fileVersion?.size, tab.performance);
+    documentHistory.get(tabId).clear();
+    if ((!performance?.lightweight || get().mode !== 'wysiwyg') && get().activeTabId === tabId && get().editorView?.getValue() === tab.content) {
       get().editorView?.resetValue?.(loaded.content);
     }
     set(state => ({
-      tabs: state.tabs.map(item => item.id === tabId ? { ...item, content: loaded.content, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined } : item),
-      ...(state.activeTabId === tabId ? { content: loaded.content } : {}),
+      tabs: state.tabs.map(item => item.id === tabId ? { ...item, content: loaded.content, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined, performance } : item),
+      ...(state.activeTabId === tabId ? { content: loaded.content, mode: modeForDocument(state.mode, state.settings.editor.mode, Boolean(performance?.lightweight)) } : {}),
     }));
     get().updateWordCount();
   },
 
-  setContent: (content) => {
+  setContent: (content, origin = 'external') => {
+    // External writers must not race the visual editor's debounced input.
+    const editor = get().editorView;
+    const editorIsActive = editor && (editor.tabId === undefined || editor.tabId === get().activeTabId);
+    if (origin === 'external' && editorIsActive) editor.flushPendingEdits?.();
     const { activeTabId, tabs } = get();
     const activeTab = tabs.find(tab => tab.id === activeTabId);
     if (activeTab?.content === content && get().content === content) return;
     if (activeTabId && activeTab) {
+      if (origin === 'external' && activeTab.content !== content) {
+        const caret = editorIsActive ? editor.getSelection().from : 0;
+        documentHistory.get(activeTabId).push({ source: activeTab.content, caret, timestamp: Date.now() }, { coalesce: false });
+      }
       if (activeTab.content !== content) {
         if (!pendingTimelineBaselines.has(activeTabId)) {
           pendingTimelineBaselines.set(activeTabId, activeTab.content);
@@ -757,12 +787,38 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setMode: (mode) => {
     get().editorView?.flushPendingEdits?.();
-    set({ mode });
+    const activeId = get().activeTabId;
+    if (activeId && get().mode !== mode) {
+      documentHistory.get(activeId).boundary();
+      rememberEditorPosition(activeId, get().mode, get().editorView, mode);
+    }
+    set(state => ({
+      mode,
+      tabs: mode === 'source' ? state.tabs : state.tabs.map(tab => tab.id === state.activeTabId && tab.performance
+        ? { ...tab, performance: { ...tab.performance, lightweight: false } } : tab),
+    }));
     // 沉浸写作 / 沉浸阅读是临时态：只切运行时视图，不覆盖用户选择的默认编辑方式。
     if (mode !== 'split' && mode !== 'wysiwyg') return;
     const latest = get().settings;
     if (latest.editor.mode === mode) return;
     void get().saveSettings({ ...latest, editor: { ...latest.editor, mode } });
+  },
+
+  setLightweightMode: enabled => {
+    get().editorView?.flushPendingEdits?.();
+    const activeId = get().activeTabId;
+    if (activeId) {
+      documentHistory.get(activeId).boundary();
+      rememberEditorPosition(activeId, get().mode, get().editorView, enabled ? 'source' : (get().settings.editor.mode ?? 'split'));
+    }
+    set(state => {
+      const active = state.tabs.find(tab => tab.id === state.activeTabId);
+      if (!active?.performance) return state;
+      return {
+        mode: enabled ? 'source' : (state.settings.editor.mode ?? 'split'),
+        tabs: state.tabs.map(tab => tab.id === active.id ? { ...tab, performance: { ...active.performance!, lightweight: enabled } } : tab),
+      };
+    });
   },
 
   setSplitRatio: (ratio) => set({ splitRatio: Math.max(0.1, Math.min(0.9, ratio)) }),
@@ -855,6 +911,7 @@ export const useAppStore = create<AppState>((set, get) => ({
       const loaded = await reading;
       if (cancelled?.()) return;
       const fileContent = loaded.content;
+      const performance = assessDocumentPerformance(fileContent, loaded.fileVersion?.size);
       get().editorView?.flushPendingEdits?.();
       const { tabs, activeTabId } = get();
       const existingTab = tabs.find(t => t.path === path);
@@ -865,24 +922,29 @@ export const useAppStore = create<AppState>((set, get) => ({
           set({ tabs: [...tabs, {
             id: generateId(), title: path.split(/[\\/]/).pop() || path,
             path, content: fileContent, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined,
+            performance,
           }] });
         }
         return;
       }
 
       if (existingTab) {
+        rememberEditorPosition(activeTabId, get().mode, get().editorView);
         set({
           content: existingTab.content,
           currentFile: path,
           activeTabId: existingTab.id,
+          mode: modeForDocument(get().mode, get().settings.editor.mode, Boolean(existingTab.performance?.lightweight)),
         });
       } else {
         const activeTab = tabs.find(t => t.id === activeTabId);
         if (activeTab && !activeTab.modified && !activeTab.path) {
-          if (get().editorView?.getValue() === activeTab.content) get().editorView?.resetValue?.(fileContent);
+          documentHistory.get(activeTab.id).clear();
+          editorViewMemory.delete(activeTab.id);
+          if ((!performance?.lightweight || get().mode !== 'wysiwyg') && get().editorView?.getValue() === activeTab.content) get().editorView?.resetValue?.(fileContent);
           const newTabs = tabs.map(t =>
             t.id === activeTabId
-              ? { ...t, content: fileContent, path, title: path.split(/[\\/]/).pop() || path, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined }
+              ? { ...t, content: fileContent, path, title: path.split(/[\\/]/).pop() || path, encoding: loaded.encoding, modified: false, fileVersion: loaded.fileVersion || undefined, performance }
               : t
           );
           set({
@@ -890,8 +952,10 @@ export const useAppStore = create<AppState>((set, get) => ({
             content: fileContent,
             currentFile: path,
             activeTabId,
+            mode: modeForDocument(get().mode, get().settings.editor.mode, Boolean(performance?.lightweight)),
           });
         } else {
+          rememberEditorPosition(activeTabId, get().mode, get().editorView);
           const newTab: Tab = {
             id: generateId(),
             title: path.split(/[\\/]/).pop() || path,
@@ -900,12 +964,14 @@ export const useAppStore = create<AppState>((set, get) => ({
             modified: false,
             encoding: loaded.encoding,
             fileVersion: loaded.fileVersion || undefined,
+            performance,
           };
           set({
             tabs: [...tabs, newTab],
             content: fileContent,
             currentFile: path,
             activeTabId: newTab.id,
+            mode: modeForDocument(get().mode, get().settings.editor.mode, Boolean(performance?.lightweight)),
           });
         }
       }
@@ -991,14 +1057,17 @@ export const useAppStore = create<AppState>((set, get) => ({
         content: markdown,
         // Converted content has not been saved as a Markdown file yet.
         modified: true,
+        performance: assessDocumentPerformance(markdown),
       };
       const { tabs } = get();
+      if (requestVersion === fileOpenSequence) rememberEditorPosition(get().activeTabId, get().mode, get().editorView);
       set({
         tabs: [...tabs, newTab],
         ...(requestVersion === fileOpenSequence ? {
           activeTabId: newTab.id,
           content: markdown,
           currentFile: null,
+          mode: modeForDocument(get().mode, get().settings.editor.mode, Boolean(newTab.performance?.lightweight)),
         } : {}),
       });
       get().updateWordCount();
@@ -1140,14 +1209,17 @@ export const useAppStore = create<AppState>((set, get) => ({
       get().setUploadStatus('error', 0, '读取期间文稿已修改，请重新确认后再载入磁盘版本。');
       return;
     }
-    if (get().activeTabId === conflict.tabId && get().editorView?.getValue() === latest.content) {
+    const performance = assessDocumentPerformance(current.content, current.fileVersion?.size, latest.performance);
+    documentHistory.get(conflict.tabId).clear();
+    if ((!performance?.lightweight || get().mode !== 'wysiwyg') && get().activeTabId === conflict.tabId && get().editorView?.getValue() === latest.content) {
       get().editorView?.resetValue?.(current.content);
     }
     set(state => ({
       fileConflict: null,
       content: state.activeTabId === conflict.tabId ? current.content : state.content,
+      mode: state.activeTabId === conflict.tabId ? modeForDocument(state.mode, state.settings.editor.mode, Boolean(performance?.lightweight)) : state.mode,
       tabs: state.tabs.map(item => item.id === conflict.tabId
-        ? { ...item, content: current.content, encoding: current.encoding, modified: false, fileVersion: current.fileVersion || undefined, externalChangePending: false }
+        ? { ...item, content: current.content, encoding: current.encoding, modified: false, fileVersion: current.fileVersion || undefined, externalChangePending: false, performance }
         : item),
     }));
     get().updateWordCount();
@@ -1287,6 +1359,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   addTab: (tab?: Partial<Tab>) => {
     get().editorView?.flushPendingEdits?.();
+    if (get().activeTabId) documentHistory.get(get().activeTabId!).boundary();
+    rememberEditorPosition(get().activeTabId, get().mode, get().editorView);
     fileOpenSequence += 1;
     const { tabs } = get();
     const id = generateId();
@@ -1300,12 +1374,14 @@ export const useAppStore = create<AppState>((set, get) => ({
       recoveryId: tab?.recoveryId,
       fileVersion: tab?.fileVersion,
       externalChangePending: tab?.externalChangePending,
+      performance: tab?.performance ?? assessDocumentPerformance(tab?.content || '', tab?.fileVersion?.size),
     };
     set({
       tabs: [...tabs, newTab],
       activeTabId: id,
       content: newTab.content,
       currentFile: newTab.path,
+      mode: modeForDocument(get().mode, get().settings.editor.mode, Boolean(newTab.performance?.lightweight)),
     });
     get().updateWordCount();
     return id;
@@ -1325,6 +1401,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   closeTab: (id) => {
     get().editorView?.flushPendingEdits?.();
+    documentHistory.delete(id);
+    editorViewMemory.delete(id);
     const { tabs, activeTabId, timeline, recoverySnapshots } = get();
     const closingTab = tabs.find(tab => tab.id === id);
     if (closingTab && (closingTab.recoveryId || closingTab.modified || recoverySnapshots.some(snapshot => snapshot.id === id))) {
@@ -1350,7 +1428,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         content: '',
         modified: false,
       };
-      set({ tabs: [newTab], activeTabId: newTab.id, content: '', currentFile: null, timeline: nextTimeline });
+      set({ tabs: [newTab], activeTabId: newTab.id, content: '', currentFile: null, timeline: nextTimeline, mode: modeForDocument(get().mode, get().settings.editor.mode, false) });
     } else if (id === activeTabId) {
       const newActiveIndex = Math.min(tabIndex, newTabs.length - 1);
       const newActiveTab = newTabs[newActiveIndex];
@@ -1359,6 +1437,7 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeTabId: newActiveTab.id,
         content: newActiveTab.content,
         currentFile: newActiveTab.path,
+        mode: modeForDocument(get().mode, get().settings.editor.mode, Boolean(newActiveTab.performance?.lightweight)),
         timeline: nextTimeline,
       });
     } else {
@@ -1369,6 +1448,8 @@ export const useAppStore = create<AppState>((set, get) => ({
 
   setActiveTab: (id) => {
     get().editorView?.flushPendingEdits?.();
+    if (get().activeTabId && get().activeTabId !== id) documentHistory.get(get().activeTabId!).boundary();
+    if (get().activeTabId !== id) rememberEditorPosition(get().activeTabId, get().mode, get().editorView);
     const { tabs } = get();
     const tab = tabs.find(t => t.id === id);
     if (tab) {
@@ -1377,15 +1458,20 @@ export const useAppStore = create<AppState>((set, get) => ({
         activeTabId: id,
         content: tab.content,
         currentFile: tab.path,
+        mode: modeForDocument(get().mode, get().settings.editor.mode, Boolean(tab.performance?.lightweight)),
       });
       get().updateWordCount();
       void get().checkFileVersion(id);
     }
   },
 
-  updateTabContent: (id, content) => {
-    if (get().activeTabId === id) { get().setContent(content); return; }
+  updateTabContent: (id, content, origin = 'external') => {
+    if (get().activeTabId === id) { get().setContent(content, origin); return; }
     const { tabs } = get();
+    const tab = tabs.find(item => item.id === id);
+    if (origin === 'external' && tab && tab.content !== content) {
+      documentHistory.get(id).push({ source: tab.content, caret: 0, timestamp: Date.now() }, { coalesce: false });
+    }
     set({
       tabs: tabs.map(t =>
         t.id === id ? { ...t, content, modified: true } : t
@@ -1426,10 +1512,15 @@ export const useAppStore = create<AppState>((set, get) => ({
   },
 
   restoreTimelineEntry: (tabId, entryId) => {
+    if (get().activeTabId === tabId) get().editorView?.flushPendingEdits?.();
     const { tabs, timeline, activeTabId } = get();
     const entry = timeline[tabId]?.find(item => item.id === entryId);
     const tab = tabs.find(item => item.id === tabId);
     if (!entry || !tab) return;
+    if (tab.content !== entry.content) {
+      const caret = activeTabId === tabId ? (get().editorView?.getSelection().from ?? 0) : 0;
+      documentHistory.get(tabId).push({ source: tab.content, caret, timestamp: Date.now() }, { coalesce: false });
+    }
 
     const rollbackEntry: TimelineEntry = {
       id: generateId(),

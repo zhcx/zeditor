@@ -15,10 +15,12 @@ export interface WysiwygCodeBlockProps {
   onCommit: (index: number, code: string, language?: string) => void;
   editing: boolean;
   onEditingChange: (editing: boolean) => void;
+  onUndo?: () => void;
+  onRedo?: () => void;
   selection?: { from: number; to: number; preserveFocus?: boolean } | null;
 }
 
-export function WysiwygCodeBlock({ index, code, language, onCommit, editing, onEditingChange, selection }: WysiwygCodeBlockProps) {
+export function WysiwygCodeBlock({ index, code, language, onCommit, editing, onEditingChange, onUndo, onRedo, selection }: WysiwygCodeBlockProps) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const [copied, setCopied] = useState(false);
   const [languagesReady, setLanguagesReady] = useState(false);
@@ -62,6 +64,14 @@ export function WysiwygCodeBlock({ index, code, language, onCommit, editing, onE
               const { selectionStart, selectionEnd } = event.currentTarget;
               onCommit(index, code.slice(0, selectionStart) + '  ' + code.slice(selectionEnd));
               requestAnimationFrame(() => textareaRef.current?.setSelectionRange(selectionStart + 2, selectionStart + 2));
+            } else if ((event.ctrlKey || event.metaKey) && !event.altKey && event.key.toLowerCase() === 'z') {
+              // 受控 textarea 的原生撤销会把值改回 DOM 再被 React 覆盖，必须走共享历史。
+              event.preventDefault();
+              if (event.shiftKey) onRedo?.();
+              else onUndo?.();
+            } else if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'y') {
+              event.preventDefault();
+              onRedo?.();
             }
           }}
         />

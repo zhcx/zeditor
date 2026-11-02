@@ -18,7 +18,7 @@ export interface AppMenuItem {
   checked?: boolean;
   /**
    * `skip`：只保留在窗口内菜单里，不进入 macOS 原生菜单。
-   * 例如「功能」里的撤销/剪贴板项，在 macOS 上由系统标准「编辑」菜单承担。
+   * 例如「功能」里的撤销/剪贴板项，在 macOS 上由「编辑」菜单承担。
    */
   macNative?: 'skip';
 }

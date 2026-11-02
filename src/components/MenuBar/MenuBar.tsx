@@ -23,6 +23,15 @@ import { createMenuDispatcher, type AppMenuItem } from '../../utils/menuModel';
 import type { TableAction } from '../../utils/markdownTable';
 import { THEMES, resolveThemePreference } from '../../themes/apply';
 
+function runHistoryCommand(action: 'undo' | 'redo') {
+  const active = document.activeElement;
+  const otherInput = active instanceof HTMLElement && active.matches('input, textarea, [contenteditable="true"]')
+    && !active.closest('.editor-workspace-pane, .wysiwyg-workspace-pane, .zen-editor-pane');
+  const editor = useAppStore.getState().editorView;
+  if (otherInput || !editor) document.execCommand(action);
+  else { editor[action](); editor.focus(); }
+}
+
 // 导出对话框与语法手册只在对应菜单项打开时才需要，按需加载以缩小入口 chunk。
 const PdfExportDialog = lazy(() => import('../Export/PdfExportDialog').then(m => ({ default: m.PdfExportDialog })));
 const ImageExportDialog = lazy(() => import('../Export/ImageExportDialog').then(m => ({ default: m.ImageExportDialog })));
@@ -42,8 +51,8 @@ interface MenuItem {
   /** 单选型菜单项的当前选中态，渲染为前置 ✓ 标记。 */
   checked?: boolean;
   /**
-   * `skip`：只在窗口内菜单出现。撤销/剪贴板类在 macOS 上由系统「编辑」菜单
-   * 以原生预定义项承担，重复放进原生菜单会得到两套不一致的行为。
+   * `skip`：只在窗口内菜单出现。撤销、重做和剪贴板已在 macOS「编辑」菜单中提供，
+   * 重复放进「功能」菜单会得到两套不一致的行为。
    */
   macNative?: 'skip';
 }
@@ -912,8 +921,8 @@ export function MenuBar() {
     {
       label: t('功能', language),
       items: [
-        { label: t('撤销', language), action: () => document.execCommand('undo'), shortcut: 'Ctrl+Z', macNative: 'skip' },
-        { label: t('重做', language), action: () => document.execCommand('redo'), shortcut: 'Ctrl+Y', macNative: 'skip' },
+        { label: t('撤销', language), action: () => runHistoryCommand('undo'), shortcut: 'Ctrl+Z', macNative: 'skip' },
+        { label: t('重做', language), action: () => runHistoryCommand('redo'), shortcut: 'Ctrl+Y', macNative: 'skip' },
         { divider: true, label: '' },
         { label: t('剪切', language), action: () => document.execCommand('cut'), shortcut: 'Ctrl+X', macNative: 'skip' },
         { label: t('复制', language), action: () => document.execCommand('copy'), shortcut: 'Ctrl+C', macNative: 'skip' },
@@ -1062,6 +1071,10 @@ export function MenuBar() {
       helpItems,
       labels,
       dispatch: (id) => {
+        if (id === 'edit.undo' || id === 'edit.redo') {
+          runHistoryCommand(id === 'edit.undo' ? 'undo' : 'redo');
+          return;
+        }
         // 「编辑 → 查找」没有对应的窗口内菜单项：直接派发查找事件，复用
         // 源码对照与所见即所得里同一套查找栏实现。
         if (id === 'edit.find') {

@@ -17,16 +17,28 @@ export interface UndoStack {
   push(snapshot: UndoSnapshot, options: { coalesce: boolean }): void;
   undo(current: UndoSnapshot): UndoSnapshot | null;
   redo(current: UndoSnapshot): UndoSnapshot | null;
+  /** End a typing group without clearing redo when switching surfaces. */
+  boundary(): void;
   clear(): void;
 }
 
 const COALESCE_WINDOW_MS = 400;
 
-export function createUndoStack(limit = 200): UndoStack {
+export function createUndoStack(limit = 200, maxCharacters = Infinity): UndoStack {
   let past: UndoSnapshot[] = [];
   let future: UndoSnapshot[] = [];
   let lastPushCoalescible = false;
-  const trim = (stack: UndoSnapshot[]) => stack.length > limit ? stack.slice(stack.length - limit) : stack;
+  const trim = (stack: UndoSnapshot[]) => {
+    let remaining = 0;
+    let first = stack.length;
+    while (first > 0 && stack.length - first < limit) {
+      const next = stack[first - 1].source.length;
+      if (first < stack.length && remaining + next > maxCharacters) break;
+      remaining += next;
+      first--;
+    }
+    return first === 0 ? stack : stack.slice(first);
+  };
 
   return {
     size: () => past.length,
@@ -44,7 +56,7 @@ export function createUndoStack(limit = 200): UndoStack {
       const snapshot = past[past.length - 1];
       if (!snapshot) return null;
       past = past.slice(0, -1);
-      future = [...future, current];
+      future = trim([...future, current]);
       return snapshot;
     },
     redo: (current) => {
@@ -52,9 +64,10 @@ export function createUndoStack(limit = 200): UndoStack {
       const snapshot = future[future.length - 1];
       if (!snapshot) return null;
       future = future.slice(0, -1);
-      past = [...past, current];
+      past = trim([...past, current]);
       return snapshot;
     },
+    boundary: () => { lastPushCoalescible = false; },
     clear: () => {
       past = [];
       future = [];

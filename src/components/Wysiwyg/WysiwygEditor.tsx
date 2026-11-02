@@ -12,6 +12,9 @@ import { parseFootnoteDefinitions } from '../../utils/footnotes';
 import type { WysiwygBlockKind, WysiwygDocument } from '../../utils/wysiwyg/blocks';
 import { findHeadingFoldSections, foldedBlockIndexes, type HeadingFoldSection } from '../../utils/wysiwyg/headingFolds';
 import { resolveEditorDisplay } from '../../utils/editorDisplay';
+import { documentHistory } from '../../utils/documentHistory';
+import { editorViewMemory } from '../../utils/editorViewMemory';
+import { revealElement } from './domCaret';
 import { isPrimaryModifier } from '../../utils/platform';
 import { blockInsertion } from '../../utils/wysiwyg/blockMenu';
 import { createBlockHtmlRenderer } from '../../utils/wysiwyg/blockHtml';
@@ -38,6 +41,13 @@ import { formatShortcut } from '../../utils/platformShortcuts';
 
 /** 渲染结果按「块类型 + 块源码」缓存：只有被编辑的块需要重新渲染。 */
 const renderBlockHtml = createBlockHtmlRenderer(source => sanitizeRenderedHtml(renderMarkdownSource(source)));
+/**
+ * 把已经过 DOMPurify 的 HTML 解析成片段。显式走 Range 而不是给 innerHTML 赋值，
+ * 让「字符串已经净化」这件事由调用点表达，而不是靠读者推断。
+ */
+function parseSanitizedHtml(doc: Document, sanitizedHtml: string): DocumentFragment {
+  return doc.createRange().createContextualFragment(sanitizedHtml);
+}
 /** 标签切换会重新挂载编辑器，折叠状态随标签保留到本次应用会话结束。 */
 const headingFoldsByTab = new Map<string, ReadonlySet<string>>();
 
@@ -70,6 +80,9 @@ interface WysiwygBlockViewProps {
   onInput: (index: number) => void;
   onBlurBlock: (index: number, nextFocus: Node | null) => void;
   onCommitCode: (index: number, code: string, language?: string) => void;
+  /** 共享编辑历史：代码编辑层的 Ctrl+Z / Ctrl+Y 走同一套快照栈。 */
+  onUndoHistory: () => void;
+  onRedoHistory: () => void;
   onInlineClick: (event: React.MouseEvent<HTMLElement>) => boolean;
   onApplyBlockSource: (index: number, source: string) => void;
   onEndSourceEditing: (index: number) => void;
@@ -128,7 +141,7 @@ function observeHandleMeasure(target: Element, measure: () => void) {
 const WysiwygBlockView = memo(function WysiwygBlockView({
   index, kind, source, startLine, editable, skipRender, renderRevision, documentPath, workflowViewerEnabled,
   scrollRoot, theme, foldKey, folded, foldIndentation, onToggleFold, registerElement, onInput, onBlurBlock,
-  onCommitCode, onInlineClick, onApplyBlockSource, onEndSourceEditing, onDeleteBlock, onInsertAfter, onMove, onDuplicate, onRetype, count,
+  onCommitCode, onUndoHistory, onRedoHistory, onInlineClick, onApplyBlockSource, onEndSourceEditing, onDeleteBlock, onInsertAfter, onMove, onDuplicate, onRetype, count,
 }: WysiwygBlockViewProps) {
   const hostRef = useRef<HTMLElement>(null);
   /** 有子列表的列表项缓存：折叠缩进的点击命中测试用，输入时失效。 */
@@ -176,14 +189,15 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
     }
     // StrictMode 会重复运行 layout effect；同一轮不能在恢复光标后再次清空 DOM。
     if ((!editable && kind !== 'table') || renderedSourceRef.current !== source || renderedRevisionRef.current !== renderRevision) {
-      const html = renderBlockHtml(kind, source);
+      // renderBlockHtml 已经把 Markdown 渲染结果送进 DOMPurify（sanitizeRenderedHtml），
+      // 这里拿到的字符串是已净化的，可以安全写入 DOM。
+      const sanitizedHtml = renderBlockHtml(kind, source);
       if (kind === 'table') {
         // Changing contentEditable on connected cells makes Chromium repeatedly
         // update its editing/layout state. Prepare every cell off-document and
         // insert the finished fragment once, including under StrictMode replay.
-        const template = host.ownerDocument.createElement('template');
-        template.innerHTML = html;
-        template.content.querySelectorAll<HTMLTableRowElement>('tr').forEach((row, rowIndex) => {
+        const fragment = parseSanitizedHtml(host.ownerDocument, sanitizedHtml);
+        fragment.querySelectorAll<HTMLTableRowElement>('tr').forEach((row, rowIndex) => {
           Array.from(row.cells).forEach((cell, column) => {
             cell.contentEditable = 'true';
             cell.tabIndex = 0;
@@ -191,9 +205,9 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
             cell.setAttribute('aria-label', `第 ${rowIndex + 1} 行第 ${column + 1} 列`);
           });
         });
-        host.replaceChildren(template.content);
+        host.replaceChildren(fragment);
       } else {
-        host.innerHTML = html;
+        host.replaceChildren(parseSanitizedHtml(host.ownerDocument, sanitizedHtml));
       }
       renderedSourceRef.current = source;
       renderedRevisionRef.current = renderRevision;
@@ -331,7 +345,7 @@ const WysiwygBlockView = memo(function WysiwygBlockView({
           <AppIcon name={folded ? 'chevronRight' : 'chevronDown'} size={14} />
         </button>
       )}
-      {kind === 'fence' && <WysiwygCodeBlock index={index} code={extractFenceCode(source)} language={extractFenceLanguage(source)} onCommit={(position, code, language) => { onCommitCode(position, code, language); if (!codeEditing) onBlurBlock(index, null); }} editing={codeEditing} selection={codeSelection} onEditingChange={editing => { setCodeEditing(editing); if (!editing) onBlurBlock(index, null); }} />}
+      {kind === 'fence' && <WysiwygCodeBlock index={index} code={extractFenceCode(source)} language={extractFenceLanguage(source)} onCommit={(position, code, language) => { onCommitCode(position, code, language); if (!codeEditing) onBlurBlock(index, null); }} editing={codeEditing} selection={codeSelection} onUndo={onUndoHistory} onRedo={onRedoHistory} onEditingChange={editing => { setCodeEditing(editing); if (!editing) onBlurBlock(index, null); }} />}
       {sourceEditing && (
         <BlockSourceEditor
           initialSelection={sourceSelection}
@@ -441,18 +455,28 @@ export function WysiwygEditor() {
   const blockElementsRef = useRef(new Map<number, HTMLElement>());
   const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
   const theme = document.documentElement.dataset.theme || 'vscode-dark';
+  const [initialView] = useState(() => activeTabId ? editorViewMemory.peek(activeTabId, 'wysiwyg') : undefined);
+  const initialViewRestored = useRef(false);
 
   // 会话只建一次；它是普通对象，不受 React 状态更新影响。放在 useState 里而不是
   // useRef 里，是因为 react-hooks/refs 禁止在渲染期读 ref。
   const [session] = useState(() => {
     const store = useAppStore.getState();
     const tabId = store.activeTabId;
-    return new WysiwygSession(store.content, {
+    const next = new WysiwygSession(store.content, {
+      undoStack: tabId ? documentHistory.get(tabId) : undefined,
+      externalHistoryRecorded: true,
+      canApplyHistory: source => {
+        const latest = useAppStore.getState();
+        return latest.activeTabId === tabId && latest.tabs.some(tab => tab.id === tabId && tab.content === source);
+      },
       onSourceChange: (source) => {
-        if (tabId) useAppStore.getState().updateTabContent(tabId, source);
+        if (tabId) useAppStore.getState().updateTabContent(tabId, source, 'editor');
       },
       insertClipboardImage,
     });
+    if (initialView) next.setSelectionOffsets(initialView.from, initialView.to);
+    return next;
   });
   const [snapshot, setSnapshot] = useState<WysiwygSessionSnapshot>(() => session.getSnapshot());
   /** 已折叠的标题分节键（见 utils/wysiwyg/headingFolds）。 */
@@ -554,6 +578,7 @@ export function WysiwygEditor() {
   useEffect(() => {
     const controller = createWysiwygController({
       session,
+      tabId: activeTabId,
       getScrollDOM: () => surfaceRef.current,
       getCaretRange: () => {
         const selection = window.getSelection();
@@ -568,7 +593,7 @@ export function WysiwygEditor() {
       // 只有当 store 里仍指向自己时才清空，避免与源码对照模式的挂载竞争。
       if (useAppStore.getState().editorView === controller) setEditorView(null);
     };
-  }, [markEditorBootReady, session, setEditorView]);
+  }, [activeTabId, markEditorBootReady, session, setEditorView]);
 
   // 外部内容变化（AI、时间线、切换标签）同步进会话。
   useEffect(() => {
@@ -611,6 +636,13 @@ export function WysiwygEditor() {
         const rect = event.currentTarget.getBoundingClientRect();
         setInlineTarget({ target, anchor: { left: rect.left, top: rect.top }, autoFocus: true });
       }
+      return;
+    }
+    if (event.ctrlKey && !event.metaKey && !event.altKey && !event.shiftKey && event.key.toLowerCase() === 'y') {
+      // Windows 惯例的 Ctrl+Y 重做。浏览器在无可原生重做的项时不一定派发
+      // beforeinput(historyRedo)，不显式接管就会出现 Shift+Z 能用、Ctrl+Y 失效。
+      event.preventDefault();
+      session.handleRedo();
       return;
     }
     if (modified && !event.altKey && !event.shiftKey && /^[0-6]$/.test(event.key)) {
@@ -820,6 +852,9 @@ export function WysiwygEditor() {
   const handleInput = useCallback((index: number) => session.handleInput(index), [session]);
   const handleBlurBlock = useCallback((index: number, nextFocus: Node | null) => session.normalizeBlock(index, nextFocus), [session]);
   const handleCommitCode = useCallback((index: number, code: string, language?: string) => { session.writeCodeBlock(index, code, language); }, [session]);
+  // 代码编辑层是受控 textarea，原生撤销会被 React 覆盖，必须由共享历史接管。
+  const handleUndoHistory = useCallback(() => { session.handleUndo(); }, [session]);
+  const handleRedoHistory = useCallback(() => { session.handleRedo(); }, [session]);
   const handleDeleteBlock = useCallback((index: number) => { session.deleteBlock(index); }, [session]);
   const editInsertedSource = useCallback(() => {
     const selection = session.getSelectionOffsets();
@@ -888,6 +923,22 @@ export function WysiwygEditor() {
   useLayoutEffect(() => {
     session.restoreCaretAfterRender();
   }, [session, snapshot.version, renderBudget, collapsedHeadings]);
+
+  useLayoutEffect(() => {
+    const surface = surfaceRef.current;
+    if (!initialView || initialViewRestored.current || !surface) return;
+    if (initialView.followCaret) {
+      const target = session.locateElementOfOffset(initialView.from);
+      if (!target) return;
+      revealElement(target, surface);
+    } else {
+      surface.scrollTop = initialView.scrollTop;
+      const maxScroll = Math.max(0, surface.scrollHeight - surface.clientHeight);
+      if (maxScroll < initialView.scrollTop && renderBudget < snapshot.document.blocks.length) return;
+    }
+    initialViewRestored.current = true;
+    if (activeTabId) editorViewMemory.consume(activeTabId, 'wysiwyg');
+  }, [activeTabId, initialView, renderBudget, session, snapshot.document.blocks.length, snapshot.version]);
 
   const toggleHeadingFold = useCallback((key: string) => {
     const { sections, collapsed } = foldStateRef.current;
@@ -1019,6 +1070,8 @@ export function WysiwygEditor() {
               onInput={handleInput}
               onBlurBlock={handleBlurBlock}
               onCommitCode={handleCommitCode}
+              onUndoHistory={handleUndoHistory}
+              onRedoHistory={handleRedoHistory}
               onInlineClick={handleInlineClick}
               onApplyBlockSource={handleApplyBlockSource}
               onEndSourceEditing={handleEndSourceEditing}

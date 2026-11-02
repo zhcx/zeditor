@@ -19,6 +19,8 @@ import { findFootnoteReferenceAt, parseFootnoteDefinitions, type FootnoteDefinit
 import { contentFontStack, normalizeTypography } from '../../utils/appearanceSettings';
 import { ensureMonacoTheme } from '../../themes/monaco';
 import { DocumentSessions, sameDocument } from '../../utils/documentSafety';
+import { documentHistory } from '../../utils/documentHistory';
+import { editorViewMemory } from '../../utils/editorViewMemory';
 import { filterSlashCommands, findSlashCommandTrigger, type SlashCommand } from '../../utils/slashCommands';
 import { extractGenieTarget, slashAiGenie } from '../../utils/aiGenies';
 import { MARKMAP_TEMPLATE, MARKMAP_TEMPLATE_SELECTION } from '../../utils/markmapSource';
@@ -216,7 +218,9 @@ function toLine(model: monaco.editor.ITextModel, lineNumber: number): EditorLine
   };
 }
 
-function createController(editor: monaco.editor.IStandaloneCodeEditor, model: monaco.editor.ITextModel, root: HTMLElement): EditorController {
+interface HistoryEditState { suppress: boolean; boundary: boolean }
+
+function createController(editor: monaco.editor.IStandaloneCodeEditor, model: monaco.editor.ITextModel, root: HTMLElement, tabId: string, historyState: HistoryEditState): EditorController {
   const isCurrentModel = () => editor.getModel() === model;
   const getSelection = () => {
     const selection = editor.getSelection();
@@ -238,7 +242,9 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
     const change = spec?.changes;
     if (change && typeof change.from === 'number') {
       const text = change.insert ?? '';
-      editor.executeEdits('zeditor', [{ range: monaco.Range.fromPositions(offsetToPosition(model, change.from), offsetToPosition(model, change.to ?? change.from)), text, forceMoveMarkers: true }]);
+      historyState.boundary = true;
+      try { editor.executeEdits('zeditor', [{ range: monaco.Range.fromPositions(offsetToPosition(model, change.from), offsetToPosition(model, change.to ?? change.from)), text, forceMoveMarkers: true }]); }
+      finally { historyState.boundary = false; }
     }
     const selected = spec?.selection?.main || spec?.selection;
     const anchor = selected?.anchor ?? selected?.from;
@@ -248,6 +254,7 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
   };
 
   const controller = {
+    tabId,
     scrollDOM: root.querySelector<HTMLElement>('.monaco-scrollable-element.editor-scrollable') || root,
     getScrollTop: () => editor.getScrollTop(),
     getScrollHeight: () => editor.getScrollHeight(),
@@ -263,14 +270,21 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
       return () => disposable.dispose();
     },
     getValue: () => model.getValue(),
-    resetValue: (content) => { if (isCurrentModel()) model.setValue(content); },
+    resetValue: (content) => {
+      if (!isCurrentModel()) return;
+      documentHistory.get(tabId).clear();
+      historyState.suppress = true;
+      try { model.setValue(content); } finally { historyState.suppress = false; }
+    },
     getSelection,
     getText: (from, to) => model.getValueInRange(monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to))),
     replaceRange: (from, to, text, selection) => {
       if (!isCurrentModel()) return;
       // 工具栏、任务切换和富文本粘贴各自形成完整的撤销步骤。
       editor.pushUndoStop();
-      editor.executeEdits('zeditor', [{ range: monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to)), text, forceMoveMarkers: true }]);
+      historyState.boundary = true;
+      try { editor.executeEdits('zeditor', [{ range: monaco.Range.fromPositions(offsetToPosition(model, from), offsetToPosition(model, to)), text, forceMoveMarkers: true }]); }
+      finally { historyState.boundary = false; }
       editor.pushUndoStop();
       if (selection) setSelection(selection.from, selection.to);
     },
@@ -288,11 +302,25 @@ function createController(editor: monaco.editor.IStandaloneCodeEditor, model: mo
       return { left, bottom, x: left, y: bottom };
     },
     focus: () => { if (isCurrentModel()) editor.focus(); },
-    undo: () => { if (isCurrentModel()) editor.trigger('zeditor', 'undo', null); },
-    redo: () => { if (isCurrentModel()) editor.trigger('zeditor', 'redo', null); },
+    undo: () => applyHistory('undo'),
+    redo: () => applyHistory('redo'),
     revealOffset: (offset) => { if (isCurrentModel()) editor.revealPositionInCenter(offsetToPosition(model, offset)); },
     dispatch: applyDispatch,
   } as EditorController;
+
+  const applyHistory = (action: 'undo' | 'redo') => {
+    if (!isCurrentModel()) return;
+    const current = { source: model.getValue(), caret: getSelection().from, timestamp: Date.now() };
+    const state = useAppStore.getState();
+    if (state.activeTabId !== tabId || state.tabs.find(tab => tab.id === tabId)?.content !== current.source) return;
+    const snapshot = documentHistory.get(tabId)[action](current);
+    if (!snapshot) return;
+    historyState.suppress = true;
+    try {
+      editor.executeEdits('zeditor-history', [{ range: model.getFullModelRange(), text: snapshot.source, forceMoveMarkers: true }]);
+      setSelection(snapshot.caret);
+    } finally { historyState.suppress = false; }
+  };
 
   Object.defineProperty(controller, 'state', {
     enumerable: true,
@@ -554,6 +582,9 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     let switchingModel = false;
     let model = documentModels.get(initialTabId, () => monaco.editor.createModel(tab.content, 'markdown'));
     if (model.getValue() !== tab.content) model.setValue(tab.content);
+    let historyPrevious = model.getValue();
+    let historyCaret = 0;
+    const historyState: HistoryEditState = { suppress: false, boundary: false };
     prepareMarkdownModel(model);
     const initialDisplay = resolveEditorDisplay(useAppStore.getState().settings.editor);
     // 使用内置 vs / vs-dark：文字与行号颜色历经充分验证，保证任何主题下
@@ -626,9 +657,19 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         editor.getAction(action)?.run();
       });
     }
-    let controller = createController(editor, model, root);
+    let controller = createController(editor, model, root, currentTabId, historyState);
     const initialView = documentViewStates.get(initialTabId);
     if (initialView) editor.restoreViewState(initialView);
+    const position = editorViewMemory.peek(initialTabId, 'source');
+    if (position?.followCaret || (!initialView && position)) {
+      controller.setSelection(position.from, position.to);
+      if (position.followCaret) controller.revealOffset(position.from);
+      else controller.setScrollTop(position.scrollTop);
+    }
+    editorViewMemory.consume(initialTabId, 'source');
+    // 恢复原生视图与跨模式选区期间没有光标回调，这里先对齐历史光标，
+    // 否则首次输入的撤销点会记成文首偏移。
+    historyCaret = controller.getSelection().from;
     monacoRef.current = editor;
     modelRef.current = model;
     controllerRef.current = controller;
@@ -887,8 +928,8 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         y: Math.max(8, event.clientY),
         submenuDirection: x + menuWidth + submenuWidth + 4 <= window.innerWidth ? 'right' : 'left',
         hasSelection: !selection.empty,
-        canUndo: model.canUndo(),
-        canRedo: model.canRedo(),
+        canUndo: documentHistory.get(currentTabId).canUndo(),
+        canRedo: documentHistory.get(currentTabId).canRedo(),
         inTable: parseTableAt(model.getValue(), selection.to) !== null,
       });
     };
@@ -1013,9 +1054,19 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       }, Math.max(500, currentSettings.ai.suggest_delay || 2000));
     };
 
-    const contentDisposable = editor.onDidChangeModelContent(() => {
+    const contentDisposable = editor.onDidChangeModelContent((event) => {
+      const next = model.getValue();
+      const previous = historyPrevious;
+      historyPrevious = next;
       if (switchingModel) return;
-      updateTabContent(currentTabId, model.getValue());
+      const stateContent = useAppStore.getState().tabs.find(tab => tab.id === currentTabId)?.content;
+      const externalSync = stateContent === next && stateContent !== previous;
+      if (!historyState.suppress && !externalSync && previous !== next) {
+        const change = event.changes.length === 1 ? event.changes[0] : null;
+        const typing = Boolean(change && !/[\r\n]/.test(change.text) && ((change.text.length === 1 && change.rangeLength === 0) || (change.text.length === 0 && change.rangeLength === 1)));
+        documentHistory.get(currentTabId).push({ source: previous, caret: historyCaret, timestamp: Date.now() }, { coalesce: typing && !historyState.boundary });
+      }
+      updateTabContent(currentTabId, next, 'editor');
       scheduleCompanion();
       refreshSlashMenu();
       refreshTableToolbar();
@@ -1023,6 +1074,7 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
     });
     const cursorDisposable = editor.onDidChangeCursorSelection(() => {
       if (switchingModel) return;
+      historyCaret = controller.getSelection().from;
       onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
       scheduleCompanion();
       refreshSlashMenu();
@@ -1075,6 +1127,12 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
       }
 
       const primaryModifier = browserEvent.ctrlKey || browserEvent.metaKey;
+      if (primaryModifier && !browserEvent.altKey && !browserEvent.isComposing && (key.toLowerCase() === 'z' || key.toLowerCase() === 'y')) {
+        event.preventDefault(); event.stopPropagation();
+        if (key.toLowerCase() === 'y' || browserEvent.shiftKey) controller.redo();
+        else controller.undo();
+        return;
+      }
       // macOS 原生菜单同样注册了 ⌘⇧T / ⌘⇧I：让菜单派发，避免插入两个表格/图片。
       if (primaryModifier && browserEvent.shiftKey && !browserEvent.altKey && !isNativeMenuActive()) {
         if (key.toLowerCase() === 't') {
@@ -1339,14 +1397,26 @@ export function Editor({ className, style, onActiveLineChange, onActiveLineRevea
         currentTabId = id;
         model = documentModels.get(id, () => monaco.editor.createModel(nextTab.content, 'markdown'));
         if (model.getValue() !== nextTab.content) model.setValue(nextTab.content);
+        historyPrevious = model.getValue();
+        historyCaret = 0;
         prepareMarkdownModel(model);
         modelRef.current = model;
         editor.setModel(model);
-        controller = createController(editor, model, root);
+        controller = createController(editor, model, root, currentTabId, historyState);
         controllerRef.current = controller;
         const nextView = documentViewStates.get(id);
         if (nextView) editor.restoreViewState(nextView);
         else { editor.setPosition({ lineNumber: 1, column: 1 }); editor.setScrollTop(0); }
+        const position = editorViewMemory.peek(id, 'source');
+        if (position?.followCaret || (!nextView && position)) {
+          controller.setSelection(position.from, position.to);
+          if (position.followCaret) controller.revealOffset(position.from);
+          else controller.setScrollTop(position.scrollTop);
+        }
+        editorViewMemory.consume(id, 'source');
+        // 恢复期间 switchingModel 会跳光标回调，必须在允许编辑前补同步，
+        // 否则切回标签后第一次撤销会把光标带回文首。
+        historyCaret = controller.getSelection().from;
         setEditorView(controller);
         onActiveLineChange?.(editor.getPosition()?.lineNumber || 1);
       } finally { switchingModel = false; }

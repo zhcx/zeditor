@@ -19,6 +19,7 @@ import { resolveEditorDisplay } from '../../utils/editorDisplay';
 const VIEW_STATES: Record<WorkspaceMode, { label: string; icon: IconName }> = {
   split: { label: '源码对照', icon: 'code' },
   wysiwyg: { label: '所见即所得', icon: 'eye' },
+  source: { label: '轻量源码', icon: 'code' },
   immersive: { label: '沉浸阅读', icon: 'book' },
   zen: { label: '沉浸写作', icon: 'pen' },
 };

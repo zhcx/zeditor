@@ -34,7 +34,7 @@ import {
   type BlockArrowDirection,
   type BlockRetypeTarget,
 } from '../../utils/wysiwyg/blockOps.ts';
-import { createUndoStack } from '../../utils/wysiwyg/undoStack.ts';
+import { createUndoStack, type UndoStack } from '../../utils/wysiwyg/undoStack.ts';
 import { extractFenceInfo, extractFenceLanguage, extractFenceMarker, formatFence, withFenceLanguage } from '../../utils/wysiwyg/codeFence.ts';
 import { htmlToMarkdown, shouldConvertHtmlToMarkdown } from '../../utils/htmlToMarkdown.ts';
 import { prepareMarkdownPaste } from '../../utils/markdownPaste.ts';
@@ -60,6 +60,11 @@ export interface WysiwygSessionSnapshot {
 
 export interface WysiwygSessionOptions {
   onSourceChange: (source: string) => void;
+  undoStack?: UndoStack;
+  /** Refuse history actions while the store has a newer external edit. */
+  canApplyHistory?: (source: string) => boolean;
+  /** The application store already recorded external edits synchronously. */
+  externalHistoryRecorded?: boolean;
   /** 粘贴图片的落地方（镜像编辑器里已有的图床 / .assets 链路）。 */
   insertClipboardImage: (file: File) => Promise<boolean>;
 }
@@ -123,7 +128,7 @@ interface CollectedBlock {
 export class WysiwygSession {
   private document: WysiwygDocument;
   private snapshot: WysiwygSessionSnapshot;
-  private readonly undo = createUndoStack();
+  private readonly undo: UndoStack;
   private readonly options: WysiwygSessionOptions;
   private writeBackTimer: ReturnType<typeof setTimeout> | null = null;
   private pendingIndex: number | null = null;
@@ -145,6 +150,7 @@ export class WysiwygSession {
 
   constructor(source: string, options: WysiwygSessionOptions) {
     this.options = options;
+    this.undo = options.undoStack ?? createUndoStack();
     this.document = splitMarkdownDocument(source);
     this.snapshot = { document: this.document, skipRenderIndex: null, version: 0, renderRevision: 0, blockRenderRevisions: this.blockRenderRevisions };
   }
@@ -673,6 +679,7 @@ export class WysiwygSession {
   /** Ctrl+Z / Ctrl+Shift+Z。 */
   handleUndo(): boolean {
     this.flushWriteBack();
+    if (this.options.canApplyHistory && !this.options.canApplyHistory(this.document.source)) return false;
     const snapshot = this.undo.undo({
       source: this.document.source,
       caret: this.locateCaretOffset() ?? this.lastCaret,
@@ -683,6 +690,7 @@ export class WysiwygSession {
 
   handleRedo(): boolean {
     this.flushWriteBack();
+    if (this.options.canApplyHistory && !this.options.canApplyHistory(this.document.source)) return false;
     const snapshot = this.undo.redo({
       source: this.document.source,
       caret: this.locateCaretOffset() ?? this.lastCaret,
@@ -822,10 +830,17 @@ export class WysiwygSession {
     if (source === this.document.source) return;
     this.flushWriteBack();
     if (source === this.document.source) return;
+    if (!this.options.externalHistoryRecorded) this.pushUndo({ coalesce: false });
     this.document = splitMarkdownDocument(source);
     this.skipRenderIndex = null;
-    this.undo.clear();
     this.emit();
+  }
+
+  /** A disk reload establishes a new baseline, rather than an undoable edit. */
+  resetSource(source: string): void {
+    this.flushWriteBack();
+    this.undo.clear();
+    this.applySource(source, 0);
   }
 
   /** 粘贴：图片走既有上传链路，HTML 转 Markdown，纯文本按 Markdown 源码插入。 */

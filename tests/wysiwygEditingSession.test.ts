@@ -45,6 +45,29 @@ it('writes IME text when the final input event precedes compositionend', async (
   assert.equal(fixture.session.getSnapshot().renderRevision, 0, '普通输入保留当前 DOM');
 });
 
+it('does not apply undo over a newer external document update', () => {
+  let allowed = true;
+  const session = new WysiwygSession('原文', {
+    onSourceChange: () => undefined,
+    insertClipboardImage: async () => false,
+    canApplyHistory: () => allowed,
+  });
+  session.replaceRange(2, 2, '本地');
+  allowed = false;
+  assert.equal(session.handleUndo(), false);
+  assert.equal(session.getSource(), '原文本地');
+  allowed = true;
+  assert.equal(session.handleUndo(), true);
+  assert.equal(session.getSource(), '原文');
+});
+
+it('keeps an external content replacement undoable', () => {
+  const session = new WysiwygSession('原文', { onSourceChange: () => undefined, insertClipboardImage: async () => false });
+  session.syncExternalSource('外部修改');
+  assert.equal(session.handleUndo(), true);
+  assert.equal(session.getSource(), '原文');
+});
+
 it('flushes the visible composition before switching away', () => {
   const fixture = editingFixture();
   fixture.session.markComposing(true, 0);

@@ -507,6 +507,7 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
             { label: '减少缩进', action: outdentSelection },
             { label: '清除行内格式', action: clearInlineFormatting },
             { label: '检查并格式化 Markdown', action: () => setShowFormatModal(true) },
+            { label: '中文排版…', action: () => window.dispatchEvent(new Event('zeditor-chinese-typography')) },
           ],
         },
       ],
@@ -600,6 +601,9 @@ export function Toolbar({ variant = 'pinned' }: ToolbarProps) {
     };
     const closeOnOutsidePointer = (event: PointerEvent) => {
       const target = event.target as Node;
+      // A nested ToolbarMenu is portalled to body; keep its owning overflow
+      // mounted until the menu item receives its click.
+      if (target instanceof Element && target.closest('.toolbar-menu')) return;
       if (!toolbarRef.current?.contains(target) && !overflowMenuRef.current?.contains(target)) setOverflowOpen(false);
     };
     const closeOnEscape = (event: KeyboardEvent) => {

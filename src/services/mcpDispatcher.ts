@@ -31,6 +31,8 @@ function scopeRoots(): string[] {
 }
 
 function requireActiveTab() {
+  const state = useAppStore.getState();
+  if (state.editorView && (state.editorView.tabId === undefined || state.editorView.tabId === state.activeTabId)) state.editorView.flushPendingEdits?.();
   const app = useAppStore.getState();
   const tab = app.tabs.find((item) => item.id === app.activeTabId);
   if (!tab) throw mcpError('NO_TAB', '没有活动的标签页');

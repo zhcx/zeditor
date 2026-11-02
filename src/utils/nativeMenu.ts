@@ -123,8 +123,7 @@ function predefined(id: string, kind: NativePredefinedKind, text?: string): Nati
 
 /**
  * 规划 macOS 系统菜单栏结构：Zeditor（应用菜单）/ 文件 / 编辑 / 功能 / 窗口 / 帮助。
- * 「编辑」「窗口」使用系统预定义项，保证撤销、剪贴板、最小化与前置窗口行为与
- * 原生应用一致。
+ * 剪贴板和窗口操作使用系统预定义项；撤销与重做派发到编辑器共享的文稿历史。
  */
 export function planMacAppMenu(options: PlanMacMenuOptions): NativePlanNode[] {
   const { labels } = options;
@@ -149,8 +148,8 @@ export function planMacAppMenu(options: PlanMacMenuOptions): NativePlanNode[] {
   ];
 
   const editMenu: NativePlanNode[] = [
-    predefined('edit.undo', 'Undo', labels.undo),
-    predefined('edit.redo', 'Redo', labels.redo),
+    { id: 'edit.undo', kind: 'item', text: labels.undo, accelerator: 'CmdOrCtrl+Z', dispatchId: 'edit.undo' },
+    { id: 'edit.redo', kind: 'item', text: labels.redo, accelerator: 'CmdOrCtrl+Shift+Z', dispatchId: 'edit.redo' },
     predefined('edit.clipboard.separator', 'Separator'),
     predefined('edit.cut', 'Cut', labels.cut),
     predefined('edit.copy', 'Copy', labels.copy),

@@ -9,6 +9,8 @@ import { useWebDavStore } from './stores/webdavStore';
 import { useS3Store } from './stores/s3Store';
 import { TabsBar } from './components/TabsBar/TabsBar';
 import { Toolbar } from './components/Toolbar/Toolbar';
+import { ChineseTypographyDialog } from './components/Toolbar/ChineseTypographyDialog';
+import { LargeDocumentBanner } from './components/Editor/LargeDocumentBanner';
 // 编辑器内核单独加载，使标题栏、资源管理器和预览先完成渲染。
 const Editor = lazy(() => import('./components/Editor/Editor').then(m => ({ default: m.Editor })));
 import { Preview } from './components/Preview/Preview';
@@ -137,7 +139,7 @@ function App() {
   const [proofreadPreferredWidth, setProofreadPanelWidth] = useState(280);
   const [chatbotPreferredWidth, setChatbotPanelWidth] = useState<number | null>(null);
   const [outlinePreferredWidth, setOutlinePanelWidth] = useState(224);
-  const standardMode = mode === 'split' || mode === 'wysiwyg';
+  const standardMode = mode === 'split' || mode === 'wysiwyg' || mode === 'source';
   const hasSidebar = standardMode && (sidebarVisible || outlineVisible);
   const hasProofread = standardMode && proofreadResults.length > 0;
   const [previewScrollElement, setPreviewScrollElement] = useState<HTMLDivElement | null>(null);
@@ -539,7 +541,7 @@ function App() {
       useS3Store.getState().initialize(store.settings.s3);
       // 恢复用户上次选择的编辑方式（未选择过则保持源码对照，并由首次选择框引导）。
       const persisted = store.settings.editor.mode;
-      if (persisted === 'split' || persisted === 'wysiwyg') store.setMode(persisted);
+      if (store.mode !== 'source' && (persisted === 'split' || persisted === 'wysiwyg')) store.setMode(persisted);
       try {
         await loadRecoverySnapshots();
       } catch (error) {
@@ -778,7 +780,7 @@ function App() {
 
   // 沉浸模式是临时态：Esc 回到用户选择的持久模式（默认源码对照）。
   useEffect(() => {
-    if (mode === 'split' || mode === 'wysiwyg') return;
+    if (mode === 'split' || mode === 'wysiwyg' || mode === 'source') return;
     const exitImmersiveWorkspace = (event: KeyboardEvent) => {
       if (event.key !== 'Escape') return;
       const store = useAppStore.getState();
@@ -801,6 +803,8 @@ function App() {
         ? 'split'
         : mode === 'split'
           ? 'wysiwyg'
+          : mode === 'source'
+            ? persistent
           : (persistent === 'wysiwyg' ? 'split' : 'wysiwyg');
       store.setMode(target);
     };
@@ -946,7 +950,7 @@ function App() {
   const revealActivityView = useCallback((view: 'explorer' | 'search') => {
     setActivityView(view);
     setSidebarVisible(true);
-    if (mode !== 'split' && mode !== 'wysiwyg') useAppStore.getState().setMode('split');
+    if (mode !== 'split' && mode !== 'wysiwyg' && mode !== 'source') useAppStore.getState().setMode('split');
   }, [mode, setSidebarVisible]);
 
   useEffect(() => {
@@ -986,7 +990,7 @@ function App() {
     setModeChoiceSaving(true);
     try {
       await latest.saveSettings({ ...latest.settings, editor: { ...latest.settings.editor, mode: choice } });
-      latest.setMode(choice);
+      if (useAppStore.getState().mode !== 'source') latest.setMode(choice);
     } finally {
       setModeChoiceSaving(false);
     }
@@ -1258,6 +1262,7 @@ function App() {
           immersive={mode === 'immersive'}
           zen={mode === 'zen'}
           wysiwyg={mode === 'wysiwyg'}
+          sourceOnly={mode === 'source'}
           theme={settings.appearance.theme}
           activeView={activityView}
           sidebarVisible={sidebarVisible}
@@ -1282,7 +1287,7 @@ function App() {
         />
         <div className="app-workbench-content">
           <div className="app-body" ref={bodyRef}>
-          {(mode === 'split' || mode === 'wysiwyg') && (sidebarVisible || outlineVisible) && (
+          {standardMode && (sidebarVisible || outlineVisible) && (
           <>
             <Sidebar style={{ width: leftPanelWidth }} view={activityView} />
             <PanelDivider className="sidebar-divider resizable" label="调整侧栏宽度" side="before"
@@ -1291,12 +1296,13 @@ function App() {
           )}
           <div className="workspace-shell">
         <main className={`main-content ${mode}`}>
-          {mode === 'split' ? (
+          {mode === 'split' || mode === 'source' ? (
             <>
-              <section className="document-pane editor-workspace-pane" style={{ flex: splitRatio }}>
+              <section className="document-pane editor-workspace-pane" style={{ flex: mode === 'source' ? 1 : splitRatio }}>
                 <div className="document-pane-tabs">
                   <TabsBar />
                 </div>
+                <LargeDocumentBanner />
                 {settings.editor.pin_toolbar && (
                   <div className="editor-pane-toolbar">
                     <Toolbar />
@@ -1310,7 +1316,7 @@ function App() {
                   />
                 </Suspense>
               </section>
-              <PanelDivider className="divider resizable" label="调整编辑与预览比例" side="split"
+              {mode === 'split' && <><PanelDivider className="divider resizable" label="调整编辑与预览比例" side="split"
                 onChange={setSplitRatio} onReset={() => setSplitRatio(0.5)} />
               <section className="document-pane preview-workspace-pane" style={{ flex: 1 - splitRatio }}>
                 <div className="document-pane-tabs">
@@ -1332,7 +1338,7 @@ function App() {
                     onContentRendered={handlePreviewContentRendered}
                   />
                 </div>
-              </section>
+              </section></>}
 
             </>
           ) : mode === 'wysiwyg' ? (
@@ -1340,6 +1346,7 @@ function App() {
               <div className="document-pane-tabs">
                 <TabsBar />
               </div>
+              <LargeDocumentBanner />
               {settings.editor.pin_toolbar && (
                 <div className="editor-pane-toolbar">
                   <Toolbar />
@@ -1504,6 +1511,7 @@ function App() {
         </div>
       </div>
       <StatusBar />
+      <ChineseTypographyDialog />
       <LineWidthWheel />
       {showModeChooser && (
         <Suspense fallback={null}>

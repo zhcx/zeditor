@@ -175,11 +175,15 @@ test('planMacAppMenu mirrors the in-app model into the system menu bar', () => {
   const nodes = flat(plan);
   const byId = new Map(nodes.map((node) => [node.id, node]));
 
-  // 系统标准项由预定义项承担，保证原生行为（撤销/剪贴板/窗口）。
+  // 撤销/重做派发到共享文稿历史；剪贴板仍使用系统预定义项。
   assert.deepEqual(
     flat(byId.get('menu.edit')?.children ?? []).map((node) => node.predefined),
-    ['Undo', 'Redo', 'Separator', 'Cut', 'Copy', 'Paste', 'Separator', 'SelectAll', 'Separator', undefined],
+    [undefined, undefined, 'Separator', 'Cut', 'Copy', 'Paste', 'Separator', 'SelectAll', 'Separator', undefined],
   );
+  assert.equal(byId.get('edit.undo')?.dispatchId, 'edit.undo');
+  assert.equal(byId.get('edit.undo')?.accelerator, 'CmdOrCtrl+Z');
+  assert.equal(byId.get('edit.redo')?.dispatchId, 'edit.redo');
+  assert.equal(byId.get('edit.redo')?.accelerator, 'CmdOrCtrl+Shift+Z');
   // 「编辑 → 查找」复用窗口内的查找栏实现，加速键是系统惯例的 ⌘F。
   assert.equal(byId.get('edit.find')?.kind, 'item');
   assert.equal(byId.get('edit.find')?.accelerator, 'CmdOrCtrl+F');

@@ -15,6 +15,7 @@ import type { EditorController, EditorDispatchSpec, EditorLine } from '../../typ
 
 export interface WysiwygControllerDeps {
   session: WysiwygSession;
+  tabId?: string | null;
   /** 编辑表面的滚动容器。 */
   getScrollDOM: () => HTMLElement | null;
   /** 当前选区（弹窗定位用）。 */
@@ -36,6 +37,7 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
   const selectionRange = () => session.getSelectionOffsets();
 
   const controller: EditorController = {
+    tabId: deps.tabId,
     get scrollDOM() { return scrollHost(); },
     getScrollTop: () => deps.getScrollDOM()?.scrollTop ?? 0,
     getScrollHeight: () => deps.getScrollDOM()?.scrollHeight ?? 0,
@@ -90,7 +92,7 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
       return session.getSource();
     },
     flushPendingEdits: () => session.flushWriteBack(),
-    resetValue: (content) => { session.applySource(content, 0); },
+    resetValue: (content) => { session.resetSource(content); },
     getSelection: () => {
       // 先落盘再读：否则调用方拿到的偏移会落后于用户刚敲的内容。
       session.prepareExternalEdit();

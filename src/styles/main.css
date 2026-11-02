@@ -4398,6 +4398,25 @@ textarea {
   width: min(540px, calc(100vw - 40px));
 }
 
+.chinese-typography-modal { width: min(960px, calc(100vw - 40px)); }
+.chinese-typography-body { max-height: calc(100vh - 130px); overflow: auto; }
+.chinese-typography-body > p { color: var(--text-secondary); font-size: 13px; margin: 0 0 14px; }
+.chinese-typography-scope, .chinese-typography-rules { border: 1px solid var(--border-color); border-radius: 8px; margin: 0 0 12px; padding: 10px 12px; }
+.chinese-typography-scope legend, .chinese-typography-rules legend { color: var(--text-secondary); font-size: 12px; padding: 0 5px; }
+.chinese-typography-scope { display: flex; gap: 24px; }
+.chinese-typography-scope label, .chinese-typography-rules label { display: flex; align-items: baseline; gap: 7px; font-size: 13px; }
+.chinese-typography-rules { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+.chinese-typography-rules small { display: block; color: var(--text-secondary); margin-top: 3px; }
+.chinese-typography-preview { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
+.chinese-typography-preview section { min-width: 0; }
+.chinese-typography-preview h3 { font-size: 13px; margin: 0 0 6px; }
+.chinese-typography-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; overflow: auto; height: 220px; margin: 0; padding: 10px; border: 1px solid var(--border-color); border-radius: 8px; background: var(--surface-subtle); color: var(--text-primary); font: inherit; font-size: 13px; line-height: 1.6; }
+.chinese-typography-body .chinese-typography-status { margin: 10px 0; }
+.large-document-banner { display: flex; flex-wrap: wrap; align-items: center; gap: 4px 12px; padding: 7px 12px; border-bottom: 1px solid var(--border-color); background: var(--surface-subtle); color: var(--text-secondary); font-size: 12px; }
+.large-document-banner button { border: 0; background: transparent; color: var(--accent-color); cursor: pointer; padding: 2px 0; }
+.large-document-banner button:hover { text-decoration: underline; }
+@media (max-width: 620px) { .chinese-typography-rules, .chinese-typography-preview { grid-template-columns: 1fr; } .chinese-typography-preview pre { height: 120px; } }
+
 .markdown-format-summary {
   display: flex;
   flex-direction: column;
