@@ -1354,11 +1354,18 @@ export class WysiwygSession {
     this.lastCaret = from;
     this.pendingCaret = from;
     this.pendingSelectionEnd = to;
+    this.restoreFocus = true;
     const startIndex = this.blockIndexAtOffset(from);
     const endIndex = this.blockIndexAtOffset(to);
     const revealedStart = startIndex !== null && this.accessors.revealBlock?.(startIndex);
     const revealedEnd = endIndex !== null && this.accessors.revealBlock?.(endIndex);
     if (revealedStart || revealedEnd) { this.awaitingRender = true; return; }
+    if (this.accessors.getSurface()
+      && ((startIndex !== null && !this.accessors.getBlockElement(startIndex))
+        || (endIndex !== null && !this.accessors.getBlockElement(endIndex)))) {
+      this.awaitingRender = true;
+      return;
+    }
     if (!this.awaitingRender) this.applySelection(from, to);
   }
 

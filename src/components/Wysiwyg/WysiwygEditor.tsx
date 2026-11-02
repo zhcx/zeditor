@@ -455,6 +455,7 @@ export function WysiwygEditor() {
   })));
   const surfaceRef = useRef<HTMLDivElement>(null);
   const blockElementsRef = useRef(new Map<number, HTMLElement>());
+  const pendingRevealRef = useRef<number | null>(null);
   const [scrollRoot, setScrollRoot] = useState<HTMLElement | null>(null);
   const theme = document.documentElement.dataset.theme || 'vscode-dark';
   const [initialView] = useState(() => activeTabId ? editorViewMemory.peek(activeTabId, 'wysiwyg') : undefined);
@@ -619,10 +620,20 @@ export function WysiwygEditor() {
         return selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
       },
       focus: () => session.focus(),
+      deferReveal: offset => {
+        pendingRevealRef.current = offset;
+        if (offset === null) return;
+        const index = session.blockIndexAtOffset(offset);
+        if (index !== null) setRenderState(current => ({
+          tabId: activeTabId,
+          budget: Math.max(current.tabId === activeTabId ? current.budget : 0, index + 1),
+        }));
+      },
     });
     setEditorView(controller);
     markEditorBootReady();
     return () => {
+      pendingRevealRef.current = null;
       session.flushWriteBack();
       // 只有当 store 里仍指向自己时才清空，避免与源码对照模式的挂载竞争。
       if (useAppStore.getState().editorView === controller) setEditorView(null);
@@ -956,6 +967,12 @@ export function WysiwygEditor() {
   // 先更新当前分节，再恢复光标；新段落/撤销/外部定位落入折叠区时自动展开后再落选区。
   useLayoutEffect(() => {
     session.restoreCaretAfterRender();
+    const offset = pendingRevealRef.current;
+    if (offset === null) return;
+    const target = session.locateElementOfOffset(offset);
+    if (!target) return;
+    pendingRevealRef.current = null;
+    revealElement(target, surfaceRef.current);
   }, [session, snapshot.version, renderBudget, collapsedHeadings]);
 
   useLayoutEffect(() => {

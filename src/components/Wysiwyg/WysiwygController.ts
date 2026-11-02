@@ -21,6 +21,8 @@ export interface WysiwygControllerDeps {
   /** 当前选区（弹窗定位用）。 */
   getCaretRange: () => Range | null;
   focus: () => void;
+  /** 目标尚未挂载时，交给外壳在渲染完成后定位。 */
+  deferReveal?: (offset: number | null) => void;
 }
 
 export function createWysiwygController(deps: WysiwygControllerDeps): EditorController {
@@ -35,6 +37,21 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
   };
 
   const selectionRange = () => session.getSelectionOffsets();
+
+  const revealOffset = (offset: number) => {
+    const element = session.locateElementOfOffset(offset);
+    if (element) {
+      deps.deferReveal?.(null);
+      revealElement(element, deps.getScrollDOM());
+    } else if (deps.deferReveal) {
+      deps.deferReveal(offset);
+    } else if (typeof requestAnimationFrame === 'function') {
+      requestAnimationFrame(() => {
+        const target = session.locateElementOfOffset(offset);
+        if (target) revealElement(target, deps.getScrollDOM());
+      });
+    }
+  };
 
   const controller: EditorController = {
     tabId: deps.tabId,
@@ -79,12 +96,14 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
         const caret = selection?.from ?? selection?.anchor ?? from + (changes.insert?.length ?? 0);
         session.replaceRange(from, to, changes.insert ?? '', caret);
         if (selection) session.setSelectionOffsets(caret, selection.to ?? selection.head ?? caret);
+        if (spec.scrollIntoView) revealOffset(caret);
         return;
       }
       if (selection) {
         const from = selection.from ?? selection.anchor ?? 0;
         const to = selection.to ?? selection.head ?? from;
         session.setSelectionOffsets(from, to);
+        if (spec.scrollIntoView) revealOffset(from);
       }
     },
     getValue: () => {
@@ -116,14 +135,7 @@ export function createWysiwygController(deps: WysiwygControllerDeps): EditorCont
     focus: () => deps.focus(),
     undo: () => { session.handleUndo(); },
     redo: () => { session.handleRedo(); },
-    revealOffset: (offset) => {
-      const element = session.locateElementOfOffset(offset);
-      if (element) revealElement(element, deps.getScrollDOM());
-      else if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => {
-        const revealed = session.locateElementOfOffset(offset);
-        if (revealed) revealElement(revealed, deps.getScrollDOM());
-      });
-    },
+    revealOffset,
   };
 
   return controller;
