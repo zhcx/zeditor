@@ -193,7 +193,7 @@ try {
       assert.ok(text.includes(`Zeditor v${pkg.version}`));
       assert.ok(!text.includes('Zeditor v0.6.3'));
       assert.ok(!text.includes('暂无本版本更新说明'));
-      assert.ok(text.includes('数据恢复与文件保护'));
+      assert.ok(text.includes('云备份并发安全'));
       if (process.env.WYSIWYG_TEST_OUTPUT) {
         await page.screenshot({ path: join(process.env.WYSIWYG_TEST_OUTPUT, 'about-release-notes.png') });
       }
